@@ -31,11 +31,7 @@ static int sleepstate_pm_notifier(struct notifier_block *nb,
 {
 	switch (event) {
 	case PM_SUSPEND_PREPARE:
-<<<<<<< HEAD
-		qcom_smem_state_update_bits(state, AWAKE_BIT, 0);
-=======
 		usleep_range(10000, 10500); /* Tuned based on SMP2P latencies */
->>>>>>> 1d5ebcb6aa6b (kernel: Workaround for sensor ipc message causing high power consume)
 		break;
 
 	case PM_POST_SUSPEND:
