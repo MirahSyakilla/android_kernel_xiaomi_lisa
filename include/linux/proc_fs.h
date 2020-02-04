@@ -12,27 +12,20 @@ struct proc_dir_entry;
 struct seq_file;
 struct seq_operations;
 
-/*
- * Compat layer for trees that still use file_operations for procfs entries.
- * This lets newer proc_ops callsites (eg. scheduler PSI) build unchanged.
- */
-#ifndef proc_ops
-#define proc_ops			file_operations
-#define proc_open			open
-#define proc_read			read
-#define proc_write			write
-#define proc_lseek			llseek
-#define proc_release			release
-#define proc_poll			poll
-#define proc_ioctl			unlocked_ioctl
+struct proc_ops {
+	int	(*proc_open)(struct inode *, struct file *);
+	ssize_t	(*proc_read)(struct file *, char __user *, size_t, loff_t *);
+	ssize_t	(*proc_write)(struct file *, const char __user *, size_t, loff_t *);
+	loff_t	(*proc_lseek)(struct file *, loff_t, int);
+	int	(*proc_release)(struct inode *, struct file *);
+	__poll_t (*proc_poll)(struct file *, struct poll_table_struct *);
+	long	(*proc_ioctl)(struct file *, unsigned int, unsigned long);
 #ifdef CONFIG_COMPAT
-#define proc_compat_ioctl		compat_ioctl
+	long	(*proc_compat_ioctl)(struct file *, unsigned int, unsigned long);
 #endif
-#define proc_mmap			mmap
-#define proc_get_unmapped_area		get_unmapped_area
-#define proc_flags			owner
-#define PROC_ENTRY_PERMANENT		NULL
-#endif
+	int	(*proc_mmap)(struct file *, struct vm_area_struct *);
+	unsigned long (*proc_get_unmapped_area)(struct file *, unsigned long, unsigned long, unsigned long, unsigned long);
+};
 
 #ifdef CONFIG_PROC_FS
 
@@ -66,10 +59,10 @@ struct proc_dir_entry *proc_create_single_data(const char *name, umode_t mode,
  
 extern struct proc_dir_entry *proc_create_data(const char *, umode_t,
 					       struct proc_dir_entry *,
-					       const struct file_operations *,
+					       const struct proc_ops *,
 					       void *);
 
-struct proc_dir_entry *proc_create(const char *name, umode_t mode, struct proc_dir_entry *parent, const struct file_operations *proc_fops);
+struct proc_dir_entry *proc_create(const char *name, umode_t mode, struct proc_dir_entry *parent, const struct proc_ops *proc_ops);
 extern void proc_set_size(struct proc_dir_entry *, loff_t);
 extern void proc_set_user(struct proc_dir_entry *, kuid_t, kgid_t);
 extern void *PDE_DATA(const struct inode *);
@@ -97,10 +90,6 @@ struct proc_dir_entry *proc_create_net_single_write(const char *name, umode_t mo
 						    proc_write_t write,
 						    void *data);
 extern struct pid *tgid_pidfd_to_pid(const struct file *file);
-
-struct bpf_iter_aux_info;
-extern int bpf_iter_init_seq_net(void *priv_data, struct bpf_iter_aux_info *aux);
-extern void bpf_iter_fini_seq_net(void *priv_data);
 
 #ifdef CONFIG_PROC_PID_ARCH_STATUS
 /*
@@ -140,8 +129,8 @@ static inline struct proc_dir_entry *proc_mkdir_mode(const char *name,
 #define proc_create_seq(name, mode, parent, ops) ({NULL;})
 #define proc_create_single(name, mode, parent, show) ({NULL;})
 #define proc_create_single_data(name, mode, parent, show, data) ({NULL;})
-#define proc_create(name, mode, parent, proc_fops) ({NULL;})
-#define proc_create_data(name, mode, parent, proc_fops, data) ({NULL;})
+#define proc_create(name, mode, parent, proc_ops) ({NULL;})
+#define proc_create_data(name, mode, parent, proc_ops, data) ({NULL;})
 
 static inline void proc_set_size(struct proc_dir_entry *de, loff_t size) {}
 static inline void proc_set_user(struct proc_dir_entry *de, kuid_t uid, kgid_t gid) {}
