@@ -433,7 +433,7 @@ static void sched_update_updown_migrate_values(bool up)
 }
 
 int sched_updown_migrate_handler(struct ctl_table *table, int write,
-				void __user *buffer, size_t *lenp,
+				void *buffer, size_t *lenp,
 				loff_t *ppos)
 {
 	int ret, i;
