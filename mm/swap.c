@@ -845,8 +845,6 @@ void release_pages(struct page **pages, int nr)
 			}
 		}
 
-		/* Clear Active bit in case of parallel mark_page_accessed */
-		__ClearPageActive(page);
 		__ClearPageWaiters(page);
 
 		list_add(&page->lru, &pages_to_free);
