@@ -581,7 +581,11 @@ static inline int mapping_mapped(struct address_space *mapping)
 
 /*
  * Might pages of this file have been modified in userspace?
+<<<<<<< HEAD
  * Note that i_mmap_writable counts all VM_SHARED, VM_MAYWRITE vmas: do_mmap_pgoff
+=======
+ * Note that i_mmap_writable counts all VM_SHARED vmas: do_mmap
+>>>>>>> 89de4540c5aa (mm: remove unnecessary wrapper function do_mmap_pgoff())
  * marks vma as VM_SHARED if it is shared, and the file was opened for
  * writing i.e. vma may be mprotected writable even if now readonly.
  *
