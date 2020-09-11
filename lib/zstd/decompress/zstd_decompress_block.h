@@ -1,6 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0+ OR BSD-3-Clause */
 /*
- * Copyright (c) Meta Platforms, Inc. and affiliates.
+ * Copyright (c) Yann Collet, Facebook, Inc.
  * All rights reserved.
  *
  * This source code is licensed under both the BSD-style license (found in the
@@ -34,12 +33,6 @@
  */
 
 
- /* Streaming state is used to inform allocation of the literal buffer */
-typedef enum {
-    not_streaming = 0,
-    is_streaming = 1
-} streaming_operation;
-
 /* ZSTD_decompressBlock_internal() :
  * decompress block, starting at `src`,
  * into destination buffer `dst`.
@@ -48,7 +41,7 @@ typedef enum {
  */
 size_t ZSTD_decompressBlock_internal(ZSTD_DCtx* dctx,
                                void* dst, size_t dstCapacity,
-                         const void* src, size_t srcSize, const streaming_operation streaming);
+                         const void* src, size_t srcSize, const int frame);
 
 /* ZSTD_buildFSETable() :
  * generate FSE decoding table for one symbol (ll, ml or off)
@@ -61,14 +54,9 @@ size_t ZSTD_decompressBlock_internal(ZSTD_DCtx* dctx,
  */
 void ZSTD_buildFSETable(ZSTD_seqSymbol* dt,
              const short* normalizedCounter, unsigned maxSymbolValue,
-             const U32* baseValue, const U8* nbAdditionalBits,
+             const U32* baseValue, const U32* nbAdditionalBits,
                    unsigned tableLog, void* wksp, size_t wkspSize,
                    int bmi2);
-
-/* Internal definition of ZSTD_decompressBlock() to avoid deprecation warnings. */
-size_t ZSTD_decompressBlock_deprecated(ZSTD_DCtx* dctx,
-                            void* dst, size_t dstCapacity,
-                      const void* src, size_t srcSize);
 
 
 #endif /* ZSTD_DEC_BLOCK_H */
