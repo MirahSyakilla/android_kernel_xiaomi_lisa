@@ -1329,32 +1329,27 @@ static int vfio_pci_zap_and_vma_lock(struct vfio_pci_device *vdev, bool try)
 		} else {
 			down_read(&mm->mmap_sem);
 		}
-		if (mmget_still_valid(mm)) {
-			if (try) {
-				if (!mutex_trylock(&vdev->vma_lock)) {
-					up_read(&mm->mmap_sem);
-					mmput(mm);
-					return 0;
-				}
-			} else {
-				mutex_lock(&vdev->vma_lock);
+		if (try) {
+			if (!mutex_trylock(&vdev->vma_lock)) {
+				mmap_read_unlock(mm);
+				mmput(mm);
+				return 0;
 			}
-			list_for_each_entry_safe(mmap_vma, tmp,
-						 &vdev->vma_list, vma_next) {
-				struct vm_area_struct *vma = mmap_vma->vma;
-
-				if (vma->vm_mm != mm)
-					continue;
-
-				list_del(&mmap_vma->vma_next);
-				kfree(mmap_vma);
-
-				zap_vma_ptes(vma, vma->vm_start,
-					     vma->vm_end - vma->vm_start);
-			}
-			mutex_unlock(&vdev->vma_lock);
+		} else {
+			mutex_lock(&vdev->vma_lock);
 		}
-		up_read(&mm->mmap_sem);
+		list_for_each_entry_safe(mmap_vma, tmp,
+					 &vdev->vma_list, vma_next) {
+			struct vm_area_struct *vma = mmap_vma->vma;
+
+			if (vma->vm_mm != mm)
+				continue;
+
+			list_del(&mmap_vma->vma_next);
+			kfree(mmap_vma);
+		}
+		mutex_unlock(&vdev->vma_lock);
+		mmap_read_unlock(mm);
 		mmput(mm);
 	}
 }
@@ -1366,7 +1361,6 @@ void vfio_pci_zap_and_down_write_memory_lock(struct vfio_pci_device *vdev)
 	mutex_unlock(&vdev->vma_lock);
 }
 
-u16 vfio_pci_memory_lock_and_enable(struct vfio_pci_device *vdev)
 {
 	u16 cmd;
 
