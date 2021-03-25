@@ -58,6 +58,9 @@ extern int proc_dointvec_minmax(struct ctl_table *, int,
 extern int proc_douintvec_minmax(struct ctl_table *table, int write,
 				 void *buffer, size_t *lenp,
 				 loff_t *ppos);
+extern int proc_dou8vec_minmax(struct ctl_table *table, int write,
+			       void *buffer, size_t *lenp,
+			       loff_t *ppos);
 extern int proc_dointvec_jiffies(struct ctl_table *, int,
 				 void *, size_t *, loff_t *);
 extern int proc_dointvec_userhz_jiffies(struct ctl_table *, int,
@@ -67,7 +70,7 @@ extern int proc_dointvec_ms_jiffies(struct ctl_table *, int,
 extern int proc_doulongvec_minmax(struct ctl_table *, int,
 				  void *, size_t *, loff_t *);
 extern int proc_doulongvec_ms_jiffies_minmax(struct ctl_table *table, int,
-				      void *, size_t *, loff_t *);
+					      void *, size_t *, loff_t *);
 extern int proc_do_large_bitmap(struct ctl_table *, int,
 				void *, size_t *, loff_t *);
 extern int proc_do_static_key(struct ctl_table *table, int write,
