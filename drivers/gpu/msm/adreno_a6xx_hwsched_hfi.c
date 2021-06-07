@@ -1244,16 +1244,6 @@ skipib:
 	if (ret)
 		goto free;
 
-	/*
-	 * Memory barrier to make sure packet and write index are written before
-	 * an interrupt is raised
-	 */
-	wmb();
-
-	add_profile_events(adreno_dev, drawobj, &time);
-
-	cmdobj->submit_ticks = time.ticks;
-
 	/* Send interrupt to GMU to receive the message */
 	gmu_core_regwrite(KGSL_DEVICE(adreno_dev), A6XX_GMU_HOST2GMU_INTR_SET,
 		DISPQ_IRQ_BIT(drawobj->context->gmu_dispatch_queue));
