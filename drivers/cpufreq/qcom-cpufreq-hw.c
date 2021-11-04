@@ -437,6 +437,14 @@ static int qcom_cpu_resources_init(struct platform_device *pdev,
 		}
 	}
 
+	if (of_find_property(dev->of_node, "interrupts", NULL)) {
+		c->dcvsh_irq = of_irq_get(dev->of_node, index);
+		if (c->dcvsh_irq > 0) {
+			mutex_init(&c->dcvsh_lock);
+			INIT_DELAYED_WORK(&c->freq_poll_work,
+					limits_dcvsh_poll);
+		}
+	}
 	for_each_cpu(cpu_r, &c->related_cpus)
 		qcom_freq_domain_map[cpu_r] = c;
 
