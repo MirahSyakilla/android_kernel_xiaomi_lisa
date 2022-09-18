@@ -636,15 +636,9 @@ static inline bool vma_is_anonymous(struct vm_area_struct *vma)
 	return !vma->vm_ops;
 }
 
-static inline bool is_shared_maywrite(vm_flags_t vm_flags)
+static inline bool vma_is_accessible(struct vm_area_struct *vma)
 {
-	return (vm_flags & (VM_SHARED | VM_MAYWRITE)) ==
-		(VM_SHARED | VM_MAYWRITE);
-}
-
-static inline bool vma_is_shared_maywrite(struct vm_area_struct *vma)
-{
-	return is_shared_maywrite(vma->vm_flags);
+	return vma->vm_flags & (VM_READ | VM_EXEC | VM_WRITE);
 }
 
 #ifdef CONFIG_SHMEM
