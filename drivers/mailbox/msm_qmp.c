@@ -382,7 +382,7 @@ static int qmp_startup(struct mbox_chan *chan)
  */
 static int qmp_send_data(struct mbox_chan *chan, void *data)
 {
-	struct qmp_mbox *mbox = chan->con_priv;
+	struct qmp_mbox *mbox;
 	struct qmp_device *mdev;
 	struct qmp_pkt *pkt = (struct qmp_pkt *)data;
 	void __iomem *addr;
@@ -390,7 +390,11 @@ static int qmp_send_data(struct mbox_chan *chan, void *data)
 	u32 size;
 	int i;
 
-	if (!mbox || !data || !completion_done(&mbox->ch_complete))
+	if (!chan || !data)
+		return -EINVAL;
+
+	mbox = chan->con_priv;
+	if (!mbox || !completion_done(&mbox->ch_complete))
 		return -EINVAL;
 
 	mdev = mbox->mdev;
