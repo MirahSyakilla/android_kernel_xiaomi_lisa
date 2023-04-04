@@ -47,6 +47,22 @@ static inline int fsnotify_parent(const struct path *path,
 static inline int fsnotify_path(struct inode *inode, const struct path *path,
 				__u32 mask)
 {
+	if (mask & FS_OPEN) {
+		if (path->dentry->d_op && path->dentry->d_op->d_canonical_path) {
+			struct path lower_path;
+			int ret;
+
+			ret = path->dentry->d_op->d_canonical_path(path, &lower_path);
+			if (ret)
+				return ret;
+
+			ret = fsnotify_parent(&lower_path, NULL, mask);
+			path_put(&lower_path);
+			if (ret)
+				return ret;
+		}
+	}
+
 	int ret = fsnotify_parent(path, NULL, mask);
 
 	if (ret)
