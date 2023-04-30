@@ -525,7 +525,10 @@ static unsigned long move_vma(struct vm_area_struct *vma,
 		if (vm_flags & VM_ACCOUNT)
 			vm_unacct_memory(to_account >> PAGE_SHIFT);
 		return -ENOMEM;
+<<<<<<< HEAD
 	}
+=======
+>>>>>>> cbacd76939b6 (Revert "mm: protect mremap() against SPF hanlder")
 
 	moved_len = move_page_tables(vma, old_addr, new_vma, new_addr, old_len,
 				     need_rmap_locks);
