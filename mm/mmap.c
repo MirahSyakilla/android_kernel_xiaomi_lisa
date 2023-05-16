@@ -1157,10 +1157,6 @@ again:
 	if (insert && file)
 		uprobe_mmap(insert);
 
-	if (next && next != vma)
-		vm_raw_write_end(next);
-	vm_raw_write_end(vma);
-
 	validate_mm(mm);
 	validate_mm_mt(mm);
 
