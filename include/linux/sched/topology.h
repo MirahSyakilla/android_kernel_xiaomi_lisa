@@ -96,7 +96,6 @@ struct sched_domain {
 	/* idle_balance() stats */
 	u64 max_newidle_lb_cost;
 	unsigned long next_decay_max_lb_cost;
-
 	u64 avg_scan_cost;		/* select_idle_sibling */
 
 #ifdef CONFIG_SCHEDSTATS
