@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2016-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022, 2024 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022-2024 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #define pr_fmt(fmt) "smcinvoke: %s: " fmt, __func__
@@ -1721,7 +1721,7 @@ static void process_piggyback_cb_data(uint8_t *outbuf, size_t buf_len)
 		piggyback_offset = max_offset + buffer_size_max_offset;
 	else
 		piggyback_offset = TZCB_BUF_OFFSET(msg);
-	piggyback_offset = size_align(piggyback_offset, SMCINVOKE_ARGS_ALIGN_SIZE);
+	piggyback_offset = smci_size_align(piggyback_offset, SMCINVOKE_ARGS_ALIGN_SIZE);
 	// Jump to piggy back data offset
 	piggyback_buf = (uint8_t *)msg + piggyback_offset;
 	piggyback_buf_size = g_max_cb_buf_size - piggyback_offset;
