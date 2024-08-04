@@ -24,6 +24,7 @@
 #define LUT_ROW_SIZE			32
 #define CLK_HW_DIV			2
 #define MAX_FN_SIZE			20
+#define LIMITS_POLLING_DELAY_MS		1
 #define MAX_ROW				2
 
 enum {
