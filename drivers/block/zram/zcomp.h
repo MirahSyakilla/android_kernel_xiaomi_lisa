@@ -3,10 +3,27 @@
 #ifndef _ZCOMP_H_
 #define _ZCOMP_H_
 
+#define ZCOMP_PARAM_NO_LEVEL	INT_MIN
+
+struct zcomp_params {
+	void *dict;
+	size_t dict_sz;
+	s32 level;
+};
+
+/*
+ * Run-time driver context - scratch buffers, etc. It is modified during
+ * request execution (compression/decompression), cannot be shared, so
+ * it's in per-CPU area.
+ */
+struct zcomp_ctx {
+	void *context;
+};
+
 struct zcomp_strm {
-	/* compression/decompression buffer */
+	/* compression buffer */
 	void *buffer;
-	void *ctx;
+	struct zcomp_ctx ctx;
 };
 
 struct zcomp_req {
@@ -18,11 +35,12 @@ struct zcomp_req {
 };
 
 struct zcomp_ops {
-	int (*compress)(void *ctx, struct zcomp_req *req);
-	int (*decompress)(void *ctx, struct zcomp_req *req);
+	int (*compress)(struct zcomp_ctx *ctx, struct zcomp_req *req);
+	int (*decompress)(struct zcomp_ctx *ctx, struct zcomp_req *req);
 
-	void *(*create_ctx)(void);
-	void (*destroy_ctx)(void *ctx);
+	int (*create_ctx)(struct zcomp_params *params,
+			  struct zcomp_ctx *ctx);
+	void (*destroy_ctx)(struct zcomp_ctx *ctx);
 
 	const char *name;
 };
@@ -31,6 +49,7 @@ struct zcomp_ops {
 struct zcomp {
 	struct zcomp_strm __percpu *stream;
 	const struct zcomp_ops *ops;
+	struct zcomp_params *params;
 	struct hlist_node node;
 };
 
@@ -39,7 +58,7 @@ int zcomp_cpu_dead(unsigned int cpu, struct hlist_node *node);
 ssize_t zcomp_available_show(const char *comp, char *buf);
 bool zcomp_available_algorithm(const char *comp);
 
-struct zcomp *zcomp_create(const char *alg);
+struct zcomp *zcomp_create(const char *alg, struct zcomp_params *params);
 void zcomp_destroy(struct zcomp *comp);
 
 struct zcomp_strm *zcomp_stream_get(struct zcomp *comp);

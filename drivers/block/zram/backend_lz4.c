@@ -10,37 +10,44 @@ struct lz4_ctx {
 	s32 level;
 };
 
-static void lz4_destroy(void *ctx)
+static void lz4_destroy(struct zcomp_ctx *ctx)
 {
-	struct lz4_ctx *zctx = ctx;
+	struct lz4_ctx *zctx = ctx->context;
+
+	if (!zctx)
+		return;
 
 	vfree(zctx->mem);
 	kfree(zctx);
 }
 
-static void *lz4_create(void)
+static int lz4_create(struct zcomp_params *params, struct zcomp_ctx *ctx)
 {
-	struct lz4_ctx *ctx;
+	struct lz4_ctx *zctx;
 
-	ctx = kzalloc(sizeof(*ctx), GFP_KERNEL);
-	if (!ctx)
-		return NULL;
+	zctx = kzalloc(sizeof(*zctx), GFP_KERNEL);
+	if (!zctx)
+		return -ENOMEM;
 
-	/* @FIXME: using a hardcoded LZ4_ACCELERATION_DEFAULT for now */
-	ctx->level = LZ4_ACCELERATION_DEFAULT;
-	ctx->mem = vmalloc(LZ4_MEM_COMPRESS);
-	if (!ctx->mem)
+	ctx->context = zctx;
+	if (params->level != ZCOMP_PARAM_NO_LEVEL)
+		zctx->level = params->level;
+	else
+		zctx->level = LZ4_ACCELERATION_DEFAULT;
+
+	zctx->mem = vmalloc(LZ4_MEM_COMPRESS);
+	if (!zctx->mem)
 		goto error;
 
-	return ctx;
+	return 0;
 error:
 	lz4_destroy(ctx);
-	return NULL;
+	return -EINVAL;
 }
 
-static int lz4_compress(void *ctx, struct zcomp_req *req)
+static int lz4_compress(struct zcomp_ctx *ctx, struct zcomp_req *req)
 {
-	struct lz4_ctx *zctx = ctx;
+	struct lz4_ctx *zctx = ctx->context;
 	int ret;
 
 	ret = LZ4_compress_fast(req->src, req->dst, req->src_len,
@@ -51,7 +58,7 @@ static int lz4_compress(void *ctx, struct zcomp_req *req)
 	return 0;
 }
 
-static int lz4_decompress(void *ctx, struct zcomp_req *req)
+static int lz4_decompress(struct zcomp_ctx *ctx, struct zcomp_req *req)
 {
 	int ret;
 
