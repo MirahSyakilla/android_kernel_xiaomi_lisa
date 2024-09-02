@@ -5,52 +5,62 @@
 
 #include "backend_lz4.h"
 
-static void lz4_release_params(struct zcomp_params *params)
+struct lz4_ctx {
+	void *mem;
+	s32 level;
+};
+
+static void lz4_destroy(void *ctx)
 {
+	struct lz4_ctx *zctx = ctx;
+
+	vfree(zctx->mem);
+	kfree(zctx);
 }
 
-static int lz4_setup_params(struct zcomp_params *params)
+static void *lz4_create(struct zcomp_params *params)
 {
-	if (params->level == ZCOMP_PARAM_NO_LEVEL)
-		params->level = LZ4_ACCELERATION_DEFAULT;
+	struct lz4_ctx *ctx;
 
-	return 0;
+	ctx = kzalloc(sizeof(*ctx), GFP_KERNEL);
+	if (!ctx)
+		return NULL;
+
+	if (params->level != ZCOMP_PARAM_NO_LEVEL)
+		ctx->level = params->level;
+	else
+		ctx->level = LZ4_ACCELERATION_DEFAULT;
+
+	ctx->mem = vmalloc(LZ4_MEM_COMPRESS);
+	if (!ctx->mem)
+		goto error;
+
+	return ctx;
+error:
+	lz4_destroy(ctx);
+	return NULL;
 }
 
-static void lz4_destroy(struct zcomp_ctx *ctx)
+static int lz4_compress(void *ctx, const unsigned char *src, size_t src_len,
+			unsigned char *dst, size_t *dst_len)
 {
-	vfree(ctx->context);
-}
-
-static int lz4_create(struct zcomp_params *params, struct zcomp_ctx *ctx)
-{
-	ctx->context = vmalloc(LZ4_MEM_COMPRESS);
-	if (!ctx->context)
-		return -ENOMEM;
-
-	return 0;
-}
-
-static int lz4_compress(struct zcomp_params *params, struct zcomp_ctx *ctx,
-			struct zcomp_req *req)
-{
+	struct lz4_ctx *zctx = ctx;
 	int ret;
 
-	ret = LZ4_compress_fast(req->src, req->dst, req->src_len,
-				req->dst_len, params->level, ctx->context);
+	ret = LZ4_compress_fast(src, dst, src_len, *dst_len,
+				zctx->level, zctx->mem);
 	if (!ret)
 		return -EINVAL;
-	req->dst_len = ret;
+	*dst_len = ret;
 	return 0;
 }
 
-static int lz4_decompress(struct zcomp_params *params, struct zcomp_ctx *ctx,
-			  struct zcomp_req *req)
+static int lz4_decompress(void *ctx, const unsigned char *src,
+			  size_t src_len, unsigned char *dst, size_t dst_len)
 {
 	int ret;
 
-	ret = LZ4_decompress_safe(req->src, req->dst, req->src_len,
-				  req->dst_len);
+	ret = LZ4_decompress_safe(src, dst, src_len, dst_len);
 	if (ret < 0)
 		return -EINVAL;
 	return 0;
@@ -61,7 +71,5 @@ const struct zcomp_ops backend_lz4 = {
 	.decompress	= lz4_decompress,
 	.create_ctx	= lz4_create,
 	.destroy_ctx	= lz4_destroy,
-	.setup_params	= lz4_setup_params,
-	.release_params	= lz4_release_params,
 	.name		= "lz4",
 };

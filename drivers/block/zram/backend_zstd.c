@@ -12,106 +12,81 @@ struct zstd_ctx {
 	zstd_dctx *dctx;
 	void *cctx_mem;
 	void *dctx_mem;
+	s32 level;
 };
 
-struct zstd_params {
-	zstd_parameters cprm;
-};
-
-static void zstd_release_params(struct zcomp_params *params)
+static void zstd_destroy(void *ctx)
 {
-	kfree(params->drv_data);
-}
-
-static int zstd_setup_params(struct zcomp_params *params)
-{
-	struct zstd_params *zp;
-
-	zp = kzalloc(sizeof(*zp), GFP_KERNEL);
-	if (!zp)
-		return -ENOMEM;
-
-	if (params->level == ZCOMP_PARAM_NO_LEVEL)
-		params->level = zstd_default_clevel();
-
-	zp->cprm = zstd_get_params(params->level, PAGE_SIZE);
-	params->drv_data = zp;
-
-	return 0;
-}
-
-static void zstd_destroy(struct zcomp_ctx *ctx)
-{
-	struct zstd_ctx *zctx = ctx->context;
-
-	if (!zctx)
-		return;
+	struct zstd_ctx *zctx = ctx;
 
 	vfree(zctx->cctx_mem);
 	vfree(zctx->dctx_mem);
 	kfree(zctx);
 }
 
-static int zstd_create(struct zcomp_params *params, struct zcomp_ctx *ctx)
+static void *zstd_create(struct zcomp_params *params)
 {
-	struct zstd_ctx *zctx;
 	zstd_parameters prm;
+	struct zstd_ctx *ctx;
 	size_t sz;
 
-	zctx = kzalloc(sizeof(*zctx), GFP_KERNEL);
-	if (!zctx)
-		return -ENOMEM;
+	ctx = kzalloc(sizeof(*ctx), GFP_KERNEL);
+	if (!ctx)
+		return NULL;
 
-	ctx->context = zctx;
-	prm = zstd_get_params(params->level, PAGE_SIZE);
+	if (params->level != ZCOMP_PARAM_NO_LEVEL)
+		ctx->level = params->level;
+	else
+		ctx->level = zstd_default_clevel();
+
+	prm = zstd_get_params(ctx->level, PAGE_SIZE);
 	sz = zstd_cctx_workspace_bound(&prm.cParams);
-	zctx->cctx_mem = vzalloc(sz);
-	if (!zctx->cctx_mem)
+	ctx->cctx_mem = vzalloc(sz);
+	if (!ctx->cctx_mem)
 		goto error;
 
-	zctx->cctx = zstd_init_cctx(zctx->cctx_mem, sz);
-	if (!zctx->cctx)
+	ctx->cctx = zstd_init_cctx(ctx->cctx_mem, sz);
+	if (!ctx->cctx)
 		goto error;
 
 	sz = zstd_dctx_workspace_bound();
-	zctx->dctx_mem = vzalloc(sz);
-	if (!zctx->dctx_mem)
+	ctx->dctx_mem = vzalloc(sz);
+	if (!ctx->dctx_mem)
 		goto error;
 
-	zctx->dctx = zstd_init_dctx(zctx->dctx_mem, sz);
-	if (!zctx->dctx)
+	ctx->dctx = zstd_init_dctx(ctx->dctx_mem, sz);
+	if (!ctx->dctx)
 		goto error;
 
-	return 0;
+	return ctx;
 
 error:
 	zstd_destroy(ctx);
-	return -EINVAL;
+	return NULL;
 }
 
-static int zstd_compress(struct zcomp_params *params, struct zcomp_ctx *ctx,
-			 struct zcomp_req *req)
+static int zstd_compress(void *ctx, const unsigned char *src, size_t src_len,
+			 unsigned char *dst, size_t *dst_len)
 {
-	struct zstd_params *zp = params->drv_data;
-	struct zstd_ctx *zctx = ctx->context;
+	struct zstd_ctx *zctx = ctx;
+	const zstd_parameters prm = zstd_get_params(zctx->level, PAGE_SIZE);
 	size_t ret;
 
-	ret = zstd_compress_cctx(zctx->cctx, req->dst, req->dst_len,
-				 req->src, req->src_len, &zp->cprm);
+	ret = zstd_compress_cctx(zctx->cctx, dst, *dst_len,
+				 src, src_len, &prm);
 	if (zstd_is_error(ret))
 		return -EINVAL;
-	req->dst_len = ret;
+	*dst_len = ret;
 	return 0;
 }
 
-static int zstd_decompress(struct zcomp_params *params, struct zcomp_ctx *ctx,
-			   struct zcomp_req *req)
+static int zstd_decompress(void *ctx, const unsigned char *src, size_t src_len,
+			   unsigned char *dst, size_t dst_len)
 {
-	struct zstd_ctx *zctx = ctx->context;
+	struct zstd_ctx *zctx = ctx;
 	size_t ret;
 
-	ret = zstd_decompress_dctx(zctx->dctx, req->dst, req->dst_len,
-				   req->src, req->src_len);
+	ret = zstd_decompress_dctx(zctx->dctx, dst, dst_len, src, src_len);
 	if (zstd_is_error(ret))
 		return -EINVAL;
 	return 0;
@@ -122,7 +97,5 @@ const struct zcomp_ops backend_zstd = {
 	.decompress	= zstd_decompress,
 	.create_ctx	= zstd_create,
 	.destroy_ctx	= zstd_destroy,
-	.setup_params	= zstd_setup_params,
-	.release_params	= zstd_release_params,
 	.name		= "zstd",
 };

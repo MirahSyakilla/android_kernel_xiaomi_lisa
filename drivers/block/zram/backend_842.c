@@ -7,47 +7,56 @@
 
 #include "backend_842.h"
 
-static void release_params_842(struct zcomp_params *params)
+struct sw842_ctx {
+	void *mem;
+};
+
+static void destroy_842(void *ctx)
 {
+	struct sw842_ctx *zctx = ctx;
+
+	kfree(zctx->mem);
+	kfree(zctx);
 }
 
-static int setup_params_842(struct zcomp_params *params)
+static void *create_842(struct zcomp_params *params)
 {
-	return 0;
+	struct sw842_ctx *ctx;
+
+	ctx = kzalloc(sizeof(*ctx), GFP_KERNEL);
+	if (!ctx)
+		return NULL;
+
+	ctx->mem = kmalloc(SW842_MEM_COMPRESS, GFP_KERNEL);
+	if (!ctx->mem)
+		goto error;
+
+	return ctx;
+
+error:
+	destroy_842(ctx);
+	return NULL;
 }
 
-static void destroy_842(struct zcomp_ctx *ctx)
+static int compress_842(void *ctx, const unsigned char *src, size_t src_len,
+			unsigned char *dst, size_t *dst_len)
 {
-	kfree(ctx->context);
-}
-
-static int create_842(struct zcomp_params *params, struct zcomp_ctx *ctx)
-{
-	ctx->context = kmalloc(SW842_MEM_COMPRESS, GFP_KERNEL);
-	if (!ctx->context)
-		return -ENOMEM;
-	return 0;
-}
-
-static int compress_842(struct zcomp_params *params, struct zcomp_ctx *ctx,
-			struct zcomp_req *req)
-{
-	unsigned int dlen = req->dst_len;
+	struct sw842_ctx *zctx = ctx;
+	unsigned int dlen = *dst_len;
 	int ret;
 
-	ret = sw842_compress(req->src, req->src_len, req->dst, &dlen,
-			     ctx->context);
+	ret = sw842_compress(src, src_len, dst, &dlen, zctx->mem);
 	if (ret == 0)
-		req->dst_len = dlen;
+		*dst_len = dlen;
 	return ret;
 }
 
-static int decompress_842(struct zcomp_params *params, struct zcomp_ctx *ctx,
-			  struct zcomp_req *req)
+static int decompress_842(void *ctx, const unsigned char *src, size_t src_len,
+			  unsigned char *dst, size_t dst_len)
 {
-	unsigned int dlen = req->dst_len;
+	unsigned int dlen = dst_len;
 
-	return sw842_decompress(req->src, req->src_len, req->dst, &dlen);
+	return sw842_decompress(src, src_len, dst, &dlen);
 }
 
 const struct zcomp_ops backend_842 = {
@@ -55,7 +64,5 @@ const struct zcomp_ops backend_842 = {
 	.decompress	= decompress_842,
 	.create_ctx	= create_842,
 	.destroy_ctx	= destroy_842,
-	.setup_params	= setup_params_842,
-	.release_params	= release_params_842,
 	.name		= "842",
 };

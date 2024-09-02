@@ -5,54 +5,27 @@
 
 #define ZCOMP_PARAM_NO_LEVEL	INT_MIN
 
-/*
- * Immutable driver (backend) parameters. The driver may attach private
- * data to it (e.g. driver representation of the dictionary, etc.).
- *
- * This data is kept per-comp and is shared among execution contexts.
- */
 struct zcomp_params {
 	void *dict;
 	size_t dict_sz;
 	s32 level;
-
-	void *drv_data;
-};
-
-/*
- * Run-time driver context - scratch buffers, etc. It is modified during
- * request execution (compression/decompression), cannot be shared, so
- * it's in per-CPU area.
- */
-struct zcomp_ctx {
-	void *context;
 };
 
 struct zcomp_strm {
-	/* compression buffer */
+	/* compression/decompression buffer */
 	void *buffer;
-	struct zcomp_ctx ctx;
-};
-
-struct zcomp_req {
-	const unsigned char *src;
-	const size_t src_len;
-
-	unsigned char *dst;
-	size_t dst_len;
+	void *ctx;
 };
 
 struct zcomp_ops {
-	int (*compress)(struct zcomp_params *params, struct zcomp_ctx *ctx,
-			struct zcomp_req *req);
-	int (*decompress)(struct zcomp_params *params, struct zcomp_ctx *ctx,
-			  struct zcomp_req *req);
+	int (*compress)(void *ctx, const unsigned char *src, size_t src_len,
+			unsigned char *dst, size_t *dst_len);
 
-	int (*create_ctx)(struct zcomp_params *params, struct zcomp_ctx *ctx);
-	void (*destroy_ctx)(struct zcomp_ctx *ctx);
+	int (*decompress)(void *ctx, const unsigned char *src, size_t src_len,
+			  unsigned char *dst, size_t dst_len);
 
-	int (*setup_params)(struct zcomp_params *params);
-	void (*release_params)(struct zcomp_params *params);
+	void *(*create_ctx)(struct zcomp_params *params);
+	void (*destroy_ctx)(void *ctx);
 
 	const char *name;
 };
