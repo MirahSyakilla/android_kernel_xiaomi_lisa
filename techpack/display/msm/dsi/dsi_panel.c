@@ -754,21 +754,16 @@ done:
 	return rc;
 }
 
-int dsi_panel_set_hbm_mode(struct dsi_panel *panel, bool status)
+int dsi_panel_apply_hbm_mode(struct dsi_panel *panel, bool mode)
 {
-	enum dsi_cmd_set_type type;
 	int rc;
-	if (panel->hbm_enabled)
-		type = DSI_CMD_SET_MI_HBM_ON;
-	else
-		type = DSI_CMD_SET_MI_HBM_OFF;
+
 	mutex_lock(&panel->panel_lock);
-	rc = dsi_panel_tx_cmd_set(panel, type);
-	if (rc)
-		DSI_ERR("[%s] failed to send nolp cmd, rc=%d\n",
-						panel->name, rc);
-	dsi_panel_set_backlight(panel, panel->hbm_enabled ? panel->bl_config.bl_max_level : panel->bl_config.bl_level);
+	rc = dsi_panel_tx_cmd_set(panel, mode ?
+			DSI_CMD_SET_MI_HBM_ON : DSI_CMD_SET_MI_HBM_OFF);
 	mutex_unlock(&panel->panel_lock);
+
+	dsi_panel_set_backlight(panel, panel->bl_config.bl_level);
 	return rc;
 }
 
@@ -1926,6 +1921,8 @@ const char *cmd_set_prop_map[DSI_CMD_SET_MAX] = {
 	"qcom,mdss-dsi-post-mode-switch-on-command",
 	"qcom,mdss-dsi-qsync-on-commands",
 	"qcom,mdss-dsi-qsync-off-commands",
+	"mi,mdss-dsi-hbm-on-command",
+	"mi,mdss-dsi-hbm-off-command",
 	"mi,mdss-dsi-local-hbm-normal-white-1000nit-command",
 	"mi,mdss-dsi-local-hbm-hlpm-white-1000nit-command",
 	"mi,mdss-dsi-local-hbm-off-to-normal-command",
@@ -1958,6 +1955,8 @@ const char *cmd_set_state_map[DSI_CMD_SET_MAX] = {
 	"qcom,mdss-dsi-post-mode-switch-on-command-state",
 	"qcom,mdss-dsi-qsync-on-commands-state",
 	"qcom,mdss-dsi-qsync-off-commands-state",
+	"mi,mdss-dsi-hbm-on-command-state",
+	"mi,mdss-dsi-hbm-off-command-state",
 	"mi,mdss-dsi-local-hbm-normal-white-1000nit-command-state",
 	"mi,mdss-dsi-local-hbm-hlpm-white-1000nit-command-state",
 	"mi,mdss-dsi-local-hbm-off-to-normal-command-state",
@@ -3690,6 +3689,54 @@ exit:
 	mutex_unlock(&panel->panel_lock);
 }
 
+static ssize_t sysfs_hbm_read(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	struct dsi_display *display = dev_get_drvdata(dev);
+
+	if (!display) {
+		pr_err("Invalid display\n");
+		return -EINVAL;
+	}
+
+	return scnprintf(buf, PAGE_SIZE, "%d\n", display->panel->hbm_mode);
+}
+
+static ssize_t sysfs_hbm_write(struct device *dev,
+	    struct device_attribute *attr, const char *buf, size_t count)
+{
+	struct dsi_display *display = dev_get_drvdata(dev);
+	bool hbm_mode;
+	int rc;
+
+	if (!display) {
+		pr_err("Invalid display\n");
+		return -EINVAL;
+	}
+
+	rc = kstrtobool(buf, &hbm_mode);
+	if (rc) {
+		pr_err("Failed to parse value, rc=%d\n", rc);
+		return rc;
+	}
+
+	if (display->panel->hbm_mode == hbm_mode)
+		return count;
+
+	rc = dsi_panel_apply_hbm_mode(display->panel, hbm_mode);
+	if (rc)
+		pr_err("Failed to %s HBM mode, rc=%d\n",
+		       hbm_mode ? "enable" : "disable", rc);
+	else
+		display->panel->hbm_mode = hbm_mode;
+
+	return !rc ? count : rc;
+}
+
+static DEVICE_ATTR(hbm, 0644,
+			sysfs_hbm_read,
+			sysfs_hbm_write);
+
 static ssize_t sysfs_fod_hbm_write(struct device *dev, struct device_attribute *attr,
 				   const char *buf, size_t count)
 {
@@ -3745,6 +3792,7 @@ static DEVICE_ATTR(fod_ui, 0400, sysfs_fod_ui_read, NULL);
 static struct attribute *panel_attrs[] = {
 	&dev_attr_fod_hbm.attr,
 	&dev_attr_fod_ui.attr,
+	&dev_attr_hbm.attr,
 	NULL,
 };
 static struct attribute_group panel_attrs_group = {
@@ -4672,10 +4720,11 @@ int dsi_panel_set_nolp(struct dsi_panel *panel)
 exit:
 	mutex_unlock(&panel->panel_lock);
 
-	if (panel->hbm_enabled) {
-		dsi_panel_set_hbm_mode(panel, panel->hbm_enabled);
-	}
 	panel->doze_enabled = false;
+
+	if (panel->hbm_mode)
+		dsi_panel_apply_hbm_mode(panel, true);
+
 	return rc;
 }
 
@@ -5010,15 +5059,12 @@ int dsi_panel_enable(struct dsi_panel *panel)
 	else
 		panel->panel_initialized = true;
 	mutex_unlock(&panel->panel_lock);
-<<<<<<< HEAD
-	if(panel->hbm_enabled)
-		dsi_panel_set_hbm_mode(panel, panel->hbm_enabled);
-	
-=======
 
 	panel->doze_enabled = false;
 
->>>>>>> 98c5ceb73232 (techpack: display: dsi: Switch back to generic doze commands handling)
+	if (panel->hbm_mode)
+		dsi_panel_apply_hbm_mode(panel, true);
+
 	return rc;
 }
 
