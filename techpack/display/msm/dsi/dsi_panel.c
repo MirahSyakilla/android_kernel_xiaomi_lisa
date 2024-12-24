@@ -775,6 +775,11 @@ int dsi_panel_set_backlight(struct dsi_panel *panel, u32 bl_lvl)
 	if (panel->host_config.ext_bridge_mode)
 		return 0;
 
+	bl->real_bl_level = bl_lvl;
+
+	if (panel->hbm_mode && !panel->doze_enabled)
+		goto skip_bl_adj;
+
 	DSI_DEBUG("backlight type:%d lvl:%d\n", bl->type, bl_lvl);
 	switch (bl->type) {
 	case DSI_BACKLIGHT_WLED:
@@ -792,12 +797,7 @@ int dsi_panel_set_backlight(struct dsi_panel *panel, u32 bl_lvl)
 		DSI_ERR("Backlight type(%d) not supported\n", bl->type);
 		rc = -ENOTSUPP;
 	}
-
-	rc = dsi_panel_apply_doze_status(panel);
-	if (rc)
-		DSI_ERR("[%s] unable to apply doze on, rc=%d\n", panel->name, rc);
-
-	bl->real_bl_level = bl_lvl;
+skip_bl_adj:
 
 	return rc;
 }
