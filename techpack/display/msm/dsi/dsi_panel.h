@@ -280,6 +280,8 @@ struct dsi_panel {
 	int local_hbm_on_1000nit_51_index;
 
 	int hbm_mode;
+
+	int dc_dimming_mode;
 };
 
 static inline bool dsi_panel_ulps_feature_enabled(struct dsi_panel *panel)
@@ -423,5 +425,7 @@ void dsi_panel_set_fod_ui(struct dsi_panel *panel, bool status);
 void dsi_panel_request_fod_hbm(struct dsi_panel *panel, bool status);
 
 int dsi_panel_apply_hbm_mode(struct dsi_panel *panel, bool mode);
+
+int dsi_panel_apply_dc_dimming_mode(struct dsi_panel *panel, bool mode);
 
 #endif /* _DSI_PANEL_H_ */
