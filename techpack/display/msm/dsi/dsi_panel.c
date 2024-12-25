@@ -758,12 +758,17 @@ int dsi_panel_apply_hbm_mode(struct dsi_panel *panel, bool mode)
 {
 	int rc;
 
+	if (mode)
+		dsi_panel_set_backlight(panel, panel->bl_config.hbm_bl_max_level);
+
 	mutex_lock(&panel->panel_lock);
 	rc = dsi_panel_tx_cmd_set(panel, mode ?
 			DSI_CMD_SET_MI_HBM_ON : DSI_CMD_SET_MI_HBM_OFF);
 	mutex_unlock(&panel->panel_lock);
 
-	dsi_panel_set_backlight(panel, panel->bl_config.bl_level);
+	if (!mode)
+		dsi_panel_set_backlight(panel, panel->bl_config.real_bl_level);
+
 	return rc;
 }
 
@@ -778,7 +783,7 @@ int dsi_panel_set_backlight(struct dsi_panel *panel, u32 bl_lvl)
 	bl->real_bl_level = bl_lvl;
 
 	if (panel->hbm_mode && !panel->doze_enabled)
-		goto skip_bl_adj;
+		bl_lvl = bl->hbm_bl_max_level;
 
 	DSI_DEBUG("backlight type:%d lvl:%d\n", bl->type, bl_lvl);
 	switch (bl->type) {
@@ -797,7 +802,6 @@ int dsi_panel_set_backlight(struct dsi_panel *panel, u32 bl_lvl)
 		DSI_ERR("Backlight type(%d) not supported\n", bl->type);
 		rc = -ENOTSUPP;
 	}
-skip_bl_adj:
 
 	return rc;
 }
@@ -3615,6 +3619,21 @@ error:
 	return rc;
 }
 
+static int dsi_panel_parse_hbm(struct dsi_panel *panel)
+{
+	struct dsi_parser_utils *utils = &panel->utils;
+	int rc;
+
+	panel->bl_config.hbm_bl_max_level = panel->bl_config.bl_max_level;
+	rc = utils->read_u32(utils->data, "mi,hbm-bl-max-level",
+			     &panel->bl_config.hbm_bl_max_level);
+	if (rc)
+		DSI_INFO("mi,hbm-bl-max-level not specified,\
+				using qcom,mdss-dsi-bl-max-level\n");
+
+	return 0;
+}
+
 static int dsi_panel_parse_fod(struct dsi_panel *panel)
 {
 	struct dsi_parser_utils *utils = &panel->utils;
@@ -3943,6 +3962,10 @@ struct dsi_panel *dsi_panel_get(struct device *parent,
 	rc = dsi_panel_parse_fod(panel);
 	if (rc)
 		DSI_DEBUG("failed to parse fod, rc=%d\n", rc);
+
+	rc = dsi_panel_parse_hbm(panel);
+	if (rc)
+		DSI_DEBUG("failed to parse hbm, rc=%d\n", rc);
 
 	rc = dsi_panel_vreg_get(panel);
 	if (rc) {

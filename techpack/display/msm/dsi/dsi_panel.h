@@ -128,6 +128,7 @@ struct dsi_backlight_config {
 	u32 real_bl_level;
 	bool allow_bl_update;
 	u32 unset_bl_level;
+	u32 hbm_bl_max_level;
 
 	int en_gpio;
 	/* PWM params */
