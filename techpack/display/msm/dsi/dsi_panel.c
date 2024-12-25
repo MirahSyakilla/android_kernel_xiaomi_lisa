@@ -755,6 +755,16 @@ done:
 	return rc;
 }
 
+int dsi_panel_apply_dc_dimming_mode(struct dsi_panel *panel, bool mode)
+{
+	int rc;
+
+	rc = dsi_panel_tx_cmd_set(panel, mode ?
+			DSI_CMD_SET_MI_DC_ON : DSI_CMD_SET_MI_DC_OFF);
+
+	return rc;
+}
+
 int dsi_panel_apply_hbm_mode(struct dsi_panel *panel, bool mode)
 {
 	int rc;
@@ -1947,6 +1957,8 @@ const char *cmd_set_prop_map[DSI_CMD_SET_MAX] = {
 	"mi,mdss-dsi-local-hbm-off-to-hlpm-command",
 	"mi,mdss-dsi-hbm-on-command",
 	"mi,mdss-dsi-hbm-off-command",
+	"mi,mdss-dsi-dc-on-command",
+	"mi,mdss-dsi-dc-off-command",
 };
 
 const char *cmd_set_state_map[DSI_CMD_SET_MAX] = {
@@ -1981,6 +1993,8 @@ const char *cmd_set_state_map[DSI_CMD_SET_MAX] = {
 	"mi,mdss-dsi-local-hbm-off-to-hlpm-command-state",
 	"mi,mdss-dsi-hbm-on-command-state",
 	"mi,mdss-dsi-hbm-off-command-state",
+	"mi,mdss-dsi-dc-on-command-state",
+	"mi,mdss-dsi-dc-off-command-state",
 };
 
 int dsi_panel_get_cmd_pkt_count(const char *data, u32 length, u32 *cnt)
@@ -3722,6 +3736,58 @@ exit:
 	mutex_unlock(&panel->panel_lock);
 }
 
+static ssize_t sysfs_dc_read(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	struct dsi_display *display = dev_get_drvdata(dev);
+
+	if (!display) {
+		pr_err("Invalid display\n");
+		return -EINVAL;
+	}
+
+	return scnprintf(buf, PAGE_SIZE, "%d\n", display->panel->dc_dimming_mode);
+}
+
+static ssize_t sysfs_dc_write(struct device *dev,
+	    struct device_attribute *attr, const char *buf, size_t count)
+{
+	struct dsi_display *display = dev_get_drvdata(dev);
+	bool dc_dimming_mode;
+	int rc;
+
+	if (!display) {
+		pr_err("Invalid display\n");
+		return -EINVAL;
+	}
+
+	rc = kstrtobool(buf, &dc_dimming_mode);
+	if (rc) {
+		pr_err("Failed to parse value, rc=%d\n", rc);
+		return rc;
+	}
+
+	if (display->panel->dc_dimming_mode == dc_dimming_mode)
+		return count;
+
+	mutex_lock(&display->panel->panel_lock);
+
+	rc = dsi_panel_apply_dc_dimming_mode(display->panel, dc_dimming_mode);
+	if (rc)
+		pr_err("Failed to %s DC dimming mode, rc=%d\n",
+		       dc_dimming_mode ? "enable" : "disable", rc);
+	else
+		display->panel->dc_dimming_mode = dc_dimming_mode;
+
+	mutex_unlock(&display->panel->panel_lock);
+
+	return !rc ? count : rc;
+}
+
+static DEVICE_ATTR(dc, 0644,
+			sysfs_dc_read,
+			sysfs_dc_write);
+
 static ssize_t sysfs_hbm_read(struct device *dev,
 		struct device_attribute *attr, char *buf)
 {
@@ -3826,6 +3892,7 @@ static struct attribute *panel_attrs[] = {
 	&dev_attr_fod_hbm.attr,
 	&dev_attr_fod_ui.attr,
 	&dev_attr_hbm.attr,
+	&dev_attr_dc.attr,
 	NULL,
 };
 static struct attribute_group panel_attrs_group = {
@@ -4668,6 +4735,9 @@ int dsi_panel_set_lp1(struct dsi_panel *panel)
 		DSI_ERR("invalid params\n");
 		return -EINVAL;
 	}
+	
+	if (panel->dc_dimming_mode)
+		dsi_panel_apply_dc_dimming_mode(panel, false);
 
 	if(panel->hbm_enabled)
 		dsi_panel_set_hbm_mode(panel, false);	
@@ -4707,6 +4777,9 @@ int dsi_panel_set_lp2(struct dsi_panel *panel)
 		DSI_ERR("invalid params\n");
 		return -EINVAL;
 	}
+	
+	if (panel->dc_dimming_mode)
+		dsi_panel_apply_dc_dimming_mode(panel, false);
 
 	if(panel->hbm_enabled)
                 dsi_panel_set_hbm_mode(panel, false);
@@ -4763,6 +4836,8 @@ exit:
 
 	if (panel->hbm_mode)
 		dsi_panel_apply_hbm_mode(panel, true);
+	else if (panel->dc_dimming_mode)
+		dsi_panel_apply_dc_dimming_mode(panel, true);
 
 	return rc;
 }
@@ -5097,12 +5172,16 @@ int dsi_panel_enable(struct dsi_panel *panel)
 		       panel->name, rc);
 	else
 		panel->panel_initialized = true;
+
 	mutex_unlock(&panel->panel_lock);
 
 	panel->doze_enabled = false;
 
 	if (panel->hbm_mode)
 		dsi_panel_apply_hbm_mode(panel, true);
+
+	if (panel->dc_dimming_mode)
+		dsi_panel_apply_dc_dimming_mode(panel, true);
 
 	return rc;
 }
