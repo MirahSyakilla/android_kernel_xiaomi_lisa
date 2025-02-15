@@ -315,9 +315,10 @@ static int hwsched_sendcmd(struct adreno_device *adreno_dev,
 	struct kgsl_drawobj_cmd *cmdobj)
 {
 	struct sched_param sched_param = { .sched_priority = MAX_RT_PRIO / 2 };
+	int nice = task_nice(current);
 	struct sched_attr attr = {
 		.sched_policy = SCHED_NORMAL,
-		.sched_nice   = 0,
+		.sched_nice   = nice,
 	};
 	struct kgsl_device *device = KGSL_DEVICE(adreno_dev);
 	struct adreno_hwsched *hwsched = to_hwsched(adreno_dev);
@@ -342,7 +343,6 @@ static int hwsched_sendcmd(struct adreno_device *adreno_dev,
 		ret = -EBUSY;
 		goto done;
 	}
-
 
 	if (kgsl_context_detached(context)) {
 		ret = -ENOENT;
