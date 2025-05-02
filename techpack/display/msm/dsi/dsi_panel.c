@@ -5104,6 +5104,9 @@ int dsi_panel_switch(struct dsi_panel *panel)
 		DSI_ERR("[%s] failed to send DSI_CMD_SET_TIMING_SWITCH cmds, rc=%d\n",
 		       panel->name, rc);
 
+	if (panel->dc_dimming_mode && !panel->hbm_mode)
+		dsi_panel_apply_dc_dimming_mode(panel, true);
+
 	mutex_unlock(&panel->panel_lock);
 	return rc;
 }
