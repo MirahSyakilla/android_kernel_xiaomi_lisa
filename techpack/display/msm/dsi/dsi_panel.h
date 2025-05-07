@@ -129,6 +129,7 @@ struct dsi_backlight_config {
 	bool allow_bl_update;
 	u32 unset_bl_level;
 	u32 hbm_bl_max_level;
+	u32 pre_hbm_bl_level;
 
 	int en_gpio;
 	/* PWM params */
@@ -280,6 +281,7 @@ struct dsi_panel {
 	int local_hbm_on_1000nit_51_index;
 
 	int hbm_mode;
+	struct delayed_work hbm_recover_backlight_delayed_work;
 };
 
 static inline bool dsi_panel_ulps_feature_enabled(struct dsi_panel *panel)
@@ -313,6 +315,8 @@ struct dsi_panel *dsi_panel_get(struct device *parent,
 				const char *type,
 				int topology_override,
 				bool trusted_vm_env);
+
+static void hbm_recover_backlight_delayed_work(struct work_struct *work);
 
 int dsi_panel_trigger_esd_attack(struct dsi_panel *panel, bool trusted_vm_env);
 

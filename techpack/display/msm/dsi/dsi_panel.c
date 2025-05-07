@@ -759,18 +759,31 @@ int dsi_panel_apply_hbm_mode(struct dsi_panel *panel, bool mode)
 {
 	int rc;
 
-	if (mode)
-		dsi_panel_set_backlight(panel, panel->bl_config.hbm_bl_max_level);
-
 	mutex_lock(&panel->panel_lock);
 	rc = dsi_panel_tx_cmd_set(panel, mode ?
 			DSI_CMD_SET_MI_HBM_ON : DSI_CMD_SET_MI_HBM_OFF);
 	mutex_unlock(&panel->panel_lock);
 
-	if (!mode)
-		dsi_panel_set_backlight(panel, panel->bl_config.real_bl_level);
+	if (mode) {
+		panel->bl_config.pre_hbm_bl_level = panel->bl_config.real_bl_level;
+		dsi_panel_set_backlight(panel, panel->bl_config.hbm_bl_max_level);
+	} else {
+		schedule_delayed_work(&panel->hbm_recover_backlight_delayed_work, msecs_to_jiffies(150));
+	}
 
 	return rc;
+}
+
+static void hbm_recover_backlight_delayed_work(struct work_struct *work)
+{
+	struct dsi_panel *panel = container_of(work,
+				struct dsi_panel, hbm_recover_backlight_delayed_work.work);
+	printk("[Rocky7842] hbm_recover_backlight_delayed_work");
+
+	dsi_panel_set_backlight(panel, (panel->bl_config.real_bl_level == 
+					panel->bl_config.hbm_bl_max_level) ? 
+					panel->bl_config.pre_hbm_bl_level : 
+					panel->bl_config.real_bl_level);
 }
 
 int dsi_panel_set_backlight(struct dsi_panel *panel, u32 bl_lvl)
@@ -4023,6 +4036,8 @@ int dsi_panel_drv_init(struct dsi_panel *panel,
 		DSI_ERR("invalid params\n");
 		return -EINVAL;
 	}
+
+	INIT_DELAYED_WORK(&panel->hbm_recover_backlight_delayed_work, hbm_recover_backlight_delayed_work);
 
 	mutex_lock(&panel->panel_lock);
 
