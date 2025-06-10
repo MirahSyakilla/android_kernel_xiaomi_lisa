@@ -183,15 +183,16 @@ struct ts_ic_info {
 #define FTS_FUNC_EXIT() do { \
     printk("[FTS_TS]%s: Exit(%d)\n", __func__, __LINE__); \
 } while (0)
-#else /* #if FTS_DEBUG_EN*/
-#define FTS_DEBUG(fmt, args...)
-#define FTS_FUNC_ENTER()
-#define FTS_FUNC_EXIT()
-#endif
 
 #define FTS_INFO(fmt, args...) do { \
     printk(KERN_INFO "[FTS_TS/I]%s:"fmt"\n", __func__, ##args); \
 } while (0)
+#else /* #if FTS_DEBUG_EN*/
+#define FTS_DEBUG(fmt, args...)
+#define FTS_FUNC_ENTER()
+#define FTS_FUNC_EXIT()
+#define FTS_INFO(fmt, args...) do {} while (0)
+#endif
 
 #define FTS_ERROR(fmt, args...) do { \
     printk(KERN_ERR "[FTS_TS/E]%s:"fmt"\n", __func__, ##args); \
