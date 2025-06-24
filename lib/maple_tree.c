@@ -5535,9 +5535,9 @@ static void mt_destroy_walk(struct maple_enode *enode, unsigned char ma_flags,
 	struct maple_enode *start;
 	struct maple_tree mt;
 
-	MA_STATE(mas, &mt, 0, 0);
-
-	if (mte_is_leaf(enode))
+	if (mte_is_leaf(enode)) {
+		mte_set_node_dead(enode);
+		node->type = mte_node_type(enode);
 		goto free_leaf;
 
 	mt_init_flags(&mt, ma_flags);
