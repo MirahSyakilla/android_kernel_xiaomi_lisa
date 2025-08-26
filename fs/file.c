@@ -124,7 +124,6 @@ static struct fdtable *alloc_fdtable(unsigned int slots_wanted)
 		if (nr < slots_wanted)
 			return ERR_PTR(-EMFILE);
 	}
-
 	/*
 	 * Check if the allocation size would exceed INT_MAX. kvmalloc_array()
 	 * and kvmalloc() will warn if the allocation size is greater than
