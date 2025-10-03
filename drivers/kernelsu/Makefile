@@ -16,12 +16,18 @@ ccflags-y += -I$(objtree)/security/selinux -include $(srctree)/include/uapi/asm-
 
 obj-$(CONFIG_KSU) += kernelsu.o
 
-KSU_LOCAL_VERSION := 2597
-
+# .git is a text file while the module is imported by 'git submodule add'.
+ifeq ($(shell test -e $(srctree)/$(src)/../.git; echo $$?),0)
+$(shell cd $(srctree)/$(src); /usr/bin/env PATH="$$PATH":/usr/bin:/usr/local/bin [ -f ../.git/shallow ] && git fetch --unshallow)
+KSU_GIT_VERSION := $(shell cd $(srctree)/$(src); /usr/bin/env PATH="$$PATH":/usr/bin:/usr/local/bin git rev-list --count HEAD)
 # ksu_version: major * 10000 + git version + 200 for historical reasons
-$(eval KSU_VERSION=$(shell expr 10000 + $(KSU_LOCAL_VERSION) + 200))
+$(eval KSU_VERSION=$(shell expr 10000 + $(KSU_GIT_VERSION) + 200))
 $(info -- KernelSU-Next version: $(KSU_VERSION))
 ccflags-y += -DKSU_VERSION=$(KSU_VERSION)
+else # If there is no .git file, the default version will be passed.
+$(warning "KSU_GIT_VERSION not defined! It is better to make KernelSU-Next a git submodule!")
+ccflags-y += -DKSU_VERSION=11998
+endif
 
 ifeq ($(shell grep -q " current_sid(void)" $(srctree)/security/selinux/include/objsec.h; echo $$?),0)
 ccflags-y += -DKSU_COMPAT_HAS_CURRENT_SID
@@ -43,12 +49,12 @@ ifeq ($(shell grep "ssize_t kernel_write" $(srctree)/fs/read_write.c | grep -q "
 ccflags-y += -DKSU_KERNEL_WRITE
 endif
 
-ifndef KSU_NEXT_EXPECTED_SIZE
-KSU_NEXT_EXPECTED_SIZE := 0x3e6
+ifndef KSU_NEXT_MANAGER_SIZE
+KSU_NEXT_MANAGER_SIZE := 0x3e6
 endif
 
-ifndef KSU_NEXT_EXPECTED_HASH
-KSU_NEXT_EXPECTED_HASH := 79e590113c4c4c0c222978e413a5faa801666957b1212a328e46c00c69821bf7
+ifndef KSU_NEXT_MANAGER_HASH
+KSU_NEXT_MANAGER_HASH := 79e590113c4c4c0c222978e413a5faa801666957b1212a328e46c00c69821bf7
 endif
 
 ifdef KSU_MANAGER_PACKAGE
@@ -56,11 +62,11 @@ ccflags-y += -DKSU_MANAGER_PACKAGE=\"$(KSU_MANAGER_PACKAGE)\"
 $(info -- KernelSU-Next Manager package name: $(KSU_MANAGER_PACKAGE))
 endif
 
-$(info -- KernelSU-Next Manager signature size: $(KSU_NEXT_EXPECTED_SIZE))
-$(info -- KernelSU-Next Manager signature hash: $(KSU_NEXT_EXPECTED_HASH))
+$(info -- KernelSU-Next Manager signature size: $(KSU_NEXT_MANAGER_SIZE))
+$(info -- KernelSU-Next Manager signature hash: $(KSU_NEXT_MANAGER_HASH))
 
-ccflags-y += -DEXPECTED_NEXT_SIZE=$(KSU_NEXT_EXPECTED_SIZE)
-ccflags-y += -DEXPECTED_NEXT_HASH=\"$(KSU_NEXT_EXPECTED_HASH)\"
+ccflags-y += -DEXPECTED_MANAGER_SIZE=$(KSU_NEXT_MANAGER_SIZE)
+ccflags-y += -DEXPECTED_MANAGER_HASH=\"$(KSU_NEXT_MANAGER_HASH)\"
 
 ccflags-y += -DKSU_UMOUNT
 
