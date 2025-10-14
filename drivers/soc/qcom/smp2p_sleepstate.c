@@ -10,6 +10,7 @@
 #include <linux/irqreturn.h>
 #include <linux/of_irq.h>
 #include <linux/of.h>
+#include <linux/delay.h>
 #include <linux/pm_wakeup.h>
 
 #define PROC_AWAKE_ID 12 /* 12th bit */
