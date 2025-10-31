@@ -53,14 +53,16 @@ $lx_task_by_pid(PID): Given PID, iterate over all tasks of the target and
 return that task_struct variable which PID matches."""
 
     def __init__(self):
-        super(LxTaskByPidFunc, self).__init__("lx_task_by_pid")
+        # Py3: Use modern, argument-less super().
+        super().__init__("lx_task_by_pid")
 
     def invoke(self, pid):
         task = get_task_by_pid(pid)
         if task:
             return task.dereference()
         else:
-            raise gdb.GdbError("No task of PID " + str(pid))
+            # Py3: Use f-string for error message.
+            raise gdb.GdbError(f"No task of PID {pid}")
 
 
 LxTaskByPidFunc()
@@ -70,14 +72,13 @@ class LxPs(gdb.Command):
     """Dump Linux tasks."""
 
     def __init__(self):
-        super(LxPs, self).__init__("lx-ps", gdb.COMMAND_DATA)
+        # Py3: Use modern, argument-less super().
+        super().__init__("lx-ps", gdb.COMMAND_DATA)
 
     def invoke(self, arg, from_tty):
         for task in task_lists():
-            gdb.write("{address} {pid} {comm}\n".format(
-                address=task,
-                pid=task["pid"],
-                comm=task["comm"].string()))
+            # Py3: Use f-string for formatting.
+            gdb.write(f"{task.address} {task['pid']} {task['comm'].string()}\n")
 
 
 LxPs()
@@ -110,7 +111,8 @@ $lx_thread_info(TASK): Given TASK, return the corresponding thread_info
 variable."""
 
     def __init__(self):
-        super(LxThreadInfoFunc, self).__init__("lx_thread_info")
+        # Py3: Use modern, argument-less super().
+        super().__init__("lx_thread_info")
 
     def invoke(self, task):
         return get_thread_info(task)
@@ -126,14 +128,16 @@ $lx_thread_info_by_pid(PID): Given PID, return the corresponding thread_info
 variable."""
 
     def __init__(self):
-        super(LxThreadInfoByPidFunc, self).__init__("lx_thread_info_by_pid")
+        # Py3: Use modern, argument-less super().
+        super().__init__("lx_thread_info_by_pid")
 
     def invoke(self, pid):
         task = get_task_by_pid(pid)
         if task:
             return get_thread_info(task.dereference())
         else:
-            raise gdb.GdbError("No task of PID " + str(pid))
+            # Py3: Use f-string for error message.
+            raise gdb.GdbError(f"No task of PID {pid}")
 
 
 LxThreadInfoByPidFunc()

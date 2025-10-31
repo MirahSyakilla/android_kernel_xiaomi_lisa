@@ -1,4 +1,4 @@
-#! /usr/bin/env python2
+#! /usr/bin/env python3
 # SPDX-License-Identifier: GPL-2.0-only
 # Copyright (c) 2009-2015, 2017-19, The Linux Foundation. All rights reserved.
 
@@ -6,25 +6,28 @@
 
 from collections import namedtuple
 import glob
-from optparse import OptionParser
+# Py3: argparse is the modern replacement for the deprecated optparse.
+from argparse import ArgumentParser
 import os
 import re
 import shutil
 import subprocess
 import sys
 import threading
-import Queue
+# Py3: The 'Queue' module was renamed to 'queue' in Python 3.
+from queue import Queue
 
-version = 'build-all.py, version 1.99'
+version = 'build-all.py, version 1.99 (Python 3 compatible)'
 
 build_dir = '../all-kernels'
 make_command = ["vmlinux", "modules", "dtbs"]
-all_options = {}
+# Py3: Removed 'all_options' global; options are now passed as arguments.
 compile64 = os.environ.get('CROSS_COMPILE64')
 clang_bin = os.environ.get('CLANG_BIN')
 
 def error(msg):
-    sys.stderr.write("error: %s\n" % msg)
+    # Py3: Use print() function with file=sys.stderr. f-string for formatting.
+    print(f"error: {msg}", file=sys.stderr)
 
 def fail(msg):
     """Fail with a user-printed message"""
@@ -43,12 +46,12 @@ def check_build():
     """Ensure that the build directory is present."""
     if not os.path.isdir(build_dir):
         try:
-            os.makedirs(build_dir)
+            # Py3: os.makedirs has an 'exist_ok' flag, which simplifies this.
+            os.makedirs(build_dir, exist_ok=True)
         except OSError as exc:
-            if exc.errno == errno.EEXIST:
-                pass
-            else:
-                raise
+            # This is a fallback in case of a race condition, but unlikely.
+            error(f"Failed to create build directory: {exc}")
+            raise
 
 failed_targets = []
 
@@ -60,7 +63,10 @@ class BuildSequence(namedtuple('BuildSequence', ['log_name', 'short_name', 'step
         self.width = width
 
     def __enter__(self):
+        # Py3: 'w' mode handles text encoding automatically.
         self.log = open(self.log_name, 'w')
+        return self
+
     def __exit__(self, type, value, traceback):
         self.log.close()
 
@@ -68,7 +74,8 @@ class BuildSequence(namedtuple('BuildSequence', ['log_name', 'short_name', 'step
         self.status = None
         messages = ["Building: " + self.short_name]
         def printer(line):
-            text = "[%-*s] %s" % (self.width, self.short_name, line)
+            # Py3: f-string for cleaner formatting.
+            text = f"[{self.short_name:<{self.width}}] {line}"
             messages.append(text)
             self.log.write(text)
             self.log.write('\n')
@@ -86,10 +93,11 @@ class BuildTracker:
     sequences can be processed independently, while the steps within a
     sequence must be done in order."""
 
-    def __init__(self, parallel_builds):
+    def __init__(self, parallel_builds, verbose=False):
         self.sequence = []
         self.lock = threading.Lock()
         self.parallel_builds = parallel_builds
+        self.verbose = verbose
 
     def add_sequence(self, log_name, short_name, steps):
         self.sequence.append(BuildSequence(log_name, short_name, steps))
@@ -101,13 +109,14 @@ class BuildTracker:
         return longest
 
     def __repr__(self):
-        return "BuildTracker(%s)" % self.sequence
+        return f"BuildTracker({self.sequence})"
 
     def run_child(self, seq):
         seq.set_width(self.longest)
         tok = self.build_tokens.get()
         with self.lock:
-            print "Building:", seq.short_name
+            # Py3: print is a function.
+            print("Building:", seq.short_name)
         with seq:
             seq.run()
             self.results.put(seq.status)
@@ -115,12 +124,13 @@ class BuildTracker:
 
     def run(self):
         self.longest = self.longest_name()
-        self.results = Queue.Queue()
+        self.results = Queue()
         children = []
         errors = []
-        self.build_tokens = Queue.Queue()
+        self.build_tokens = Queue()
         nthreads = self.parallel_builds
-        print "Building with", nthreads, "threads"
+        # Py3: print is a function.
+        print(f"Building with {nthreads} threads")
         for i in range(nthreads):
             self.build_tokens.put(True)
         for seq in self.sequence:
@@ -129,10 +139,10 @@ class BuildTracker:
             child.start()
         for child in children:
             stats = self.results.get()
-            if all_options.verbose:
+            if self.verbose:
                 with self.lock:
                     for line in stats.messages:
-                        print line
+                        print(line)
                     sys.stdout.flush()
             if stats.status:
                 errors.append(stats.status)
@@ -148,6 +158,7 @@ class PrintStep:
 
     def run(self, outp):
         outp(self.message)
+        return None # Py3: Explicitly return None for clarity
 
 class MkdirStep:
     """A step that makes a directory"""
@@ -155,16 +166,18 @@ class MkdirStep:
         self.direc = direc
 
     def run(self, outp):
-        outp("mkdir %s" % self.direc)
+        outp(f"mkdir {self.direc}")
         os.mkdir(self.direc)
+        return None
 
 class RmtreeStep:
     def __init__(self, direc):
         self.direc = direc
 
     def run(self, outp):
-        outp("rmtree %s" % self.direc)
+        outp(f"rmtree {self.direc}")
         shutil.rmtree(self.direc, ignore_errors=True)
+        return None
 
 class CopyfileStep:
     def __init__(self, src, dest):
@@ -172,8 +185,9 @@ class CopyfileStep:
         self.dest = dest
 
     def run(self, outp):
-        outp("cp %s %s" % (self.src, self.dest))
+        outp(f"cp {self.src} {self.dest}")
         shutil.copyfile(self.src, self.dest)
+        return None
 
 class ExecStep:
     def __init__(self, cmd, **kwargs):
@@ -181,18 +195,22 @@ class ExecStep:
         self.kwargs = kwargs
 
     def run(self, outp):
-        outp("exec: %s" % (" ".join(self.cmd),))
-        with open('/dev/null', 'r') as devnull:
+        outp(f"exec: {' '.join(self.cmd)}")
+        with open(os.devnull, 'r') as devnull:
             proc = subprocess.Popen(self.cmd, stdin=devnull,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT,
+                    # Py3: Popen expects text mode to be explicitly requested.
+                    # Here we want bytes, so we leave it as default.
                     **self.kwargs)
             stdout = proc.stdout
             while True:
-                line = stdout.readline()
-                if not line:
+                # Py3: Subprocess PIPE reads bytes, not strings.
+                line_bytes = stdout.readline()
+                if not line_bytes:
                     break
-                line = line.rstrip('\n')
+                # Py3: Decode bytes to string, ignoring errors, and strip newline.
+                line = line_bytes.decode('utf-8', errors='ignore').rstrip('\n')
                 outp(line)
             result = proc.wait()
             if result != 0:
@@ -220,35 +238,31 @@ class Builder():
         else:
             self.make_env['ARCH'] = 'arm'
         self.make_env['KCONFIG_NOTIMESTAMP'] = 'true'
-        self.log_name = "%s/log-%s.log" % (build_dir, self.name)
+        self.log_name = f"{build_dir}/log-{self.name}.log"
 
     def build(self):
         steps = []
         dest_dir = os.path.join(build_dir, self.name)
-        log_name = "%s/log-%s.log" % (build_dir, self.name)
-        steps.append(PrintStep('Building %s in %s log %s' %
-            (self.name, dest_dir, log_name)))
+        log_name = f"{build_dir}/log-{self.name}.log"
+        steps.append(PrintStep(f'Building {self.name} in {dest_dir} log {log_name}'))
         if not os.path.isdir(dest_dir):
             steps.append(MkdirStep(dest_dir))
-        defconfig = self.defconfig
-        dotconfig = '%s/.config' % dest_dir
-        savedefconfig = '%s/defconfig' % dest_dir
 
         staging_dir = 'install_staging'
-        modi_dir = '%s' % staging_dir
-        hdri_dir = '%s/usr' % staging_dir
+        modi_dir = f'{staging_dir}'
+        hdri_dir = f'{staging_dir}/usr'
         steps.append(RmtreeStep(os.path.join(dest_dir, staging_dir)))
 
-        steps.append(ExecStep(['make', 'O=%s' % dest_dir,
+        steps.append(ExecStep(['make', f'O={dest_dir}',
             self.confname], env=self.make_env))
 
         # Build targets can be dependent upon the completion of
         # previous build targets, so build them one at a time.
         cmd_line = ['make',
-            'INSTALL_HDR_PATH=%s' % hdri_dir,
-            'INSTALL_MOD_PATH=%s' % modi_dir,
-            'O=%s' % dest_dir,
-            'REAL_CC=%s' % clang_bin]
+            f'INSTALL_HDR_PATH={hdri_dir}',
+            f'INSTALL_MOD_PATH={modi_dir}',
+            f'O={dest_dir}',
+            f'REAL_CC={clang_bin}']
         build_targets = []
         for c in make_command:
             if re.match(r'^-{1,2}\w', c):
@@ -277,18 +291,18 @@ def scan_configs():
 
     return names
 
-def build_many(targets):
-    print "Building %d target(s)" % len(targets)
+def build_many(targets, options):
+    print(f"Building {len(targets)} target(s)")
 
     # To try and make up for the link phase being serial, try to do
     # two full builds in parallel.  Don't do too many because lots of
     # parallel builds tends to use up available memory rather quickly.
     parallel = 2
-    if all_options.jobs and all_options.jobs > 1:
-        j = max(all_options.jobs / parallel, 2)
-        make_command.append("-j" + str(j))
+    if options.jobs and options.jobs > 1:
+        j = max(options.jobs // parallel, 2)
+        make_command.append(f"-j{j}")
 
-    tracker = BuildTracker(parallel)
+    tracker = BuildTracker(parallel, verbose=options.verbose)
     for target in targets:
         steps = target.build()
         tracker.add_sequence(target.log_name, target.name, steps)
@@ -302,56 +316,56 @@ def main():
 
     configs = scan_configs()
 
-    usage = ("""
-           %prog [options] all                 -- Build all targets
-           %prog [options] target target ...   -- List specific targets
-           """)
-    parser = OptionParser(usage=usage, version=version)
-    parser.add_option('--list', action='store_true',
-            dest='list',
+    # Py3: Switched from optparse to argparse
+    description = """
+Build the kernel for all targets or a specified list of targets.
+Examples:
+  %prog all                 -- Build all targets
+  %prog target1 target2 ... -- Build specific targets
+"""
+    parser = ArgumentParser(description=description.replace('%prog', sys.argv[0]))
+    parser.add_argument('--version', action='version', version=version)
+    parser.add_argument('--list', action='store_true',
             help='List available targets')
-    parser.add_option('-v', '--verbose', action='store_true',
-            dest='verbose',
+    parser.add_argument('-v', '--verbose', action='store_true',
             help='Output to stdout in addition to log file')
-    parser.add_option('-j', '--jobs', type='int', dest="jobs",
+    parser.add_argument('-j', '--jobs', type=int,
             help="Number of simultaneous jobs")
-    parser.add_option('-l', '--load-average', type='int',
-            dest='load_average',
+    parser.add_argument('-l', '--load-average', type=int,
             help="Don't start multiple jobs unless load is below LOAD_AVERAGE")
-    parser.add_option('-k', '--keep-going', action='store_true',
-            dest='keep_going', default=False,
+    parser.add_argument('-k', '--keep-going', action='store_true',
+            default=False,
             help="Keep building other targets if a target fails")
-    parser.add_option('-m', '--make-target', action='append',
-            help='Build the indicated make target (default: %s)' %
-                 ' '.join(make_command))
+    parser.add_argument('-m', '--make-target', action='append',
+            help=f"Build the indicated make target (default: {' '.join(make_command)})")
+    parser.add_argument('targets', nargs='*',
+            help="A list of targets to build, or 'all'")
 
-    (options, args) = parser.parse_args()
-    global all_options
-    all_options = options
+    options = parser.parse_args()
 
     if options.list:
-        print "Available targets:"
+        print("Available targets:")
         for target in configs:
-            print "   %s" % target.name
+            print(f"   {target.name}")
         sys.exit(0)
 
     if options.make_target:
         make_command = options.make_target
 
-    if args == ['all']:
-        build_many(configs)
-    elif len(args) > 0:
-        all_configs = {}
-        for t in configs:
-            all_configs[t.name] = t
-        targets = []
-        for t in args:
-            if t not in all_configs:
-                parser.error("Target '%s' not one of %s" % (t, all_configs.keys()))
-            targets.append(all_configs[t])
-        build_many(targets)
+    if not options.targets:
+        parser.error("Must specify a target to build (e.g., 'all')")
+
+    if options.targets == ['all']:
+        build_many(configs, options)
     else:
-        parser.error("Must specify a target to build, or 'all'")
+        all_configs = {t.name: t for t in configs}
+        targets_to_build = []
+        for t in options.targets:
+            if t not in all_configs:
+                # Py3: In Python 3, .keys() returns a view, so we convert to a list for nice printing.
+                parser.error(f"Target '{t}' not one of {sorted(list(all_configs.keys()))}")
+            targets_to_build.append(all_configs[t])
+        build_many(targets_to_build, options)
 
 if __name__ == "__main__":
     main()

@@ -37,12 +37,10 @@ def per_cpu(var_ptr, cpu):
     if cpu == -1:
         cpu = get_current_cpu()
     if utils.is_target_arch("sparc:v9"):
-        offset = gdb.parse_and_eval(
-            "trap_block[{0}].__per_cpu_base".format(str(cpu)))
+        offset = gdb.parse_and_eval(f"trap_block[{cpu}].__per_cpu_base")
     else:
         try:
-            offset = gdb.parse_and_eval(
-                "__per_cpu_offset[{0}]".format(str(cpu)))
+            offset = gdb.parse_and_eval(f"__per_cpu_offset[{cpu}]")
         except gdb.error:
             # !CONFIG_SMP case
             offset = 0
@@ -74,7 +72,8 @@ def cpu_list(mask_name):
             if hasattr(gdb.events, 'new_objfile'):
                 gdb.events.new_objfile.connect(cpu_mask_invalidate)
     bits_per_entry = mask[0].type.sizeof * 8
-    num_entries = mask.type.sizeof * 8 / bits_per_entry
+    # Py3: Use integer division //.
+    num_entries = mask.type.sizeof * 8 // bits_per_entry
     entry = -1
     bits = 0
 
@@ -127,13 +126,15 @@ Displays the known state of each CPU based on the kernel masks
 and can help identify the state of hotplugged CPUs"""
 
     def __init__(self):
-        super(LxCpus, self).__init__("lx-cpus", gdb.COMMAND_DATA)
+        # Py3: Use modern, argument-less super().
+        super().__init__("lx-cpus", gdb.COMMAND_DATA)
 
     def invoke(self, arg, from_tty):
-        gdb.write("Possible CPUs : {}\n".format(list(each_possible_cpu())))
-        gdb.write("Present CPUs  : {}\n".format(list(each_present_cpu())))
-        gdb.write("Online CPUs   : {}\n".format(list(each_online_cpu())))
-        gdb.write("Active CPUs   : {}\n".format(list(each_active_cpu())))
+        # Py3: Use f-strings.
+        gdb.write(f"Possible CPUs : {list(each_possible_cpu())}\n")
+        gdb.write(f"Present CPUs  : {list(each_present_cpu())}\n")
+        gdb.write(f"Online CPUs   : {list(each_online_cpu())}\n")
+        gdb.write(f"Active CPUs   : {list(each_active_cpu())}\n")
 
 
 LxCpus()
@@ -147,7 +148,8 @@ given CPU number. If CPU is omitted, the CPU of the current context is used.
 Note that VAR has to be quoted as string."""
 
     def __init__(self):
-        super(PerCpu, self).__init__("lx_per_cpu")
+        # Py3: Use modern, argument-less super().
+        super().__init__("lx_per_cpu")
 
     def invoke(self, var_name, cpu=-1):
         var_ptr = gdb.parse_and_eval("&" + var_name.string())
@@ -164,7 +166,8 @@ $lx_current([CPU]): Return the per-cpu task variable for the given CPU
 number. If CPU is omitted, the CPU of the current context is used."""
 
     def __init__(self):
-        super(LxCurrentFunc, self).__init__("lx_current")
+        # Py3: Use modern, argument-less super().
+        super().__init__("lx_current")
 
     def invoke(self, cpu=-1):
         var_ptr = gdb.parse_and_eval("&current_task")

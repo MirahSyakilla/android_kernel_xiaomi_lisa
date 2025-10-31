@@ -3,7 +3,8 @@
 # Copyright (c) NXP 2019
 
 import gdb
-import sys
+# Py3: sys module is not used, can be removed.
+# import sys
 
 from linux import utils, lists, constants
 
@@ -24,18 +25,22 @@ No calls are made during printing, instead a (c) if printed after values which
 are cached and potentially out of date"""
 
     def __init__(self):
-        super(LxClkSummary, self).__init__("lx-clk-summary", gdb.COMMAND_DATA)
+        # Py3: Use modern, argument-less super().
+        super().__init__("lx-clk-summary", gdb.COMMAND_DATA)
 
     def show_subtree(self, clk, level):
-        gdb.write("%*s%-*s %7d %8d %8d %11lu%s\n" % (
-                level * 3 + 1, "",
-                30 - level * 3,
-                clk['name'].string(),
-                clk['enable_count'],
-                clk['prepare_count'],
-                clk['protect_count'],
-                clk['rate'],
-                '(c)' if clk['flags'] & constants.LX_CLK_GET_RATE_NOCACHE else '   '))
+        # Py3: Use f-string for complex formatting.
+        padding = " " * (level * 3 + 1)
+        name = clk['name'].string()
+        cached_flag = '(c)' if clk['flags'] & constants.LX_CLK_GET_RATE_NOCACHE else '   '
+        gdb.write(
+            f"{padding}{name:<{30 - level * 3}} "
+            f"{int(clk['enable_count']):7d} "
+            f"{int(clk['prepare_count']):8d} "
+            f"{int(clk['protect_count']):8d} "
+            f"{int(clk['rate']):11d}"
+            f"{cached_flag}\n"
+        )
 
         for child in clk_core_for_each_child(clk['children']):
             self.show_subtree(child, level + 1)
@@ -59,7 +64,8 @@ class LxClkCoreLookup(gdb.Function):
     """Find struct clk_core by name"""
 
     def __init__(self):
-        super(LxClkCoreLookup, self).__init__("lx_clk_core_lookup")
+        # Py3: Use modern, argument-less super().
+        super().__init__("lx_clk_core_lookup")
 
     def lookup_hlist(self, hlist_head, name):
         for child in clk_core_for_each_child(hlist_head):
@@ -70,9 +76,9 @@ class LxClkCoreLookup(gdb.Function):
                 return result
 
     def invoke(self, name):
-        name = name.string()
-        return (self.lookup_hlist(gdb.parse_and_eval("clk_root_list"), name) or
-                self.lookup_hlist(gdb.parse_and_eval("clk_orphan_list"), name))
+        name_str = name.string()
+        return (self.lookup_hlist(gdb.parse_and_eval("clk_root_list"), name_str) or
+                self.lookup_hlist(gdb.parse_and_eval("clk_orphan_list"), name_str))
 
 
 LxClkCoreLookup()

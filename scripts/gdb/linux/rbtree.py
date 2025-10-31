@@ -14,10 +14,13 @@ def rb_first(root):
     if root.type == rb_root_type.get_type():
         node = root.address.cast(rb_root_type.get_type().pointer())
     elif root.type != rb_root_type.get_type().pointer():
-        raise gdb.GdbError("Must be struct rb_root not {}".format(root.type))
+        # Py3: Use f-string.
+        raise gdb.GdbError(f"Must be struct rb_root not {root.type}")
+    else:
+        node = root
 
-    node = root['rb_node']
-    if node is 0:
+    node = node['rb_node']
+    if not node:
         return None
 
     while node['rb_left']:
@@ -30,10 +33,12 @@ def rb_last(root):
     if root.type == rb_root_type.get_type():
         node = root.address.cast(rb_root_type.get_type().pointer())
     elif root.type != rb_root_type.get_type().pointer():
-        raise gdb.GdbError("Must be struct rb_root not {}".format(root.type))
+        raise gdb.GdbError(f"Must be struct rb_root not {root.type}")
+    else:
+        node = root
 
-    node = root['rb_node']
-    if node is 0:
+    node = node['rb_node']
+    if not node:
         return None
 
     while node['rb_right']:
@@ -55,7 +60,7 @@ def rb_next(node):
     if node.type == rb_node_type.get_type():
         node = node.address.cast(rb_node_type.get_type().pointer())
     elif node.type != rb_node_type.get_type().pointer():
-        raise gdb.GdbError("Must be struct rb_node not {}".format(node.type))
+        raise gdb.GdbError(f"Must be struct rb_node not {node.type}")
 
     if rb_empty_node(node):
         return None
@@ -67,7 +72,7 @@ def rb_next(node):
         return node
 
     parent = rb_parent(node)
-    while parent and node == parent['rb_right']:
+    while parent and node.address == parent['rb_right'].address:
             node = parent
             parent = rb_parent(node)
 
@@ -78,7 +83,7 @@ def rb_prev(node):
     if node.type == rb_node_type.get_type():
         node = node.address.cast(rb_node_type.get_type().pointer())
     elif node.type != rb_node_type.get_type().pointer():
-        raise gdb.GdbError("Must be struct rb_node not {}".format(node.type))
+        raise gdb.GdbError(f"Must be struct rb_node not {node.type}")
 
     if rb_empty_node(node):
         return None
@@ -87,10 +92,10 @@ def rb_prev(node):
         node = node['rb_left']
         while node['rb_right']:
             node = node['rb_right']
-        return node.dereference()
+        return node
 
     parent = rb_parent(node)
-    while parent and node == parent['rb_left'].dereference():
+    while parent and node.address == parent['rb_left'].address:
             node = parent
             parent = rb_parent(node)
 
@@ -104,7 +109,8 @@ $lx_rb_first(root): Return the node at the given index.
 If index is omitted, the root node is dereferenced and returned."""
 
     def __init__(self):
-        super(LxRbFirst, self).__init__("lx_rb_first")
+        # Py3: Use modern, argument-less super().
+        super().__init__("lx_rb_first")
 
     def invoke(self, root):
         result = rb_first(root)
@@ -124,7 +130,8 @@ $lx_rb_last(root): Return the node at the given index.
 If index is omitted, the root node is dereferenced and returned."""
 
     def __init__(self):
-        super(LxRbLast, self).__init__("lx_rb_last")
+        # Py3: Use modern, argument-less super().
+        super().__init__("lx_rb_last")
 
     def invoke(self, root):
         result = rb_last(root)
@@ -144,12 +151,13 @@ $lx_rb_next(node): Return the node at the given index.
 If index is omitted, the root node is dereferenced and returned."""
 
     def __init__(self):
-        super(LxRbNext, self).__init__("lx_rb_next")
+        # Py3: Use modern, argument-less super().
+        super().__init__("lx_rb_next")
 
     def invoke(self, node):
         result = rb_next(node)
         if result is None:
-            raise gdb.GdbError("No entry in tree")
+            raise gdb.GdbError("No next entry in tree")
 
         return result
 
@@ -164,12 +172,13 @@ $lx_rb_prev(node): Return the node at the given index.
 If index is omitted, the root node is dereferenced and returned."""
 
     def __init__(self):
-        super(LxRbPrev, self).__init__("lx_rb_prev")
+        # Py3: Use modern, argument-less super().
+        super().__init__("lx_rb_prev")
 
     def invoke(self, node):
         result = rb_prev(node)
         if result is None:
-            raise gdb.GdbError("No entry in tree")
+            raise gdb.GdbError("No previous entry in tree")
 
         return result
 

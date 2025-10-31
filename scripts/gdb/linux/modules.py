@@ -20,14 +20,13 @@ module_type = utils.CachedType("struct module")
 
 
 def module_list():
-    global module_type
-    modules = utils.gdb_eval_or_none("modules")
-    if modules is None:
+    modules_head = utils.gdb_eval_or_none("modules")
+    if modules_head is None:
         return
 
     module_ptr_type = module_type.get_type().pointer()
 
-    for module in lists.list_for_each_entry(modules, module_ptr_type, "list"):
+    for module in lists.list_for_each_entry(modules_head, module_ptr_type, "list"):
         yield module
 
 
@@ -45,15 +44,17 @@ $lx_module("MODULE"): Given the name MODULE, iterate over all loaded modules
 of the target and return that module variable which MODULE matches."""
 
     def __init__(self):
-        super(LxModule, self).__init__("lx_module")
+        # Py3: Use modern, argument-less super().
+        super().__init__("lx_module")
 
     def invoke(self, mod_name):
-        mod_name = mod_name.string()
-        module = find_module_by_name(mod_name)
+        mod_name_str = mod_name.string()
+        module = find_module_by_name(mod_name_str)
         if module:
             return module.dereference()
         else:
-            raise gdb.GdbError("Unable to find MODULE " + mod_name)
+            # Py3: Use f-string.
+            raise gdb.GdbError(f"Unable to find MODULE {mod_name_str}")
 
 
 LxModule()
@@ -65,28 +66,26 @@ class LxLsmod(gdb.Command):
     _module_use_type = utils.CachedType("struct module_use")
 
     def __init__(self):
-        super(LxLsmod, self).__init__("lx-lsmod", gdb.COMMAND_DATA)
+        # Py3: Use modern, argument-less super().
+        super().__init__("lx-lsmod", gdb.COMMAND_DATA)
 
     def invoke(self, arg, from_tty):
-        gdb.write(
-            "Address{0}    Module                  Size  Used by\n".format(
-                "        " if utils.get_long_type().sizeof == 8 else ""))
+        padding = "        " if utils.get_long_type().sizeof == 8 else ""
+        gdb.write(f"Address{padding}    Module                  Size  Used by\n")
 
         for module in module_list():
             layout = module['core_layout']
-            gdb.write("{address} {name:<19} {size:>8}  {ref}".format(
-                address=str(layout['base']).split()[0],
-                name=module['name'].string(),
-                size=str(layout['size']),
-                ref=str(module['refcnt']['counter'] - 1)))
+            ref_count = int(module['refcnt']['counter']) - 1
+            # Py3: Use f-string.
+            gdb.write(f"{str(layout['base']).split()[0]} {module['name'].string():<19} "
+                      f"{int(layout['size']):>8}  {ref_count}")
 
             t = self._module_use_type.get_type().pointer()
             first = True
             sources = module['source_list']
             for use in lists.list_for_each_entry(sources, t, "source_list"):
-                gdb.write("{separator}{name}".format(
-                    separator=" " if first else ",",
-                    name=use['source']['name'].string()))
+                separator = " " if first else ","
+                gdb.write(f"{separator}{use['source']['name'].string()}")
                 first = False
 
             gdb.write("\n")

@@ -21,7 +21,8 @@ from linux import modules, utils
 if hasattr(gdb, 'Breakpoint'):
     class LoadModuleBreakpoint(gdb.Breakpoint):
         def __init__(self, spec, gdb_command):
-            super(LoadModuleBreakpoint, self).__init__(spec, internal=True)
+            # Py3: Use modern, argument-less super().
+            super().__init__(spec, internal=True)
             self.silent = True
             self.gdb_command = gdb_command
 
@@ -41,14 +42,14 @@ if hasattr(gdb, 'Breakpoint'):
             gdb.execute("set pagination off")
 
             if module_name in cmd.loaded_modules:
-                gdb.write("refreshing all symbols to reload module "
-                          "'{0}'\n".format(module_name))
+                # Py3: Use f-string for formatting.
+                gdb.write(f"refreshing all symbols to reload module '{module_name}'\n")
                 cmd.load_all_symbols()
             else:
                 cmd.load_module_symbols(module)
 
             # restore pagination state
-            gdb.execute("set pagination %s" % ("on" if pagination else "off"))
+            gdb.execute(f"set pagination {'on' if pagination else 'off'}")
 
             return False
 
@@ -68,22 +69,23 @@ lx-symbols command."""
     breakpoint = None
 
     def __init__(self):
-        super(LxSymbols, self).__init__("lx-symbols", gdb.COMMAND_FILES,
-                                        gdb.COMPLETE_FILENAME)
+        # Py3: Use modern, argument-less super().
+        super().__init__("lx-symbols", gdb.COMMAND_FILES,
+                         gdb.COMPLETE_FILENAME)
 
     def _update_module_files(self):
         self.module_files = []
         for path in self.module_paths:
-            gdb.write("scanning for modules in {0}\n".format(path))
+            gdb.write(f"scanning for modules in {path}\n")
             for root, dirs, files in os.walk(path):
                 for name in files:
                     if name.endswith(".ko") or name.endswith(".ko.debug"):
-                        self.module_files.append(root + "/" + name)
+                        self.module_files.append(os.path.join(root, name))
         self.module_files_updated = True
 
     def _get_module_file(self, module_name):
-        module_pattern = ".*/{0}\.ko(?:.debug)?$".format(
-            module_name.replace("_", r"[_\-]"))
+        # Py3: Use f-string.
+        module_pattern = f".*/{module_name.replace('_', r'[_-]')}\\.ko(?:\\.debug)?$"
         for name in self.module_files:
             if re.match(module_pattern, name) and os.path.exists(name):
                 return name
@@ -103,8 +105,8 @@ lx-symbols command."""
                              ".text", ".text.hot", ".text.unlikely"]:
             address = section_name_to_address.get(section_name)
             if address:
-                args.append(" -s {name} {addr}".format(
-                    name=section_name, addr=str(address)))
+                # Py3: Use f-string.
+                args.append(f" -s {section_name} {str(address)}")
         return "".join(args)
 
     def load_module_symbols(self, module):
@@ -123,17 +125,15 @@ lx-symbols command."""
                 plt_offset = int(module_arch['plt_offset'])
                 plt_size = int(module_arch['plt_size'])
                 module_addr = hex(int(module_addr, 0) + plt_offset + plt_size)
-            gdb.write("loading @{addr}: {filename}\n".format(
-                addr=module_addr, filename=module_file))
-            cmdline = "add-symbol-file {filename} {addr}{sections}".format(
-                filename=module_file,
-                addr=module_addr,
-                sections=self._section_arguments(module))
+            # Py3: Use f-string.
+            gdb.write(f"loading @{module_addr}: {module_file}\n")
+            cmdline = (f"add-symbol-file {module_file} {module_addr}"
+                       f"{self._section_arguments(module)}")
             gdb.execute(cmdline, to_string=True)
             if module_name not in self.loaded_modules:
                 self.loaded_modules.append(module_name)
         else:
-            gdb.write("no module object found for '{0}'\n".format(module_name))
+            gdb.write(f"no module object found for '{module_name}'\n")
 
     def load_all_symbols(self):
         gdb.write("loading vmlinux\n")
@@ -141,7 +141,7 @@ lx-symbols command."""
         # Dropping symbols will disable all breakpoints. So save their states
         # and restore them afterward.
         saved_states = []
-        if hasattr(gdb, 'breakpoints') and not gdb.breakpoints() is None:
+        if hasattr(gdb, 'breakpoints') and gdb.breakpoints() is not None:
             for bp in gdb.breakpoints():
                 saved_states.append({'breakpoint': bp, 'enabled': bp.enabled})
 
@@ -151,14 +151,15 @@ lx-symbols command."""
             if obj.filename.endswith('vmlinux'):
                 orig_vmlinux = obj.filename
         gdb.execute("symbol-file", to_string=True)
-        gdb.execute("symbol-file {0}".format(orig_vmlinux))
+        gdb.execute(f"symbol-file {orig_vmlinux}")
 
         self.loaded_modules = []
         module_list = modules.module_list()
         if not module_list:
             gdb.write("no modules found\n")
         else:
-            [self.load_module_symbols(module) for module in module_list]
+            for module in module_list:
+                self.load_module_symbols(module)
 
         for saved_state in saved_states:
             saved_state['breakpoint'].enabled = saved_state['enabled']

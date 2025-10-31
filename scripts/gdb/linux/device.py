@@ -50,14 +50,15 @@ def get_bus_by_name(name):
     for item in for_each_bus():
         if item['name'].string() == name:
             return item
-    raise gdb.GdbError("Can't find bus type {!r}".format(name))
+    # Py3: Use f-string with !r for repr().
+    raise gdb.GdbError(f"Can't find bus type {name!r}")
 
 
 def get_class_by_name(name):
     for item in for_each_class():
         if item['name'].string() == name:
             return item
-    raise gdb.GdbError("Can't find device class {!r}".format(name))
+    raise gdb.GdbError(f"Can't find device class {name!r}")
 
 
 klist_type = CachedType('struct klist')
@@ -88,7 +89,8 @@ def device_for_each_child(dev):
 
 
 def _show_device(dev, level=0, recursive=False):
-    gdb.write('{}dev {}:\t{}\n'.format('\t' * level, dev_name(dev), dev))
+    # Py3: Use f-string.
+    gdb.write(f"{'\\t' * level}dev {dev_name(dev)}:\\t{dev}\\n")
     if recursive:
         for child in device_for_each_child(dev):
             _show_device(child, level + 1, recursive)
@@ -98,18 +100,19 @@ class LxDeviceListBus(gdb.Command):
     '''Print devices on a bus (or all buses if not specified)'''
 
     def __init__(self):
-        super(LxDeviceListBus, self).__init__('lx-device-list-bus', gdb.COMMAND_DATA)
+        # Py3: Use modern, argument-less super().
+        super().__init__('lx-device-list-bus', gdb.COMMAND_DATA)
 
     def invoke(self, arg, from_tty):
         if not arg:
             for bus in for_each_bus():
-                gdb.write('bus {}:\t{}\n'.format(bus['name'].string(), bus))
+                gdb.write(f"bus {bus['name'].string()}:\\t{bus}\\n")
                 for dev in bus_for_each_device(bus):
                     _show_device(dev, level=1)
         else:
             bus = get_bus_by_name(arg)
             if not bus:
-                raise gdb.GdbError("Can't find bus {!r}".format(arg))
+                raise gdb.GdbError(f"Can't find bus {arg!r}")
             for dev in bus_for_each_device(bus):
                 _show_device(dev)
 
@@ -118,12 +121,13 @@ class LxDeviceListClass(gdb.Command):
     '''Print devices in a class (or all classes if not specified)'''
 
     def __init__(self):
-        super(LxDeviceListClass, self).__init__('lx-device-list-class', gdb.COMMAND_DATA)
+        # Py3: Use modern, argument-less super().
+        super().__init__('lx-device-list-class', gdb.COMMAND_DATA)
 
     def invoke(self, arg, from_tty):
         if not arg:
             for cls in for_each_class():
-                gdb.write("class {}:\t{}\n".format(cls['name'].string(), cls))
+                gdb.write(f"class {cls['name'].string()}:\\t{cls}\\n")
                 for dev in class_for_each_device(cls):
                     _show_device(dev, level=1)
         else:
@@ -136,7 +140,8 @@ class LxDeviceListTree(gdb.Command):
     '''Print a device and its children recursively'''
 
     def __init__(self):
-        super(LxDeviceListTree, self).__init__('lx-device-list-tree', gdb.COMMAND_DATA)
+        # Py3: Use modern, argument-less super().
+        super().__init__('lx-device-list-tree', gdb.COMMAND_DATA)
 
     def invoke(self, arg, from_tty):
         if not arg:
@@ -151,13 +156,14 @@ class LxDeviceFindByBusName(gdb.Function):
     '''Find struct device by bus and name (both strings)'''
 
     def __init__(self):
-        super(LxDeviceFindByBusName, self).__init__('lx_device_find_by_bus_name')
+        # Py3: Use modern, argument-less super().
+        super().__init__('lx_device_find_by_bus_name')
 
     def invoke(self, bus, name):
-        name = name.string()
-        bus = get_bus_by_name(bus.string())
-        for dev in bus_for_each_device(bus):
-            if dev_name(dev) == name:
+        name_str = name.string()
+        bus_obj = get_bus_by_name(bus.string())
+        for dev in bus_for_each_device(bus_obj):
+            if dev_name(dev) == name_str:
                 return dev
 
 
@@ -165,13 +171,14 @@ class LxDeviceFindByClassName(gdb.Function):
     '''Find struct device by class and name (both strings)'''
 
     def __init__(self):
-        super(LxDeviceFindByClassName, self).__init__('lx_device_find_by_class_name')
+        # Py3: Use modern, argument-less super().
+        super().__init__('lx_device_find_by_class_name')
 
     def invoke(self, cls, name):
-        name = name.string()
-        cls = get_class_by_name(cls.string())
-        for dev in class_for_each_device(cls):
-            if dev_name(dev) == name:
+        name_str = name.string()
+        cls_obj = get_class_by_name(cls.string())
+        for dev in class_for_each_device(cls_obj):
+            if dev_name(dev) == name_str:
                 return dev
 
 

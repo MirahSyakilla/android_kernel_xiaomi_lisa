@@ -35,10 +35,11 @@ def print_timer(rb_node, idx):
     expires = timer['node']['expires']
     now = ktime_get()
 
-    text = " #{}: <{}>, {}, ".format(idx, timer, function)
-    text += "S:{:02x}\n".format(int(timer['state']))
-    text += " # expires at {}-{} nsecs [in {} to {} nsecs]\n".format(
-            softexpires, expires, softexpires - now, expires - now)
+    # Py3: Use f-strings for formatting.
+    text = f" #{idx}: <{timer}>, {function}, "
+    text += f"S:{int(timer['state']):02x}\n"
+    text += (f" # expires at {softexpires}-{expires} nsecs [in {softexpires - now} "
+             f"to {expires - now} nsecs]\n")
     return text
 
 
@@ -53,14 +54,13 @@ def print_active_timers(base):
 
 
 def print_base(base):
-    text = " .base:       {}\n".format(base.address)
-    text += " .index:      {}\n".format(base['index'])
-
-    text += " .resolution: {} nsecs\n".format(constants.LX_hrtimer_resolution)
-
-    text += " .get_time:   {}\n".format(base['get_time'])
+    # Py3: Use f-strings for formatting.
+    text = f" .base:       {base.address}\n"
+    text += f" .index:      {base['index']}\n"
+    text += f" .resolution: {constants.LX_hrtimer_resolution} nsecs\n"
+    text += f" .get_time:   {base['get_time']}\n"
     if constants.LX_CONFIG_HIGH_RES_TIMERS:
-        text += "  .offset:     {} nsecs\n".format(base['offset'])
+        text += f"  .offset:     {base['offset']} nsecs\n"
     text += "active timers:\n"
     text += "".join([x for x in print_active_timers(base)])
     return text
@@ -72,9 +72,9 @@ def print_cpu(hrtimer_bases, cpu, max_clock_bases):
     tick_sched_ptr = gdb.parse_and_eval("&tick_cpu_sched")
     ts = cpus.per_cpu(tick_sched_ptr, cpu)
 
-    text = "cpu: {}\n".format(cpu)
+    text = f"cpu: {cpu}\n"
     for i in range(max_clock_bases):
-        text += " clock {}:\n".format(i)
+        text += f" clock {i}:\n"
         text += print_base(cpu_base['clock_base'][i])
 
         if constants.LX_CONFIG_HIGH_RES_TIMERS:
@@ -84,6 +84,7 @@ def print_cpu(hrtimer_bases, cpu, max_clock_bases):
                     ("  .{}     : {}", 'nr_retries'),
                     ("  .{}       : {}", 'nr_hangs'),
                     ("  .{}  : {}", 'max_hang_time')]
+            # Py3: Use f-strings for complex formatting.
             text += "\n".join([s.format(f, cpu_base[f]) for s, f in fmts])
             text += "\n"
 
@@ -103,35 +104,32 @@ def print_cpu(hrtimer_bases, cpu, max_clock_bases):
                     ("  .{}     : {}", 'next_timer'),
                     ("  .{}   : {} nsecs", 'idle_expires')]
             text += "\n".join([s.format(f, ts[f]) for s, f in fmts])
-            text += "\njiffies: {}\n".format(jiffies)
-
+            text += f"\njiffies: {jiffies}\n"
         text += "\n"
-
     return text
 
 
 def print_tickdevice(td, cpu):
     dev = td['evtdev']
-    text = "Tick Device: mode:     {}\n".format(td['mode'])
+    text = f"Tick Device: mode:     {td['mode']}\n"
     if cpu < 0:
-            text += "Broadcast device\n"
+        text += "Broadcast device\n"
     else:
-            text += "Per CPU device: {}\n".format(cpu)
+        text += f"Per CPU device: {cpu}\n"
 
     text += "Clock Event Device: "
     if dev == 0:
-            text += "<NULL>\n"
-            return text
+        text += "<NULL>\n"
+        return text
 
-    text += "{}\n".format(dev['name'])
-    text += " max_delta_ns:   {}\n".format(dev['max_delta_ns'])
-    text += " min_delta_ns:   {}\n".format(dev['min_delta_ns'])
-    text += " mult:           {}\n".format(dev['mult'])
-    text += " shift:          {}\n".format(dev['shift'])
-    text += " mode:           {}\n".format(dev['state_use_accessors'])
-    text += " next_event:     {} nsecs\n".format(dev['next_event'])
-
-    text += " set_next_event: {}\n".format(dev['set_next_event'])
+    text += f"{dev['name'].string()}\n"
+    text += f" max_delta_ns:   {dev['max_delta_ns']}\n"
+    text += f" min_delta_ns:   {dev['min_delta_ns']}\n"
+    text += f" mult:           {dev['mult']}\n"
+    text += f" shift:          {dev['shift']}\n"
+    text += f" mode:           {dev['state_use_accessors']}\n"
+    text += f" next_event:     {dev['next_event']} nsecs\n"
+    text += f" set_next_event: {dev['set_next_event']}\n"
 
     members = [('set_state_shutdown', " shutdown: {}\n"),
                ('set_state_periodic', " periodic: {}\n"),
@@ -142,9 +140,8 @@ def print_tickdevice(td, cpu):
         if dev[member]:
             text += fmt.format(dev[member])
 
-    text += " event_handler:  {}\n".format(dev['event_handler'])
-    text += " retries:        {}\n".format(dev['retries'])
-
+    text += f" event_handler:  {dev['event_handler']}\n"
+    text += f" retries:        {dev['retries']}\n"
     return text
 
 
@@ -155,11 +152,11 @@ def pr_cpumask(mask):
 
     inf = gdb.inferiors()[0]
     bits = mask['bits']
-    num_bytes = (nr_cpu_ids + 7) / 8
-    buf = utils.read_memoryview(inf, bits, num_bytes).tobytes()
-    buf = binascii.b2a_hex(buf)
-    if type(buf) is not str:
-        buf=buf.decode()
+    # Py3: Use integer division //
+    num_bytes = (nr_cpu_ids + 7) // 8
+    buf_bytes = utils.read_memoryview(inf, bits, num_bytes).tobytes()
+    # Py3: b2a_hex returns bytes, so decode it to a string.
+    buf = binascii.b2a_hex(buf_bytes).decode('ascii')
 
     chunks = []
     i = num_bytes
@@ -182,15 +179,16 @@ class LxTimerList(gdb.Command):
     """Print /proc/timer_list"""
 
     def __init__(self):
-        super(LxTimerList, self).__init__("lx-timerlist", gdb.COMMAND_DATA)
+        # Py3: Use modern, argument-less super().
+        super().__init__("lx-timerlist", gdb.COMMAND_DATA)
 
     def invoke(self, arg, from_tty):
         hrtimer_bases = gdb.parse_and_eval("&hrtimer_bases")
         max_clock_bases = gdb.parse_and_eval("HRTIMER_MAX_CLOCK_BASES")
 
         text = "Timer List Version: gdb scripts\n"
-        text += "HRTIMER_MAX_CLOCK_BASES: {}\n".format(max_clock_bases)
-        text += "now at {} nsecs\n".format(ktime_get())
+        text += f"HRTIMER_MAX_CLOCK_BASES: {max_clock_bases}\n"
+        text += f"now at {ktime_get()} nsecs\n"
 
         for cpu in cpus.each_online_cpu():
             text += print_cpu(hrtimer_bases, cpu, max_clock_bases)
@@ -201,12 +199,12 @@ class LxTimerList(gdb.Command):
                 text += print_tickdevice(bc_dev, -1)
                 text += "\n"
                 mask = gdb.parse_and_eval("tick_broadcast_mask")
-                mask = pr_cpumask(mask)
-                text += "tick_broadcast_mask: {}\n".format(mask)
+                mask_str = pr_cpumask(mask)
+                text += f"tick_broadcast_mask: {mask_str}\n"
                 if constants.LX_CONFIG_TICK_ONESHOT:
                     mask = gdb.parse_and_eval("tick_broadcast_oneshot_mask")
-                    mask = pr_cpumask(mask)
-                    text += "tick_broadcast_oneshot_mask: {}\n".format(mask)
+                    mask_str = pr_cpumask(mask)
+                    text += f"tick_broadcast_oneshot_mask: {mask_str}\n"
                 text += "\n"
 
             tick_cpu_devices = gdb.parse_and_eval("&tick_cpu_device")

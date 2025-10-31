@@ -24,8 +24,8 @@ def list_for_each(head):
     if head.type == list_head.get_type().pointer():
         head = head.dereference()
     elif head.type != list_head.get_type():
-        raise TypeError("Must be struct list_head not {}"
-                           .format(head.type))
+        # Py3: Use f-string.
+        raise TypeError(f"Must be struct list_head not {head.type}")
 
     node = head['next'].dereference()
     while node.address != head.address:
@@ -42,13 +42,13 @@ def hlist_for_each(head):
     if head.type == hlist_head.get_type().pointer():
         head = head.dereference()
     elif head.type != hlist_head.get_type():
-        raise TypeError("Must be struct hlist_head not {}"
-                           .format(head.type))
+        raise TypeError(f"Must be struct hlist_head not {head.type}")
 
-    node = head['first'].dereference()
-    while node.address:
+    node = head['first']
+    # Py3: Check if pointer is not null.
+    while node:
         yield node.address
-        node = node['next'].dereference()
+        node = node['next']
 
 
 def hlist_for_each_entry(head, gdbtype, member):
@@ -64,7 +64,7 @@ def list_check(head):
         raise gdb.GdbError('argument must be of type (struct list_head [*])')
     c = head
     try:
-        gdb.write("Starting with: {}\n".format(c))
+        gdb.write(f"Starting with: {c}\n")
     except gdb.MemoryError:
         gdb.write('head is not accessible\n')
         return
@@ -73,44 +73,26 @@ def list_check(head):
         n = c['next'].dereference()
         try:
             if p['next'] != c.address:
-                gdb.write('prev.next != current: '
-                          'current@{current_addr}={current} '
-                          'prev@{p_addr}={p}\n'.format(
-                              current_addr=c.address,
-                              current=c,
-                              p_addr=p.address,
-                              p=p,
-                          ))
+                gdb.write(f"prev.next != current: "
+                          f"current@{c.address}={c} "
+                          f"prev@{p.address}={p}\n")
                 return
         except gdb.MemoryError:
-            gdb.write('prev is not accessible: '
-                      'current@{current_addr}={current}\n'.format(
-                          current_addr=c.address,
-                          current=c
-                      ))
+            gdb.write(f"prev is not accessible: current@{c.address}={c}\n")
             return
         try:
             if n['prev'] != c.address:
-                gdb.write('next.prev != current: '
-                          'current@{current_addr}={current} '
-                          'next@{n_addr}={n}\n'.format(
-                              current_addr=c.address,
-                              current=c,
-                              n_addr=n.address,
-                              n=n,
-                          ))
+                gdb.write(f"next.prev != current: "
+                          f"current@{c.address}={c} "
+                          f"next@{n.address}={n}\n")
                 return
         except gdb.MemoryError:
-            gdb.write('next is not accessible: '
-                      'current@{current_addr}={current}\n'.format(
-                          current_addr=c.address,
-                          current=c
-                      ))
+            gdb.write(f"next is not accessible: current@{c.address}={c}\n")
             return
         c = n
         nb += 1
-        if c == head:
-            gdb.write("list is consistent: {} node(s)\n".format(nb))
+        if c.address == head.address:
+            gdb.write(f"list is consistent: {nb} node(s)\n")
             return
 
 
@@ -118,8 +100,9 @@ class LxListChk(gdb.Command):
     """Verify a list consistency"""
 
     def __init__(self):
-        super(LxListChk, self).__init__("lx-list-check", gdb.COMMAND_DATA,
-                                        gdb.COMPLETE_EXPRESSION)
+        # Py3: Use modern, argument-less super().
+        super().__init__("lx-list-check", gdb.COMMAND_DATA,
+                         gdb.COMPLETE_EXPRESSION)
 
     def invoke(self, arg, from_tty):
         argv = gdb.string_to_argv(arg)

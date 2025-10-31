@@ -14,8 +14,9 @@ class LxConfigDump(gdb.Command):
        a running target"""
 
     def __init__(self):
-        super(LxConfigDump, self).__init__("lx-configdump", gdb.COMMAND_DATA,
-                                           gdb.COMPLETE_FILENAME)
+        # Py3: Use modern, argument-less super().
+        super().__init__("lx-configdump", gdb.COMMAND_DATA,
+                         gdb.COMPLETE_FILENAME)
 
     def invoke(self, arg, from_tty):
         if len(arg) == 0:
@@ -27,7 +28,7 @@ class LxConfigDump(gdb.Command):
             py_config_ptr = gdb.parse_and_eval("&kernel_config_data")
             py_config_ptr_end = gdb.parse_and_eval("&kernel_config_data_end")
             py_config_size = py_config_ptr_end - py_config_ptr
-        except gdb.error as e:
+        except gdb.error:
             raise gdb.GdbError("Can't find config, enable CONFIG_IKCONFIG?")
 
         inf = gdb.inferiors()[0]
@@ -35,10 +36,12 @@ class LxConfigDump(gdb.Command):
                                             py_config_size).tobytes()
 
         config_buf = zlib.decompress(zconfig_buf, 16)
+        # Py3: 'wb' is correct for writing bytes.
         with open(filename, 'wb') as f:
             f.write(config_buf)
 
-        gdb.write("Dumped config to " + filename + "\n")
+        # Py3: Use f-string.
+        gdb.write(f"Dumped config to {filename}\n")
 
 
 LxConfigDump()

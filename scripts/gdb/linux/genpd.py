@@ -3,7 +3,8 @@
 # Copyright (c) NXP 2019
 
 import gdb
-import sys
+# Py3: sys module is not used.
+# import sys
 
 from linux.utils import CachedType
 from linux.lists import list_for_each_entry
@@ -32,7 +33,7 @@ def rtpm_status_str(dev):
         "suspended",
         "suspending"
     ]
-    return _RPM_STATUS_LOOKUP[dev['power']['runtime_status']]
+    return _RPM_STATUS_LOOKUP[int(dev['power']['runtime_status'])]
 
 
 class LxGenPDSummary(gdb.Command):
@@ -41,25 +42,25 @@ class LxGenPDSummary(gdb.Command):
 Output is similar to /sys/kernel/debug/pm_genpd/pm_genpd_summary'''
 
     def __init__(self):
-        super(LxGenPDSummary, self).__init__('lx-genpd-summary', gdb.COMMAND_DATA)
+        # Py3: Use modern, argument-less super().
+        super().__init__('lx-genpd-summary', gdb.COMMAND_DATA)
 
     def summary_one(self, genpd):
         if genpd['status'] == 0:
             status_string = 'on'
         else:
-            status_string = 'off-{}'.format(genpd['state_idx'])
+            status_string = f"off-{genpd['state_idx']}"
 
         slave_names = []
         for link in list_for_each_entry(
                 genpd['master_links'],
                 device_link_type.get_type().pointer(),
                 'master_node'):
-            slave_names.apend(link['slave']['name'])
+            # Py3: Fixed typo from .apend to .append
+            slave_names.append(link['slave']['name'].string())
 
-        gdb.write('%-30s  %-15s %s\n' % (
-                genpd['name'].string(),
-                status_string,
-                ', '.join(slave_names)))
+        # Py3: Use f-string for formatting.
+        gdb.write(f"{genpd['name'].string():<30}  {status_string:<15} {', '.join(slave_names)}\n")
 
         # Print devices in domain
         for pm_data in list_for_each_entry(genpd['dev_list'],
@@ -67,12 +68,12 @@ Output is similar to /sys/kernel/debug/pm_genpd/pm_genpd_summary'''
                         'list_node'):
             dev = pm_data['dev']
             kobj_path = kobject_get_path(dev['kobj'])
-            gdb.write('    %-50s  %s\n' % (kobj_path, rtpm_status_str(dev)))
+            gdb.write(f"    {kobj_path:<50}  {rtpm_status_str(dev)}\n")
 
     def invoke(self, arg, from_tty):
-        gdb.write('domain                          status          slaves\n');
-        gdb.write('    /device                                             runtime status\n');
-        gdb.write('----------------------------------------------------------------------\n');
+        gdb.write('domain                          status          slaves\n')
+        gdb.write('    /device                                             runtime status\n')
+        gdb.write('----------------------------------------------------------------------\n')
         for genpd in list_for_each_entry(
                 gdb.parse_and_eval('&gpd_list'),
                 generic_pm_domain_type.get_type().pointer(),

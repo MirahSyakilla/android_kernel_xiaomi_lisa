@@ -25,10 +25,11 @@ class CachedType:
 
     def get_type(self):
         if self._type is None:
-            self._type = gdb.lookup_type(self._name)
-            if self._type is None:
-                raise gdb.GdbError(
-                    "cannot resolve type '{0}'".format(self._name))
+            try:
+                self._type = gdb.lookup_type(self._name)
+            except gdb.error:
+                # Py3: Using f-string for cleaner formatting.
+                raise gdb.GdbError(f"cannot resolve type '{self._name}'")
             if hasattr(gdb, 'events') and hasattr(gdb.events, 'new_objfile'):
                 gdb.events.new_objfile.connect(self._new_objfile_handler)
         return self._type
@@ -60,7 +61,8 @@ data structure of the type TYPE in which PTR is the address of ELEMENT.
 Note that TYPE and ELEMENT have to be quoted as strings."""
 
     def __init__(self):
-        super(ContainerOf, self).__init__("container_of")
+        # Py3: Use the modern, argument-less super() call.
+        super().__init__("container_of")
 
     def invoke(self, ptr, typename, elementname):
         return container_of(ptr, gdb.lookup_type(typename.string()).pointer(),
@@ -84,32 +86,30 @@ def get_target_endianness():
         elif "big endian" in endian:
             target_endianness = BIG_ENDIAN
         else:
-            raise gdb.GdbError("unknown endianness '{0}'".format(str(endian)))
+            # Py3: Using f-string.
+            raise gdb.GdbError(f"unknown endianness '{str(endian)}'")
     return target_endianness
 
 
 def read_memoryview(inf, start, length):
-    m = inf.read_memory(start, length)
-    if type(m) is memoryview:
-        return m
-    return memoryview(m)
+    # This function is compatible with Python 3's GDB as is.
+    # inf.read_memory() returns a memoryview object.
+    return inf.read_memory(start, length)
 
 
 def read_u16(buffer, offset):
     buffer_val = buffer[offset:offset + 2]
-    value = [0, 0]
 
-    if type(buffer_val[0]) is str:
-        value[0] = ord(buffer_val[0])
-        value[1] = ord(buffer_val[1])
-    else:
-        value[0] = buffer_val[0]
-        value[1] = buffer_val[1]
+    # Py3: This logic is greatly simplified. Indexing a `bytes` object (which
+    # is what `buffer` is) directly returns an integer (0-255). The Python 2
+    # check for `str` and the use of `ord()` are no longer necessary.
+    value0 = buffer_val[0]
+    value1 = buffer_val[1]
 
     if get_target_endianness() == LITTLE_ENDIAN:
-        return value[0] + (value[1] << 8)
+        return value0 + (value1 << 8)
     else:
-        return value[1] + (value[0] << 8)
+        return value1 + (value0 << 8)
 
 
 def read_u32(buffer, offset):
@@ -174,9 +174,9 @@ def get_gdbserver_type():
     return gdbserver_type
 
 
-def gdb_eval_or_none(expresssion):
+def gdb_eval_or_none(expression):
     try:
-        return gdb.parse_and_eval(expresssion)
+        return gdb.parse_and_eval(expression)
     except gdb.error:
         return None
 
@@ -185,5 +185,6 @@ def dentry_name(d):
     parent = d['d_parent']
     if parent == d or parent == 0:
         return ""
+    # Py3: String concatenation and .string() method remain the same.
     p = dentry_name(d['d_parent']) + "/"
     return p + d['d_iname'].string()
