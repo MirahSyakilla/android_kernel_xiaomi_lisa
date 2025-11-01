@@ -5874,7 +5874,6 @@ static int dsi_display_sysfs_deinit(struct dsi_display *display)
 	return 0;
 }
 
->>>>>>> 7f96239c9128 (techpack: display: make dimlayer switchable)
 /**
  * dsi_display_bind - bind dsi device with controlling device
  * @dev:        Pointer to base of platform device

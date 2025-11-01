@@ -381,6 +381,7 @@ long do_faccessat(int dfd, const char __user *filename, int mode)
 		ksu_handle_faccessat(&dfd, &filename, &mode, NULL);
 	}
 orig_flow:
+#endif
 
 #ifdef CONFIG_KSU
 	ksu_handle_faccessat(&dfd, &filename, &mode, NULL);
