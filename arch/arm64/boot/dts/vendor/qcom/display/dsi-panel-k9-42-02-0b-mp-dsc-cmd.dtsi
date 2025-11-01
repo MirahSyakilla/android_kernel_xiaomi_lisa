@@ -126,6 +126,20 @@
 					15 01 00 00 11 00 02 2F 01];
 				qcom,mdss-dsi-timing-switch-command-state = "dsi_lp_mode";
 
+				qcom,mdss-dsi-lp1-command = [
+					15 01 00 00 00 00 02 2F 01
+					39 01 00 00 00 00 05 51 00 00 01 55
+					39 01 00 00 00 00 06 F0 55 AA 52 08 00
+					15 01 00 00 00 00 02 B2 08
+					05 01 00 00 14 00 01 39
+					15 01 00 00 00 00 02 65 01];
+				qcom,mdss-dsi-lp2-command = [
+					15 01 00 00 00 00 02 2F 01
+					39 01 00 00 00 00 05 51 00 00 01 55
+					39 01 00 00 00 00 06 F0 55 AA 52 08 00
+					15 01 00 00 00 00 02 B2 08
+					05 01 00 00 14 00 01 39
+					15 01 00 00 00 00 02 65 01];
 				qcom,mdss-dsi-nolp-command = [
 					39 01 00 00 00 00 06 F0 55 AA 52 08 00
 					15 01 00 00 00 00 02 B2 98
@@ -133,6 +147,8 @@
 					05 01 00 00 00 00 01 38
 					15 01 00 00 1E 00 02 2F 01
 					39 01 00 00 00 00 03 51 03 FF];
+				qcom,mdss-dsi-lp1-command-state = "dsi_lp_mode";
+				qcom,mdss-dsi-lp2-command-state = "dsi_lp_mode";
 				qcom,mdss-dsi-nolp-command-state = "dsi_lp_mode";
 
 				qcom,compression-mode = "dsc";
@@ -228,6 +244,20 @@
 					15 01 00 00 11 00 02 2F 02];
 				qcom,mdss-dsi-timing-switch-command-state = "dsi_lp_mode";
 
+				qcom,mdss-dsi-lp1-command = [
+					15 01 00 00 00 00 02 2F 01
+					39 01 00 00 00 00 05 51 00 00 01 55
+					39 01 00 00 00 00 06 F0 55 AA 52 08 00
+					15 01 00 00 00 00 02 B2 08
+					05 01 00 00 14 00 01 39
+					15 01 00 00 00 00 02 65 01];
+				qcom,mdss-dsi-lp2-command = [
+					15 01 00 00 00 00 02 2F 01
+					39 01 00 00 00 00 05 51 00 00 01 55
+					39 01 00 00 00 00 06 F0 55 AA 52 08 00
+					15 01 00 00 00 00 02 B2 08
+					05 01 00 00 14 00 01 39
+					15 01 00 00 00 00 02 65 01];
 				qcom,mdss-dsi-nolp-command = [
 					39 01 00 00 00 00 06 F0 55 AA 52 08 00
 					15 01 00 00 00 00 02 B2 98
@@ -235,6 +265,8 @@
 					05 01 00 00 00 00 01 38
 					15 01 00 00 1E 00 02 2F 02
 					39 01 00 00 00 00 03 51 03 FF];
+				qcom,mdss-dsi-lp1-command-state = "dsi_lp_mode";
+				qcom,mdss-dsi-lp2-command-state = "dsi_lp_mode";
 				qcom,mdss-dsi-nolp-command-state = "dsi_lp_mode";
 
 				qcom,compression-mode = "dsc";
