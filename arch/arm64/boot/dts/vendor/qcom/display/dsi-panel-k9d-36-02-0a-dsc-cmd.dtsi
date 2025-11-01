@@ -221,6 +221,18 @@
 					15 01 00 00 00 00 02 2F 02];
 				qcom,mdss-dsi-timing-switch-command-state = "dsi_lp_mode";
 
+				qcom,mdss-dsi-lp1-command = [
+					15 01 00 00 00 00 02 2F 01
+					15 01 00 00 00 00 02 6F 02
+					39 01 00 00 00 00 03 51 02 FF
+					05 01 00 00 14 00 01 39
+					15 01 00 00 00 00 02 65 01];
+				qcom,mdss-dsi-lp2-command = [
+					15 01 00 00 00 00 02 2F 01
+					15 01 00 00 00 00 02 6F 02
+					39 01 00 00 00 00 03 51 02 FF
+					05 01 00 00 14 00 01 39
+					15 01 00 00 00 00 02 65 01];
 				qcom,mdss-dsi-nolp-command = [
 					15 01 00 00 00 00 02 65 00
 					05 01 00 00 07 00 01 38
@@ -228,6 +240,8 @@
 					39 01 00 00 1B 00 05 BA 10 1A 10 1A
 					39 01 00 00 00 00 05 BA 10 10 10 10
 					15 01 00 00 00 00 02 2F 02];
+				qcom,mdss-dsi-lp1-command-state = "dsi_lp_mode";
+				qcom,mdss-dsi-lp2-command-state = "dsi_lp_mode";
 				qcom,mdss-dsi-nolp-command-state = "dsi_lp_mode";
 
 				qcom,compression-mode = "dsc";
@@ -419,6 +433,18 @@
 					15 01 00 00 00 00 02 2F 01];
 				qcom,mdss-dsi-timing-switch-command-state = "dsi_lp_mode";
 
+				qcom,mdss-dsi-lp1-command = [
+					15 01 00 00 00 00 02 2F 01
+					15 01 00 00 00 00 02 6F 02
+					39 01 00 00 00 00 03 51 02 FF
+					05 01 00 00 14 00 01 39
+					15 01 00 00 00 00 02 65 01];
+				qcom,mdss-dsi-lp2-command = [
+					15 01 00 00 00 00 02 2F 01
+					15 01 00 00 00 00 02 6F 02
+					39 01 00 00 00 00 03 51 02 FF
+					05 01 00 00 14 00 01 39
+					15 01 00 00 00 00 02 65 01];
 				qcom,mdss-dsi-nolp-command = [
 					15 01 00 00 00 00 02 65 00
 					05 01 00 00 07 00 01 38
@@ -426,6 +452,8 @@
 					39 01 00 00 1B 00 05 BA 10 1A 10 1A
 					39 01 00 00 00 00 05 BA 10 10 10 10
 					15 01 00 00 00 00 02 2F 01];
+				qcom,mdss-dsi-lp1-command-state = "dsi_lp_mode";
+				qcom,mdss-dsi-lp2-command-state = "dsi_lp_mode";
 				qcom,mdss-dsi-nolp-command-state = "dsi_lp_mode";
 
 				qcom,compression-mode = "dsc";
