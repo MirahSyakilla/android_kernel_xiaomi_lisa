@@ -63,6 +63,10 @@ modules.order
 /modules.builtin.modinfo
 /out/
 
+#KSUN
+/KernelSU-Next/
+drivers/kernelsu/kernel
+
 #
 # RPM spec file (make rpm-pkg)
 #
