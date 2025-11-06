@@ -121,8 +121,6 @@
 #define AW8624_REG_NUM_F0_2		0x7e
 #define AW8624_REG_NUM_F0_3		0x7f
 
-
-
 /********************************************
  * Register Access
  *******************************************/
@@ -130,7 +128,6 @@
 #define REG_RD_ACCESS		(1 << 0)
 #define REG_WR_ACCESS			(1 << 1)
 #define AW8624_REG_MAX 0xff
-
 
 const unsigned char aw8624_reg_access[AW8624_REG_MAX] = {
 	[AW8624_REG_ID] = REG_RD_ACCESS,
@@ -251,9 +248,6 @@ const unsigned char aw8624_reg_access[AW8624_REG_MAX] = {
 	[AW8624_REG_NUM_F0_3] = REG_RD_ACCESS|REG_WR_ACCESS,
 };
 
-
-
-
 /******************************************************
  * Register Detail
  *****************************************************/
@@ -372,7 +366,6 @@ const unsigned char aw8624_reg_access[AW8624_REG_MAX] = {
 #define AW8624_BIT_WAVLOOP4_SEQ7_MASK			(~(15<<4))
 #define AW8624_BIT_WAVLOOP4_SEQ8_MASK			(~(15<<0))
 
-
  /* PLAYPRIO */
 #define AW8624_BIT_PLAYPRIO_GO_MASK			(~(3<<6))
 #define AW8624_BIT_PLAYPRIO_TRIG3_MASK			(~(3<<4))
@@ -419,7 +412,6 @@ const unsigned char aw8624_reg_access[AW8624_REG_MAX] = {
 #define AW8624_BIT_DBGCTRL_INTN_EDGE_MODE		(1<<2)
 #define AW8624_BIT_DBGCTRL_INTN_POSEDGE_MODE		(2<<2)
 #define AW8624_BIT_DBGCTRL_INTN_BOTH_EDGE_MODE		(3<<2)
-
 
  /* DATCTRL */
 #define AW8624_BIT_DATCTRL_FC_MASK			(~(1<<6))
@@ -489,12 +481,10 @@ const unsigned char aw8624_reg_access[AW8624_REG_MAX] = {
 #define AW8624_BIT_DETCTRL_DIAG_GO_ENABLE		(1<<0)
 #define AW8624_BIT_DETCTRL_DIAG_GO_DISABLE		(0<<0)
 
-
  /* VBAT MODE */
 #define AW8624_BIT_DETCTRL_VBAT_MODE_MASK		(~(1<<6))
 #define AW8624_BIT_DETCTRL_VBAT_HW_COMP			(1<<6)
 #define AW8624_BIT_DETCTRL_VBAT_SW_COMP			(0<<6)
-
 
  /* ANACTRL */
 #define AW8624_BIT_ANACTRL_LRA_SRC_MASK			(~(1<<5))
@@ -533,8 +523,9 @@ const unsigned char aw8624_reg_access[AW8624_REG_MAX] = {
 #define AW8624_BIT_TDH_TD_BRAKE_MASK			(~(0xF<<4))
 #define AW8624_BIT_R_SPARE_MASK				(~(1<<7))
 #define AW8624_BIT_R_SPARE_ENABLE			(1<<7)
+
  /* PWMDBG */
 #define AW8624_BIT_D2SCFG_DS_GAIN_MASK			(~(7<<0))
 #define AW8624_BIT_D2SCFG_DS_GAIN_40			(7<<0)
-#endif
 
+#endif

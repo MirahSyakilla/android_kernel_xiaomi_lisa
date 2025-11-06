@@ -2,7 +2,7 @@
 # Automatically generated file; DO NOT EDIT.
 # Linux/arm64 5.4.300 Kernel Configuration
 #
-CONFIG_CC_VERSION_TEXT="ZyC clang version 22.0.0git (https://github.com/llvm/llvm-project ebfee327df69e6cfeaa4c5300e6abd19476b8bfe)"
+CONFIG_CC_VERSION_TEXT="ZyC clang v22.0.0"
 CONFIG_GCC_VERSION=0
 CONFIG_CC_IS_CLANG=y
 CONFIG_LD_IS_LLD=y
@@ -20,7 +20,7 @@ CONFIG_THREAD_INFO_IN_TASK=y
 #
 CONFIG_INIT_ENV_ARG_LIMIT=32
 # CONFIG_COMPILE_TEST is not set
-CONFIG_LOCALVERSION="MeowKernel-alpha-qgki"
+CONFIG_LOCALVERSION="-MeowKernel-alpha-qgki"
 CONFIG_LOCALVERSION_AUTO=y
 CONFIG_BUILD_SALT=""
 CONFIG_DEFAULT_HOSTNAME="(none)"

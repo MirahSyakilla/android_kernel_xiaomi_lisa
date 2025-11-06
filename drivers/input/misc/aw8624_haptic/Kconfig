@@ -8,6 +8,3 @@ config INPUT_AW8624_HAPTIC
 	  If unsure, say N.
 
 	  To compile this driver as a module, choose M here.
-
-
-
