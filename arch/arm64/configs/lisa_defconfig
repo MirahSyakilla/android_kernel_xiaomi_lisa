@@ -6961,4 +6961,7 @@ CONFIG_CORESIGHT_TGU=y
 CONFIG_CORESIGHT_OST=y
 # CONFIG_CORESIGHT_FUSE is not set
 
+# Awinic enable
+CONFIG_HAPTIC_NV=y
+
 # end of Kernel hacking
