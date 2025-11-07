@@ -11569,7 +11569,6 @@ static int sched_balance_newidle(struct rq *this_rq, struct rq_flags *rf)
 		rcu_read_unlock();
 
 		nohz_newidle_balance(this_rq);
-
 		goto out;
 	}
 
