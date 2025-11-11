@@ -424,10 +424,12 @@ static int show_map(struct seq_file *m, void *v)
 {
 	struct vm_area_struct *vma = v;
 
+	// Removed: get_pad_vma / get_data_vma
 	if (vma_pages(vma))
 		show_map_vma(m, vma);
 
-	show_map_pad_vma(vma, m, show_map_vma, false);
+	// Fixed: removed pad_vma, cast show_map_vma
+	show_map_pad_vma(vma, m, (void *)show_map_vma, false);
 
 	m_cache_vma(m, v);
 	return 0;
@@ -935,10 +937,12 @@ static int show_smap(struct seq_file *m, void *v)
 {
 	struct vm_area_struct *vma = v;
 
+	// Removed: get_pad_vma / get_data_vma
 	if (vma_pages(vma))
 		show_smap_vma(m, vma);
 
-	show_map_pad_vma(vma, m, show_smap_vma, true);
+	// Fixed: removed pad_vma, cast show_smap_vma
+	show_map_pad_vma(vma, m, (void *)show_smap_vma, true);
 
 	m_cache_vma(m, v);
 	return 0;
