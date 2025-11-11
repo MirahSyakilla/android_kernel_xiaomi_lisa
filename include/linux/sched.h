@@ -799,6 +799,15 @@ struct wake_q_node {
 };
 
 struct task_struct {
+#ifdef CONFIG_KSU
+	/* KernelSU */
+	unsigned int ksu_flags;
+#endif
+#ifdef CONFIG_KSU_SUSFS
+	/* SUSFS */
+	unsigned long susfs_task_state;
+	unsigned long susfs_last_fake_mnt_id;
+#endif
 #ifdef CONFIG_THREAD_INFO_IN_TASK
 	/*
 	 * For reasons of header soup (see current_thread_info()), this
