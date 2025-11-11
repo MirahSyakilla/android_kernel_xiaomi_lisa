@@ -4426,13 +4426,8 @@ aw8624_i2c_probe(struct i2c_client *i2c, const struct i2c_device_id *id)
 	}
 
 	if (gpio_is_valid(aw8624->irq_gpio)) {
-		ret = devm_gpio_request_one(&i2c->dev, aw8624->irq_gpio,
-					    GPIOF_DIR_IN, "aw8624_int");
-		if (ret) {
-			dev_err(&i2c->dev, "%s: int request failed\n",
-				__func__);
-			goto err_irq_gpio_request;
-		}
+		pr_warn("aw8624: Skipping irq...\n");
+		aw8624->irq_gpio = -1;
 	}
 
 	ret = aw8624_read_chipid(aw8624);
