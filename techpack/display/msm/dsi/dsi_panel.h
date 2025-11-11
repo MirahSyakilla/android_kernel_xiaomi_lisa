@@ -282,7 +282,7 @@ struct dsi_panel {
 
 	int hbm_mode;
 	struct delayed_work hbm_recover_backlight_delayed_work;
-
+	bool hbm_enabled;
 	int dc_dimming_mode;
 };
 
@@ -319,6 +319,7 @@ struct dsi_panel *dsi_panel_get(struct device *parent,
 				bool trusted_vm_env);
 
 static void hbm_recover_backlight_delayed_work(struct work_struct *work);
+int dsi_panel_set_hbm_mode(struct dsi_panel *panel, bool enable);
 
 int dsi_panel_trigger_esd_attack(struct dsi_panel *panel, bool trusted_vm_env);
 

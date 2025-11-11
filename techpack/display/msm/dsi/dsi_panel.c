@@ -1955,8 +1955,6 @@ const char *cmd_set_prop_map[DSI_CMD_SET_MAX] = {
 	"mi,mdss-dsi-local-hbm-hlpm-white-1000nit-command",
 	"mi,mdss-dsi-local-hbm-off-to-normal-command",
 	"mi,mdss-dsi-local-hbm-off-to-hlpm-command",
-	"mi,mdss-dsi-hbm-on-command",
-	"mi,mdss-dsi-hbm-off-command",
 	"mi,mdss-dsi-dc-on-command",
 	"mi,mdss-dsi-dc-off-command",
 };
@@ -1991,8 +1989,6 @@ const char *cmd_set_state_map[DSI_CMD_SET_MAX] = {
 	"mi,mdss-dsi-local-hbm-hlpm-white-1000nit-command-state",
 	"mi,mdss-dsi-local-hbm-off-to-normal-command-state",
 	"mi,mdss-dsi-local-hbm-off-to-hlpm-command-state",
-	"mi,mdss-dsi-hbm-on-command-state",
-	"mi,mdss-dsi-hbm-off-command-state",
 	"mi,mdss-dsi-dc-on-command-state",
 	"mi,mdss-dsi-dc-off-command-state",
 };
@@ -4739,9 +4735,6 @@ int dsi_panel_set_lp1(struct dsi_panel *panel)
 	if (panel->dc_dimming_mode)
 		dsi_panel_apply_dc_dimming_mode(panel, false);
 
-	if(panel->hbm_enabled)
-		dsi_panel_set_hbm_mode(panel, false);	
-
 	mutex_lock(&panel->panel_lock);
 	if (!panel->panel_initialized)
 		goto exit;
@@ -4780,9 +4773,6 @@ int dsi_panel_set_lp2(struct dsi_panel *panel)
 	
 	if (panel->dc_dimming_mode)
 		dsi_panel_apply_dc_dimming_mode(panel, false);
-
-	if(panel->hbm_enabled)
-                dsi_panel_set_hbm_mode(panel, false);
 
 	mutex_lock(&panel->panel_lock);
 	if (!panel->panel_initialized)
@@ -4831,7 +4821,7 @@ int dsi_panel_set_nolp(struct dsi_panel *panel)
 		       panel->name, rc);
 exit:
 	mutex_unlock(&panel->panel_lock);
-
+	
 	panel->doze_enabled = false;
 
 	if (panel->hbm_mode)
