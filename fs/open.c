@@ -32,6 +32,9 @@
 #include <linux/ima.h>
 #include <linux/dnotify.h>
 #include <linux/compat.h>
+#ifdef CONFIG_KSU_SUSFS_SUS_SU
+#include <linux/susfs_def.h>
+#endif
 
 #include "internal.h"
 
@@ -340,16 +343,22 @@ SYSCALL_DEFINE4(fallocate, int, fd, int, mode, loff_t, offset, loff_t, len)
 	return ksys_fallocate(fd, mode, offset, len);
 }
 
+#ifdef CONFIG_KSU
+extern int ksu_handle_faccessat(int *dfd, const char __user **filename_user, int *mode,
+			        int *flags);
+#endif
+
 /*
  * access() needs to use the real uid/gid, not the effective uid/gid.
  * We do this by temporarily clearing all FS-related capabilities and
  * switching the fsuid/fsgid around to the real ones.
  */
 
-#ifdef CONFIG_KSU
+#ifdef CONFIG_KSU_SUSFS_SUS_SU
 extern bool susfs_is_sus_su_hooks_enabled __read_mostly;
+extern bool __ksu_is_allow_uid(uid_t uid);
 extern int ksu_handle_faccessat(int *dfd, const char __user **filename_user, int *mode,
-                       int *flags);
+			int *flags);
 #endif
 
 long do_faccessat(int dfd, const char __user *filename, int mode)
@@ -459,17 +468,8 @@ out:
 	return res;
 }
 
-#if defined(CONFIG_KSU) && !defined(CONFIG_KSU_KPROBES_HOOK)
-__attribute__((hot))
-extern int ksu_handle_faccessat(int *dfd, const char __user **filename_user,
-                               int *mode, int *flags);
-#endif
-
 SYSCALL_DEFINE3(faccessat, int, dfd, const char __user *, filename, int, mode)
 {
-#if defined(CONFIG_KSU) && !defined(CONFIG_KSU_KPROBES_HOOK)
-        ksu_handle_faccessat(&dfd, &filename, &mode, NULL);
-#endif
 	return do_faccessat(dfd, filename, mode);
 }
 
