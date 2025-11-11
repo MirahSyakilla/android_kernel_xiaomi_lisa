@@ -73,7 +73,11 @@ struct vfsmount {
 	ANDROID_KABI_RESERVE(1);
 	ANDROID_KABI_RESERVE(2);
 	ANDROID_KABI_RESERVE(3);
+#ifdef CONFIG_KSU_SUSFS
+	ANDROID_KABI_USE(4, int susfs_mnt_id_backup);
+#else
 	ANDROID_KABI_RESERVE(4);
+#endif
 
 	void *data;
 } __randomize_layout;
