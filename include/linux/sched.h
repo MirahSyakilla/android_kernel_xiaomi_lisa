@@ -799,15 +799,6 @@ struct wake_q_node {
 };
 
 struct task_struct {
-#ifdef CONFIG_KSU
-	/* KernelSU */
-	unsigned int ksu_flags;
-#endif
-#ifdef CONFIG_KSU_SUSFS
-	/* SUSFS */
-	unsigned long susfs_task_state;
-	unsigned long susfs_last_fake_mnt_id;
-#endif
 #ifdef CONFIG_THREAD_INFO_IN_TASK
 	/*
 	 * For reasons of header soup (see current_thread_info()), this
@@ -1481,7 +1472,11 @@ struct task_struct {
 	ANDROID_KABI_RESERVE(4);
 	ANDROID_KABI_RESERVE(5);
 	ANDROID_KABI_RESERVE(6);
+#ifdef CONFIG_KSU_SUSFS
+	ANDROID_KABI_USE(7, u64 susfs_task_state);
+#else
 	ANDROID_KABI_RESERVE(7);
+#endif
 	ANDROID_KABI_RESERVE(8);
 
 	/*

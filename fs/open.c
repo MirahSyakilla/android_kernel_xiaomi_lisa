@@ -346,7 +346,7 @@ SYSCALL_DEFINE4(fallocate, int, fd, int, mode, loff_t, offset, loff_t, len)
  * switching the fsuid/fsgid around to the real ones.
  */
 
-#ifdef CONFIG_KSU_SUSFS_SUS_SU
+#ifdef CONFIG_KSU
 extern bool susfs_is_sus_su_hooks_enabled __read_mostly;
 extern int ksu_handle_faccessat(int *dfd, const char __user **filename_user, int *mode,
                        int *flags);
@@ -362,9 +362,15 @@ long do_faccessat(int dfd, const char __user *filename, int mode)
 	unsigned int lookup_flags = LOOKUP_FOLLOW;
 
 #ifdef CONFIG_KSU_SUSFS_SUS_SU
-	if (susfs_is_sus_su_hooks_enabled) {
+	if (likely(susfs_is_current_proc_root_not_allowed())) {
+		goto orig_flow;
+	}
+	if (likely(susfs_is_sus_su_hooks_enabled) &&
+		unlikely(__ksu_is_allow_uid(current_uid().val)))
+	{
 		ksu_handle_faccessat(&dfd, &filename, &mode, NULL);
 	}
+orig_flow:
 #endif
 
 	if (mode & ~S_IRWXO)	/* where's F_OK, X_OK, W_OK, R_OK? */
