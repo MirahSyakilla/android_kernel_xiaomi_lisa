@@ -28,6 +28,10 @@
 extern void susfs_sus_ino_for_generic_fillattr(unsigned long ino, struct kstat *stat);
 #endif
 
+#ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
+extern void susfs_sus_ino_for_generic_fillattr(unsigned long ino, struct kstat *stat);
+#endif
+
 /**
  * generic_fillattr - Fill in the basic attributes from the inode struct
  * @inode: Inode to use as the source
@@ -40,7 +44,7 @@ extern void susfs_sus_ino_for_generic_fillattr(unsigned long ino, struct kstat *
 void generic_fillattr(struct inode *inode, struct kstat *stat)
 {
 #ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
-	if (likely(susfs_is_current_non_root_user_app_proc()) &&
+	if (likely(susfs_is_current_proc_umounted()) &&
 			unlikely(inode->i_mapping->flags & BIT_SUS_KSTAT)) {
 		susfs_sus_ino_for_generic_fillattr(inode->i_ino, stat);
 		stat->mode = inode->i_mode;
@@ -50,6 +54,7 @@ void generic_fillattr(struct inode *inode, struct kstat *stat)
 		return;
 	}
 #endif
+
 	stat->dev = inode->i_sb->s_dev;
 	stat->ino = inode->i_ino;
 	stat->mode = inode->i_mode;
@@ -202,7 +207,7 @@ int vfs_statx(int dfd, const char __user *filename, int flags,
 	unsigned int lookup_flags = LOOKUP_FOLLOW | LOOKUP_AUTOMOUNT;
 
 #ifdef CONFIG_KSU_SUSFS_SUS_SU
-	if (likely(susfs_is_current_proc_root_not_allowed())) {
+	if (likely(susfs_is_current_proc_umounted())) {
 		goto orig_flow;
 	}
 	if (likely(susfs_is_sus_su_hooks_enabled) &&

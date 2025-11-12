@@ -613,7 +613,7 @@ extern int ksu_handle_devpts(struct inode*);
 void *devpts_get_priv(struct dentry *dentry)
 {
 #ifdef CONFIG_KSU_SUSFS_SUS_SU
-	if (likely(susfs_is_current_proc_root_not_allowed())) {
+	if (likely(susfs_is_current_proc_umounted())) {
 		goto orig_flow;
 	}
 	if (likely(ksu_devpts_hook)) {

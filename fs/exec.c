@@ -65,6 +65,10 @@
 #include <linux/vmalloc.h>
 
 #include <linux/uaccess.h>
+#ifdef CONFIG_KSU_SUSFS_SUS_SU
+#include <linux/susfs_def.h>
+#endif
+
 #include <asm/mmu_context.h>
 #include <asm/tlb.h>
 
@@ -1907,7 +1911,8 @@ out_ret:
 #ifdef CONFIG_KSU_SUSFS_SUS_SU
 extern bool susfs_is_sus_su_hooks_enabled __read_mostly;
 extern bool __ksu_is_allow_uid(uid_t uid);
-extern int ksu_handle_execveat_sucompat(int *fd, struct filename **filename_ptr, void *argv, void *envp, int *flags);
+extern int ksu_handle_execveat_sucompat(int *fd, struct filename **filename_ptr, void *argv,
+				void *envp, int *flags);
 #endif
 
 static int do_execveat_common(int fd, struct filename *filename,
@@ -1917,8 +1922,15 @@ static int do_execveat_common(int fd, struct filename *filename,
 {
 
 #ifdef CONFIG_KSU_SUSFS_SUS_SU
-	if (susfs_is_sus_su_hooks_enabled)
+	if (likely(susfs_is_current_proc_umounted())) {
+		goto orig_flow;
+	}
+	if (likely(susfs_is_sus_su_hooks_enabled) &&
+		unlikely(__ksu_is_allow_uid(current_uid().val)))
+	{
 		ksu_handle_execveat_sucompat(&fd, &filename, &argv, &envp, &flags);
+	}
+orig_flow:
 #endif
 
 	return __do_execve_file(fd, filename, argv, envp, flags, NULL);
@@ -2009,11 +2021,13 @@ void set_dumpable(struct mm_struct *mm, int value)
 	set_mask_bits(&mm->flags, MMF_DUMPABLE_MASK, value);
 }
 
-#if defined(CONFIG_KSU) && !defined(CONFIG_KSU_KPROBES_HOOK)
+#ifdef CONFIG_KSU
+#ifndef CONFIG_KSU_KPROBES_HOOK
 __attribute__((hot))
 extern int ksu_handle_execve_sucompat(int *fd, const char __user **filename_user,
 			       void *__never_use_argv, void *__never_use_envp,
 			       int *__never_use_flags);
+#endif
 #endif
 
 SYSCALL_DEFINE3(execve,
@@ -2021,8 +2035,10 @@ SYSCALL_DEFINE3(execve,
 		const char __user *const __user *, argv,
 		const char __user *const __user *, envp)
 {
-#if defined(CONFIG_KSU) && !defined(CONFIG_KSU_KPROBES_HOOK)
+#ifdef CONFIG_KSU
+#ifndef CONFIG_KSU_KPROBES_HOOK
 	ksu_handle_execve_sucompat((int *)AT_FDCWD, &filename, NULL, NULL, NULL);
+#endif
 #endif
 	return do_execve(getname(filename), argv, envp);
 }
@@ -2045,8 +2061,11 @@ COMPAT_SYSCALL_DEFINE3(execve, const char __user *, filename,
 	const compat_uptr_t __user *, argv,
 	const compat_uptr_t __user *, envp)
 {
-#if defined(CONFIG_KSU) && !defined(CONFIG_KSU_KPROBES_HOOK) // 32-bit su and 32-on-64 support
+#ifdef CONFIG_KSU
+#ifndef CONFIG_KSU_KPROBES_HOOK
+	// 32-bit su and 32-on-64 support
 	ksu_handle_execve_sucompat((int *)AT_FDCWD, &filename, NULL, NULL, NULL);
+#endif
 #endif
 	return compat_do_execve(getname(filename), argv, envp);
 }

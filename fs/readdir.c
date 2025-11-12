@@ -32,6 +32,14 @@ extern bool susfs_is_base_dentry_sdcard_dir(struct dentry* base);
 
 #include <asm/unaligned.h>
 
+#ifdef CONFIG_KSU_SUSFS_SUS_PATH
+#include <linux/susfs_def.h>
+extern bool susfs_is_inode_sus_path(struct inode *inode);
+extern bool susfs_is_sus_android_data_d_name_found(const char *d_name);
+extern bool susfs_is_sus_sdcard_d_name_found(const char *d_name);
+extern bool susfs_is_base_dentry_android_data_dir(struct dentry* base);
+extern bool susfs_is_base_dentry_sdcard_dir(struct dentry* base);
+#endif
 /*
  * Note the "unsafe_put_user() semantics: we goto a
  * label for errors.
@@ -274,6 +282,11 @@ struct linux_dirent {
 struct getdents_callback {
 	struct dir_context ctx;
 	struct linux_dirent __user * current_dir;
+#ifdef CONFIG_KSU_SUSFS_SUS_PATH
+	struct super_block *sb;
+	bool is_base_dentry_android_data_root_dir;
+	bool is_base_dentry_sdcard_root_dir;
+#endif
 	int prev_reclen;
 	int count;
 	int error;
@@ -289,10 +302,10 @@ static int filldir(struct dir_context *ctx, const char *name, int namlen,
 	int reclen = ALIGN(offsetof(struct linux_dirent, d_name) + namlen + 2,
 		sizeof(long));
 	int prev_reclen;
-
 #ifdef CONFIG_KSU_SUSFS_SUS_PATH
 	struct inode __maybe_unused *inode;
 #endif
+
 	buf->error = verify_dirent_name(name, namlen);
 	if (unlikely(buf->error))
 		return buf->error;
@@ -304,6 +317,29 @@ static int filldir(struct dir_context *ctx, const char *name, int namlen,
 		buf->error = -EOVERFLOW;
 		return -EOVERFLOW;
 	}
+#ifdef CONFIG_KSU_SUSFS_SUS_PATH
+	if (buf->is_base_dentry_android_data_root_dir) {
+		if (susfs_is_sus_android_data_d_name_found(name)) {
+			return 0;
+		}
+	} else if (buf->is_base_dentry_sdcard_root_dir) {
+		if (susfs_is_sus_sdcard_d_name_found(name)) {
+			return 0;
+		}
+	}
+
+	inode = ilookup(buf->sb, ino);
+	if (!inode) {
+		goto orig_flow;
+	}
+	if (susfs_is_inode_sus_path(inode)) {
+		iput(inode);
+		return 0;
+	}
+	iput(inode);
+orig_flow:
+#endif
+
 	prev_reclen = buf->prev_reclen;
 	if (prev_reclen && signal_pending(current))
 		return -EINTR;
@@ -342,6 +378,10 @@ SYSCALL_DEFINE3(getdents, unsigned int, fd,
 	};
 	int error;
 
+#ifdef CONFIG_KSU_SUSFS_SUS_PATH
+	struct inode *inode;
+#endif
+
 	if (!access_ok(dirent, count))
 		return -EFAULT;
 
@@ -349,6 +389,27 @@ SYSCALL_DEFINE3(getdents, unsigned int, fd,
 	if (!f.file)
 		return -EBADF;
 
+#ifdef CONFIG_KSU_SUSFS_SUS_PATH
+	buf.sb = f.file->f_inode->i_sb;
+	inode = f.file->f_path.dentry->d_inode;
+	if (f.file->f_path.dentry && inode) {
+		if (susfs_is_base_dentry_android_data_dir(f.file->f_path.dentry))
+		{
+			buf.is_base_dentry_android_data_root_dir = true;
+			buf.is_base_dentry_sdcard_root_dir = false;
+			goto orig_flow;
+		}
+		if (susfs_is_base_dentry_sdcard_dir(f.file->f_path.dentry))
+		{
+			buf.is_base_dentry_sdcard_root_dir = true;
+			buf.is_base_dentry_android_data_root_dir = false;
+			goto orig_flow;
+		}
+	}
+	buf.is_base_dentry_android_data_root_dir = false;
+	buf.is_base_dentry_sdcard_root_dir = false;
+orig_flow:
+#endif
 	error = iterate_dir(f.file, &buf.ctx);
 	if (error >= 0)
 		error = buf.error;
@@ -387,10 +448,10 @@ static int filldir64(struct dir_context *ctx, const char *name, int namlen,
 	int reclen = ALIGN(offsetof(struct linux_dirent64, d_name) + namlen + 1,
 		sizeof(u64));
 	int prev_reclen;
-
 #ifdef CONFIG_KSU_SUSFS_SUS_PATH
 	struct inode *inode;
 #endif
+
 	buf->error = verify_dirent_name(name, namlen);
 	if (unlikely(buf->error))
 		return buf->error;
@@ -400,8 +461,6 @@ static int filldir64(struct dir_context *ctx, const char *name, int namlen,
 	prev_reclen = buf->prev_reclen;
 	if (prev_reclen && signal_pending(current))
 		return -EINTR;
-	dirent = buf->current_dir;
-
 #ifdef CONFIG_KSU_SUSFS_SUS_PATH
 	if (buf->is_base_dentry_android_data_root_dir) {
 		if (susfs_is_sus_android_data_d_name_found(name)) {
@@ -424,6 +483,7 @@ static int filldir64(struct dir_context *ctx, const char *name, int namlen,
 	iput(inode);
 orig_flow:
 #endif
+	dirent = buf->current_dir;
 
 	prev = (void __user *)dirent - prev_reclen;
 	if (!user_access_begin(prev, reclen + prev_reclen))

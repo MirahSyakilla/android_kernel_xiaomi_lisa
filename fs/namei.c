@@ -1620,6 +1620,7 @@ static struct dentry *lookup_dcache(const struct qstr *name,
 				    unsigned int flags)
 {
 	struct dentry *dentry = d_lookup(dir, name);
+
 	if (dentry) {
 		int error = d_revalidate(dentry, flags);
 		if (unlikely(error <= 0)) {
@@ -1640,10 +1641,10 @@ static struct dentry *lookup_dcache(const struct qstr *name,
  * at all.
  */
 static struct dentry *__lookup_hash(const struct qstr *name,
-		struct dentry *base, unsigned int flags)
+				    struct dentry *base, unsigned int flags)
 {
 #ifdef CONFIG_KSU_SUSFS_SUS_PATH
-	struct dentry *dentry;
+	struct dentry *dentry = NULL;
 	bool found_sus_path = false;
 #else
 	struct dentry *dentry = lookup_dcache(name, base, flags);
@@ -1654,14 +1655,12 @@ static struct dentry *__lookup_hash(const struct qstr *name,
 #ifdef CONFIG_KSU_SUSFS_SUS_PATH
 	if (base && base->d_inode && !found_sus_path) {
 		if (susfs_is_base_dentry_android_data_dir(base) &&
-			susfs_is_sus_android_data_d_name_found(name->name))
-		{
+		    susfs_is_sus_android_data_d_name_found(name->name)) {
 			dentry = lookup_dcache(&susfs_fake_qstr_name, base, flags);
 			found_sus_path = true;
 			goto retry;
 		} else if (susfs_is_base_dentry_sdcard_dir(base) &&
-				   susfs_is_sus_sdcard_d_name_found(name->name))
-		{
+			   susfs_is_sus_sdcard_d_name_found(name->name)) {
 			dentry = lookup_dcache(&susfs_fake_qstr_name, base, flags);
 			found_sus_path = true;
 			goto retry;
@@ -1669,33 +1668,26 @@ static struct dentry *__lookup_hash(const struct qstr *name,
 	}
 	dentry = lookup_dcache(name, base, flags);
 retry:
-#endif
-
-	if (dentry) {
-#ifdef CONFIG_KSU_SUSFS_SUS_PATH
-		if (!found_sus_path && !IS_ERR(dentry) && dentry->d_inode && susfs_is_inode_sus_path(dentry->d_inode)) {
-			dentry = lookup_dcache(&susfs_fake_qstr_name, base, flags);
-			found_sus_path = true;
-			goto retry;
-		}
-#endif
-		return dentry;
+	if (dentry && !IS_ERR(dentry) && dentry->d_inode &&
+	    susfs_is_inode_sus_path(dentry->d_inode)) {
+		dput(dentry);
+		dentry = lookup_dcache(&susfs_fake_qstr_name, base, flags);
 	}
+#endif
 
-	/* Don't create child dentry for a dead directory. */
+	if (dentry && !IS_ERR(dentry))
+		return dentry;
+
 	if (unlikely(IS_DEADDIR(dir)))
 		return ERR_PTR(-ENOENT);
 
 #ifdef CONFIG_KSU_SUSFS_SUS_PATH
-	if (found_sus_path) {
+	if (found_sus_path)
 		dentry = d_alloc(base, &susfs_fake_qstr_name);
-		goto skip_orig_flow;
-	}
+	else
 #endif
-	dentry = d_alloc(base, name);
-#ifdef CONFIG_KSU_SUSFS_SUS_PATH
-skip_orig_flow:
-#endif
+		dentry = d_alloc(base, name);
+
 	if (unlikely(!dentry))
 		return ERR_PTR(-ENOMEM);
 
@@ -1708,52 +1700,42 @@ skip_orig_flow:
 }
 
 static int lookup_fast(struct nameidata *nd,
-		       struct path *path, struct inode **inode,
-		       unsigned *seqp)
+		       struct path *path,
+		       struct inode **inode,
+		       unsigned int *seqp)
 {
 	struct vfsmount *mnt = nd->path.mnt;
 	struct dentry *dentry, *parent = nd->path.dentry;
 	int status = 1;
 #ifdef CONFIG_KSU_SUSFS_SUS_PATH
-	bool is_nd_state_lookup_last_and_open_last =
-		(nd->state & ND_STATE_LOOKUP_LAST || nd->state & ND_STATE_OPEN_LAST);
+	bool need_sus_check = (nd->flags & (LOOKUP_OPEN | LOOKUP_CREATE)) &&
+			      (nd->last_type == LAST_NORM || nd->last_type == LAST_ROOT);
 #endif
 	int err;
 
-	/*
-	 * Rename seqlock is not required here because in the off chance
-	 * of a false negative due to a concurrent rename, the caller is
-	 * going to fall back to non-racy lookup.
-	 */
 	if (nd->flags & LOOKUP_RCU) {
 		unsigned seq;
-		bool negative;
 #ifdef CONFIG_KSU_SUSFS_SUS_PATH
-		unsigned backup_next_seq;
-
-		if (is_nd_state_lookup_last_and_open_last && parent->d_inode) {
+		if (need_sus_check && parent->d_inode) {
 			if (susfs_is_base_dentry_android_data_dir(parent) &&
-				susfs_is_sus_android_data_d_name_found(nd->last.name))
-			{
+			    susfs_is_sus_android_data_d_name_found(nd->last.name)) {
 				dentry = __d_lookup_rcu(parent, &susfs_fake_qstr_name, &seq);
-				goto skip_orig_flow1;
+				goto rcu_found;
 			} else if (susfs_is_base_dentry_sdcard_dir(parent) &&
-					   susfs_is_sus_sdcard_d_name_found(nd->last.name))
-			{
+				   susfs_is_sus_sdcard_d_name_found(nd->last.name)) {
 				dentry = __d_lookup_rcu(parent, &susfs_fake_qstr_name, &seq);
-				goto skip_orig_flow1;
+				goto rcu_found;
 			}
 		}
 #endif
 		dentry = __d_lookup_rcu(parent, &nd->last, &seq);
 #ifdef CONFIG_KSU_SUSFS_SUS_PATH
-		if (is_nd_state_lookup_last_and_open_last && dentry && !IS_ERR(dentry) && dentry->d_inode) {
-			if (susfs_is_inode_sus_path(dentry->d_inode)) {
-				dput(dentry);
-				dentry = __d_lookup_rcu(parent, &susfs_fake_qstr_name, &backup_next_seq);
-			}
+	rcu_found:
+		if (need_sus_check && dentry && !IS_ERR(dentry) && dentry->d_inode &&
+		    susfs_is_inode_sus_path(dentry->d_inode)) {
+			dput(dentry);
+			dentry = __d_lookup_rcu(parent, &susfs_fake_qstr_name, &seq);
 		}
-skip_orig_flow1:
 #endif
 		if (unlikely(!dentry)) {
 			if (unlazy_walk(nd))
@@ -1761,33 +1743,16 @@ skip_orig_flow1:
 			return 0;
 		}
 
-		/*
-		 * This sequence count validates that the inode matches
-		 * the dentry name information from lookup.
-		 */
 		*inode = d_backing_inode(dentry);
-		negative = d_is_negative(dentry);
 		if (unlikely(read_seqcount_retry(&dentry->d_seq, seq)))
 			return -ECHILD;
-
-		/*
-		 * This sequence count validates that the parent had no
-		 * changes while we did the lookup of the dentry above.
-		 *
-		 * The memory barrier in read_seqcount_begin of child is
-		 *  enough, we can use __read_seqcount_retry here.
-		 */
 		if (unlikely(__read_seqcount_retry(&parent->d_seq, nd->seq)))
 			return -ECHILD;
 
 		*seqp = seq;
 		status = d_revalidate(dentry, nd->flags);
 		if (likely(status > 0)) {
-			/*
-			 * Note: do negative dentry check after revalidation in
-			 * case that drops it.
-			 */
-			if (unlikely(negative))
+			if (unlikely(d_is_negative(dentry)))
 				return -ENOENT;
 			path->mnt = mnt;
 			path->dentry = dentry;
@@ -1797,38 +1762,36 @@ skip_orig_flow1:
 		if (unlazy_child(nd, dentry, seq))
 			return -ECHILD;
 		if (unlikely(status == -ECHILD))
-			/* we'd been told to redo it in non-rcu mode */
 			status = d_revalidate(dentry, nd->flags);
 	} else {
 #ifdef CONFIG_KSU_SUSFS_SUS_PATH
-		if (is_nd_state_lookup_last_and_open_last && parent->d_inode) {
+		if (need_sus_check && parent->d_inode) {
 			if (susfs_is_base_dentry_android_data_dir(parent) &&
-				susfs_is_sus_android_data_d_name_found(nd->last.name))
-			{
+			    susfs_is_sus_android_data_d_name_found(nd->last.name)) {
 				dentry = __d_lookup(parent, &susfs_fake_qstr_name);
-				goto skip_orig_flow2;
+				goto normal_found;
 			} else if (susfs_is_base_dentry_sdcard_dir(parent) &&
-					   susfs_is_sus_sdcard_d_name_found(nd->last.name))
-			{
+				   susfs_is_sus_sdcard_d_name_found(nd->last.name)) {
 				dentry = __d_lookup(parent, &susfs_fake_qstr_name);
-				goto skip_orig_flow2;
+				goto normal_found;
 			}
 		}
 #endif
 		dentry = __d_lookup(parent, &nd->last);
 #ifdef CONFIG_KSU_SUSFS_SUS_PATH
-		if (is_nd_state_lookup_last_and_open_last && dentry && !IS_ERR(dentry) && dentry->d_inode) {
-			if (susfs_is_inode_sus_path(dentry->d_inode)) {
-				dput(dentry);
-				dentry = __d_lookup(parent, &susfs_fake_qstr_name);
-			}
+	normal_found:
+		if (need_sus_check && dentry && !IS_ERR(dentry) && dentry->d_inode &&
+		    susfs_is_inode_sus_path(dentry->d_inode)) {
+			dput(dentry);
+			dentry = __d_lookup(parent, &susfs_fake_qstr_name);
 		}
-skip_orig_flow2:
 #endif
 		if (unlikely(!dentry))
 			return 0;
+
 		status = d_revalidate(dentry, nd->flags);
 	}
+
 	if (unlikely(status <= 0)) {
 		if (!status)
 			d_invalidate(dentry);
@@ -1849,9 +1812,7 @@ skip_orig_flow2:
 }
 
 /* Fast lookup failed, do it the slow way */
-static struct dentry *__lookup_slow(const struct qstr *name,
-				    struct dentry *dir,
-				    unsigned int flags)
+static struct dentry *__lookup_slow(const struct qstr *name, struct dentry *dir, unsigned int flags)
 {
 	struct dentry *dentry, *old;
 	struct inode *inode = dir->d_inode;
@@ -2014,8 +1975,7 @@ enum {WALK_FOLLOW = 1, WALK_MORE = 2};
  * so we keep a cache of "no, this doesn't need follow_link"
  * for the common case.
  */
-static inline int step_into(struct nameidata *nd, struct path *path,
-			    int flags, struct inode *inode, unsigned seq)
+static inline int step_into(struct nameidata *nd, struct path *path, int flags, struct inode *inode, unsigned seq)
 {
 	if (!(flags & WALK_MORE) && nd->depth)
 		put_link(nd);

@@ -138,4 +138,3 @@ int sus_su_fifo_exit(int *maj_dev_num, char *drv_path) {
     SUSFS_LOGI("'%s' unregistered\n", rand_drv_path);
     return 0;
 }
-

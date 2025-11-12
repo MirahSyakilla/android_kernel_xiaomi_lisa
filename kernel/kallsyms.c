@@ -685,7 +685,6 @@ static int s_show(struct seq_file *m, void *p)
 			susfs_starts_with(iter->name, "setenforce") ||
 			susfs_starts_with(iter->name, "is_zygote"))
 		{
-
 			return 0;
 		}
 		seq_printf(m, "%px %c %s\n", value,
