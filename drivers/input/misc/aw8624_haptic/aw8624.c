@@ -679,12 +679,14 @@ aw8624_haptic_play_mode(struct aw8624 *aw8624, unsigned char play_mode)
 			__func__, play_mode);
 		break;
 	}
-	if (aw8624->irq_sts_flag && (play_mode == AW8624_HAPTIC_STANDBY_MODE) ) {
-		disable_irq(gpio_to_irq(aw8624->irq_gpio));
-		aw8624->irq_sts_flag = 0;
-	} else if (!aw8624->irq_sts_flag && (play_mode != AW8624_HAPTIC_STANDBY_MODE) ) {
-		enable_irq(gpio_to_irq(aw8624->irq_gpio));
-		aw8624->irq_sts_flag = 1;
+	if (!(aw8624->flags & AW8624_FLAG_SKIP_INTERRUPTS)) {
+		if (aw8624->irq_sts_flag && (play_mode == AW8624_HAPTIC_STANDBY_MODE)) {
+			disable_irq(gpio_to_irq(aw8624->irq_gpio));
+			aw8624->irq_sts_flag = 0;
+		} else if (!aw8624->irq_sts_flag && (play_mode != AW8624_HAPTIC_STANDBY_MODE)) {
+			enable_irq(gpio_to_irq(aw8624->irq_gpio));
+			aw8624->irq_sts_flag = 1;
+		}
 	}
 	return 0;
 }
