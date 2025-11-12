@@ -2788,10 +2788,8 @@ static int aw8624_parse_dt(struct device *dev, struct aw8624 *aw8624,
 			printk("%s: Read qcom,wf-pattern property failed !\n",
 			       __func__);
 		}
-		printk
-		    ("%s: %d  effect->pattern_length=%d  effect->pattern=%d \n",
-		     __func__, __LINE__, effect->pattern_length,
-		     (int)effect->pattern);
+		printk("%s: %d  effect->pattern_length=%d  effect->pattern=%p\n",
+			__func__, __LINE__, effect->pattern_length, effect->pattern);
 
 		effect->play_rate_us = config->play_rate_us;
 		rc = of_property_read_u32(child_node, "qcom,wf-play-rate-us",
@@ -4350,14 +4348,14 @@ aw8624_i2c_probe(struct i2c_client *i2c, const struct i2c_device_id *id)
 	int i;
 #endif
 
-	pr_info("%s:      enter\n", __func__);
+	pr_info("%s: enter\n", __func__);
 	if (!i2c_check_functionality(i2c->adapter, I2C_FUNC_I2C)) {
 		dev_err(&i2c->dev, "check_functionality failed\n");
 		return -EIO;
 	}
 
 	aw8624 = devm_kzalloc(&i2c->dev, sizeof(struct aw8624), GFP_KERNEL);
-	if (aw8624 == NULL)
+	if (!aw8624)
 		return -ENOMEM;
 
 	input_dev = devm_input_allocate_device(&i2c->dev);
@@ -4387,36 +4385,35 @@ aw8624_i2c_probe(struct i2c_client *i2c, const struct i2c_device_id *id)
 	aw8624->aw8624_pinctrl = devm_pinctrl_get(&i2c->dev);
 	if (IS_ERR(aw8624->aw8624_pinctrl)) {
 		if (PTR_ERR(aw8624->aw8624_pinctrl) == -EPROBE_DEFER) {
-			printk("pinctrl not ready\n");
-			rc = -EPROBE_DEFER;
-			return rc;
+			pr_info("pinctrl not ready\n");
+			return -EPROBE_DEFER;
 		}
-		printk("Target does not use pinctrl\n");
+		pr_info("Target does not use pinctrl\n");
 		aw8624->aw8624_pinctrl = NULL;
-		rc = -EINVAL;
-		return rc;
+		return -EINVAL;
 	}
 	for (i = 0; i < ARRAY_SIZE(aw8624->pinctrl_state); i++) {
 		const char *n = pctl_names[i];
 		struct pinctrl_state *state =
 		    pinctrl_lookup_state(aw8624->aw8624_pinctrl, n);
 		if (IS_ERR(state)) {
-			printk("cannot find '%s'\n", n);
-			rc = -EINVAL;
-			//goto exit;
+			pr_err("cannot find '%s'\n", n);
+			// Continue — allow probe without full pinctrl
+			aw8624->pinctrl_state[i] = NULL;
+		} else {
+			pr_info("%s: found pin control %s\n", __func__, n);
+			aw8624->pinctrl_state[i] = state;
+			aw8624->enable_pin_control = 1;
 		}
-		pr_info("%s: found pin control %s\n", __func__, n);
-		aw8624->pinctrl_state[i] = state;
-		aw8624->enable_pin_control = 1;
-		aw8624_set_interrupt(aw8624);
 	}
+	aw8624_set_interrupt(aw8624);
 #endif
+
 	if (!aw8624->enable_pin_control) {
 		if (gpio_is_valid(aw8624->reset_gpio)) {
-			ret =
-			    devm_gpio_request_one(&i2c->dev, aw8624->reset_gpio,
-						  GPIOF_OUT_INIT_LOW,
-						  "aw8624_rst");
+			ret = devm_gpio_request_one(&i2c->dev, aw8624->reset_gpio,
+						    GPIOF_OUT_INIT_LOW,
+						    "aw8624_rst");
 			if (ret) {
 				dev_err(&i2c->dev, "%s: rst request failed\n",
 					__func__);
@@ -4425,9 +4422,10 @@ aw8624_i2c_probe(struct i2c_client *i2c, const struct i2c_device_id *id)
 		}
 	}
 
+	/* IRQ GPIO is intentionally skipped — requesting it caused haptic malfunction */
 	if (gpio_is_valid(aw8624->irq_gpio)) {
-		pr_warn("aw8624: Skipping irq...\n");
-		aw8624->irq_gpio = -1;
+		pr_warn("aw8624: Skipping IRQ GPIO request to avoid haptic failure.\n");
+		aw8624->irq_gpio = -1;  // invalidate to bypass later IRQ setup
 	}
 
 	ret = aw8624_read_chipid(aw8624);
@@ -4446,18 +4444,18 @@ aw8624_i2c_probe(struct i2c_client *i2c, const struct i2c_device_id *id)
 						gpio_to_irq(aw8624->irq_gpio),
 						NULL, aw8624_irq, irq_flags,
 						"aw8624", aw8624);
-		aw8624->irq_sts_flag = 1;
-		pr_info("%s: aw8624_irq success.\n", __func__);
 		if (ret != 0) {
 			dev_err(&i2c->dev, "%s: failed to request IRQ %d: %d\n",
 				__func__, gpio_to_irq(aw8624->irq_gpio), ret);
 			goto err_irq;
 		}
+		aw8624->irq_sts_flag = 1;
+		pr_info("%s: IRQ registered successfully.\n", __func__);
 	} else {
-		dev_info(&i2c->dev, "%s skipping IRQ registration\n", __func__);
-		/* disable feature support if gpio was invalid */
+		dev_info(&i2c->dev, "%s: IRQ registration skipped (by config or GPIO invalid).\n",
+			 __func__);
 		aw8624->flags |= AW8624_FLAG_SKIP_INTERRUPTS;
-		pr_err("%s: aw8624_irq failed.\n", __func__);
+		// No error — intentional skip
 	}
 
 	hrtimer_init(&aw8624->stop_timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
@@ -4480,23 +4478,22 @@ aw8624_i2c_probe(struct i2c_client *i2c, const struct i2c_device_id *id)
 		effect_count_max = aw8624->effects_count + 1;
 	else
 		effect_count_max = FF_EFFECT_COUNT_MAX;
+
 	rc = input_ff_create(input_dev, effect_count_max);
 	if (rc < 0) {
-		dev_err(aw8624->dev, "create FF input device failed, rc=%d\n",
-			rc);
-		return rc;
+		dev_err(aw8624->dev, "create FF input device failed, rc=%d\n", rc);
+		goto err_input_ff;
 	}
-	aw8624->work_queue =
-	    create_singlethread_workqueue("aw8624_vibrator_work_queue");
+
+	aw8624->work_queue = create_singlethread_workqueue("aw8624_vibrator_work_queue");
 	if (!aw8624->work_queue) {
-		dev_err(&i2c->dev,
-			"%s: Error creating aw8624_vibrator_work_queue\n",
-			__func__);
-		goto err_sysfs;
+		dev_err(&i2c->dev, "%s: Error creating workqueue\n", __func__);
+		goto err_create_queue;
 	}
 	INIT_WORK(&aw8624->set_gain_work, aw8624_haptics_set_gain_work_routine);
-	aw8624->ram_init = 0;//Daniel 20210527 modify
-	aw8624->ram_retry_cnt = 0;//Daniel 20211009 modify
+	aw8624->ram_init = 0;      // Daniel 20210527 modify
+	aw8624->ram_retry_cnt = 0; // Daniel 20211009 modify
+
 	aw8624_vibrator_init(aw8624);
 	aw8624_haptic_init(aw8624);
 	aw8624_ram_init(aw8624);
@@ -4506,45 +4503,46 @@ aw8624_i2c_probe(struct i2c_client *i2c, const struct i2c_device_id *id)
 	ff->playback = aw8624_haptics_playback;
 	ff->erase = aw8624_haptics_erase;
 	ff->set_gain = aw8624_haptics_set_gain;
+
 	rc = input_register_device(input_dev);
 	if (rc < 0) {
-		dev_err(aw8624->dev, "register input device failed, rc=%d\n",
-			rc);
-		goto destroy_ff;
+		dev_err(aw8624->dev, "register input device failed, rc=%d\n", rc);
+		goto err_register_input;
 	}
 
 	dev_set_drvdata(&i2c->dev, aw8624);
-	ret =
-	    sysfs_create_group(&i2c->dev.kobj,
-			       &aw8624_vibrator_attribute_group);
+
+	ret = sysfs_create_group(&i2c->dev.kobj, &aw8624_vibrator_attribute_group);
 	if (ret < 0) {
-		dev_info(&i2c->dev, "%s error creating sysfs attr files\n",
-			 __func__);
+		dev_err(&i2c->dev, "%s: error creating sysfs attr files\n", __func__);
 		goto err_sysfs;
 	}
 
 	g_aw8624 = aw8624;
-
 	pr_info("%s: probe completed successfully!\n", __func__);
 
 	return 0;
 
 err_sysfs:
-	devm_free_irq(&i2c->dev, gpio_to_irq(aw8624->irq_gpio), aw8624);
-destroy_ff:
-	input_ff_destroy(aw8624->input_dev);
+	sysfs_remove_group(&i2c->dev.kobj, &aw8624_vibrator_attribute_group);
+err_register_input:
+err_create_queue:
+	if (aw8624->work_queue) {
+		destroy_workqueue(aw8624->work_queue);
+		aw8624->work_queue = NULL;
+	}
+err_input_ff:
+	input_ff_destroy(input_dev);
 err_irq:
+	if (aw8624->irq_sts_flag) {
+		devm_free_irq(&i2c->dev, gpio_to_irq(aw8624->irq_gpio), aw8624);
+		aw8624->irq_sts_flag = 0;
+	}
 err_id:
-	if (gpio_is_valid(aw8624->irq_gpio))
-		devm_gpio_free(&i2c->dev, aw8624->irq_gpio);
-err_irq_gpio_request:
-	if (gpio_is_valid(aw8624->reset_gpio))
-		devm_gpio_free(&i2c->dev, aw8624->reset_gpio);
 err_reset_gpio_request:
 err_parse_dt:
 	device_init_wakeup(aw8624->dev, false);
-	devm_kfree(&i2c->dev, aw8624);
-	aw8624 = NULL;
+	// All devm_ resources (kzalloc, gpio, irq, input_dev, etc.) auto-freed
 	return ret;
 }
 
