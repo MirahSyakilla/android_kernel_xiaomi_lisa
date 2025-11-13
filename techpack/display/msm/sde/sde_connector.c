@@ -1048,9 +1048,9 @@ void sde_connector_helper_bridge_disable(struct drm_connector *connector)
 
 void sde_connector_helper_bridge_enable(struct drm_connector *connector)
 {
-	struct sde_connector *c_conn = NULL;
-	struct dsi_display *display;
-	struct sde_kms *sde_kms;
+    struct sde_connector *c_conn;
+    struct dsi_display *display = NULL;
+    struct sde_kms *sde_kms;
 
 	sde_kms = _sde_connector_get_kms(connector);
 	if (!sde_kms) {
@@ -1060,6 +1060,7 @@ void sde_connector_helper_bridge_enable(struct drm_connector *connector)
 
 	c_conn = to_sde_connector(connector);
 
+	/* Only handle DSI connectors */
 	if (c_conn->connector_type == DRM_MODE_CONNECTOR_DSI) {
 		display = (struct dsi_display *) c_conn->display;
 
@@ -1070,10 +1071,11 @@ void sde_connector_helper_bridge_enable(struct drm_connector *connector)
 		 * So delay backlight update to these panels until the
 		 * first frame commit is received from the HW.
 		 */
-		if (display->panel->bl_config.bl_update ==
-					BL_UPDATE_DELAY_UNTIL_FIRST_FRAME)
-			sde_encoder_wait_for_event(c_conn->encoder,
-					MSM_ENC_TX_COMPLETE);
+        if (display->panel->bl_config.bl_update == BL_UPDATE_DELAY_UNTIL_FIRST_FRAME)
+            sde_encoder_wait_for_event(c_conn->encoder, MSM_ENC_TX_COMPLETE);
+
+        /* Allow backlight update for DSI panels */
+        display->panel->bl_config.allow_bl_update = true;
 	}
 
 	display->panel->bl_config.allow_bl_update = true;
@@ -1083,6 +1085,7 @@ void sde_connector_helper_bridge_enable(struct drm_connector *connector)
 		c_conn->bl_device->props.state &= ~BL_CORE_FBBLANK;
 		backlight_update_status(c_conn->bl_device);
 	}
+
 	c_conn->panel_dead = false;
 }
 
