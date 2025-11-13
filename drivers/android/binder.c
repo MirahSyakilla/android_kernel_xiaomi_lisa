@@ -5604,7 +5604,7 @@ static void binder_add_freeze_work(struct binder_proc *proc, bool is_frozen)
 		binder_put_node(prev);
 }
 
-static int binder_ioctl_freeze(struct binder_freeze_info *info,
+static __maybe_unused int binder_ioctl_freeze(struct binder_freeze_info *info,
 			       struct binder_proc *target_proc)
 {
 	int ret = 0;
@@ -5655,7 +5655,7 @@ static int binder_ioctl_freeze(struct binder_freeze_info *info,
 	return ret;
 }
 
-static int binder_ioctl_get_freezer_info(
+static __maybe_unused int binder_ioctl_get_freezer_info(
 				struct binder_frozen_status_info *info)
 {
 	struct binder_proc *target_proc;
