@@ -2757,49 +2757,59 @@ static ssize_t goodix_lockdown_info_read(struct file *file, char __user *buf,
 	else
 		return cnt;
 }
+
 static const struct file_operations goodix_lockdown_info_ops = {
 	.read = goodix_lockdown_info_read,
 };
 
-static ssize_t goodix_fw_version_info_read(struct file *file, char __user *buf,
-					 size_t count, loff_t *pos)
+static ssize_t goodix_fw_version_info_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
 {
-	struct goodix_ts_hw_ops *hw_ops = goodix_core_data->hw_ops;
-	struct goodix_fw_version chip_ver = goodix_core_data->fw_version;
-	char k_buf[100] = {0};
-	int ret = 0;
-	int cnt = -EINVAL;
+    struct goodix_ts_hw_ops *hw_ops = goodix_core_data->hw_ops;
+    struct goodix_fw_version chip_ver = goodix_core_data->fw_version;
+    char k_buf[100] = {0};  /* Buffer for version info */
+    int ret = 0;
+    int cnt = 0;  /* Start with 0 instead of -EINVAL */
 
-	if (*pos != 0 || !hw_ops)
-		return 0;
-	if (hw_ops->read_version) {
-		ret = hw_ops->read_version(goodix_core_data, &chip_ver);
-		if (!ret) {
-			cnt = snprintf(&k_buf[0], PAGE_SIZE,
-				"patch_pid:%s\n",
-				chip_ver.patch_pid);
-			cnt += snprintf(&k_buf[cnt], PAGE_SIZE,
+    if (*pos != 0 || !hw_ops)
+        return 0;
+
+    if (hw_ops->read_version) {
+        ret = hw_ops->read_version(goodix_core_data, &chip_ver);
+        if (!ret) {
+            cnt = snprintf(&k_buf[0], sizeof(k_buf), "patch_pid:%s\n", chip_ver.patch_pid);
+            if (cnt < 0)
+                cnt = 0;
+            cnt += snprintf(&k_buf[cnt], sizeof(k_buf) - cnt,
 				"patch_vid:%02x%02x%02x%02x\n",
 				chip_ver.patch_vid[0], chip_ver.patch_vid[1],
 				chip_ver.patch_vid[2], chip_ver.patch_vid[3]);
-		}
-	}
+            if (cnt < 0)
+                cnt = 0;
+        }
+    }
 
-	if (hw_ops->get_ic_info) {
-		ret = hw_ops->get_ic_info(goodix_core_data, &goodix_core_data->ic_info, false);
-		if (!ret) {
-			cnt += snprintf(&k_buf[cnt], PAGE_SIZE,
-				"config_version:%x\n", goodix_core_data->ic_info.version.config_version);
-		}
-	}
-	cnt = cnt > count ? count : cnt;
-	ret = copy_to_user(buf, k_buf, cnt);
-	*pos += cnt;
-	if (ret != 0)
-		return 0;
-	else
-		return cnt;
+    if (hw_ops->get_ic_info) {
+        ret = hw_ops->get_ic_info(goodix_core_data, &goodix_core_data->ic_info, false);
+        if (!ret) {
+            cnt += snprintf(&k_buf[cnt], sizeof(k_buf) - cnt,
+				"config_version:%x\n",
+				goodix_core_data->ic_info.version.config_version);
+            if (cnt < 0)
+                cnt = 0;
+        }
+    }
+
+    /* Clamp count to user buffer size */
+    cnt = cnt > count ? count : cnt;
+
+    ret = copy_to_user(buf, k_buf, cnt);
+    if (ret)  /* partial copy or error */
+        return -EFAULT;
+
+    *pos += cnt;
+    return cnt;
 }
+
 static const struct file_operations goodix_fw_version_info_ops = {
 	.read = goodix_fw_version_info_read,
 };
