@@ -59,7 +59,7 @@ static struct attribute *mi_thermal_dev_attr_group[] = {
 	NULL,
 };
 
-static const char *get_screen_state_name(int mode)
+static __maybe_unused const char *get_screen_state_name(int mode)
 {
 	switch (mode) {
 	case MI_DISP_DPMS_ON:
