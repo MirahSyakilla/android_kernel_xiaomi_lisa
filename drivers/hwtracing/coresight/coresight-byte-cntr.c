@@ -77,73 +77,79 @@ static void tmc_etr_flush_bytes(loff_t *ppos, size_t bytes, size_t *len)
 }
 
 static ssize_t tmc_etr_byte_cntr_read(struct file *fp, char __user *data,
-			       size_t len, loff_t *ppos)
+                                      size_t len, loff_t *ppos)
 {
-	struct byte_cntr *byte_cntr_data = fp->private_data;
-	char *bufp;
-	int ret = 0;
-	if (!data)
-		return -EINVAL;
+    struct byte_cntr *byte_cntr_data = fp->private_data;
+    char *bufp = NULL;  /* Initialize to NULL to avoid uninitialized warning */
+    int ret = 0;
 
-	mutex_lock(&byte_cntr_data->byte_cntr_lock);
-	if (!byte_cntr_data->read_active) {
-		ret = -EINVAL;
-		goto err0;
-	}
+    if (!data)
+        return -EINVAL;
 
-	if (byte_cntr_data->enable) {
-		if (!atomic_read(&byte_cntr_data->irq_cnt)) {
-			mutex_unlock(&byte_cntr_data->byte_cntr_lock);
-			if (wait_event_interruptible(byte_cntr_data->wq,
-				atomic_read(&byte_cntr_data->irq_cnt) > 0
-				|| !byte_cntr_data->enable))
-				return -ERESTARTSYS;
-			mutex_lock(&byte_cntr_data->byte_cntr_lock);
-			if (!byte_cntr_data->read_active) {
-				ret = -EINVAL;
-				goto err0;
-			}
+    mutex_lock(&byte_cntr_data->byte_cntr_lock);
 
-		}
+    if (!byte_cntr_data->read_active) {
+        ret = -EINVAL;
+        goto err0;
+    }
 
-		tmc_etr_read_bytes(byte_cntr_data, ppos,
-				   byte_cntr_data->block_size, &len, &bufp);
+    if (byte_cntr_data->enable) {
+        if (!atomic_read(&byte_cntr_data->irq_cnt)) {
+            mutex_unlock(&byte_cntr_data->byte_cntr_lock);
+            if (wait_event_interruptible(byte_cntr_data->wq,
+                atomic_read(&byte_cntr_data->irq_cnt) > 0
+                || !byte_cntr_data->enable))
+                return -ERESTARTSYS;
+            mutex_lock(&byte_cntr_data->byte_cntr_lock);
+            if (!byte_cntr_data->read_active) {
+                ret = -EINVAL;
+                goto err0;
+            }
+        }
 
-	} else {
-		if (!atomic_read(&byte_cntr_data->irq_cnt)) {
-			tmc_etr_flush_bytes(ppos, byte_cntr_data->block_size,
-						  &len);
-			if (!len) {
-				ret = -EINVAL;
-				goto err0;
-			}
-		} else {
-			tmc_etr_read_bytes(byte_cntr_data, ppos,
-						   byte_cntr_data->block_size,
-						   &len, &bufp);
-		}
-	}
+        tmc_etr_read_bytes(byte_cntr_data, ppos,
+                           byte_cntr_data->block_size, &len, &bufp);
 
-	if (copy_to_user(data, bufp, len)) {
-		mutex_unlock(&byte_cntr_data->byte_cntr_lock);
-		dev_dbg(&tmcdrvdata->csdev->dev,
-			"%s: copy_to_user failed\n", __func__);
-		return -EFAULT;
-	}
+    } else {
+        if (!atomic_read(&byte_cntr_data->irq_cnt)) {
+            tmc_etr_flush_bytes(ppos, byte_cntr_data->block_size, &len);
+            if (!len) {
+                ret = -EINVAL;
+                goto err0;
+            }
+        } else {
+            tmc_etr_read_bytes(byte_cntr_data, ppos,
+                               byte_cntr_data->block_size, &len, &bufp);
+        }
+    }
 
-	if (*ppos + len >= tmcdrvdata->size)
-		*ppos = 0;
-	else
-		*ppos += len;
+    /* Safety check: bufp must be set */
+    if (!bufp) {
+        ret = -EINVAL;
+        goto err0;
+    }
 
-	goto out;
+    if (copy_to_user(data, bufp, len)) {
+        mutex_unlock(&byte_cntr_data->byte_cntr_lock);
+        dev_dbg(&tmcdrvdata->csdev->dev,
+            "%s: copy_to_user failed\n", __func__);
+        return -EFAULT;
+    }
+
+    if (*ppos + len >= tmcdrvdata->size)
+        *ppos = 0;
+    else
+        *ppos += len;
+
+    goto out;
 
 err0:
-	mutex_unlock(&byte_cntr_data->byte_cntr_lock);
-	return ret;
+    mutex_unlock(&byte_cntr_data->byte_cntr_lock);
+    return ret;
+
 out:
-	mutex_unlock(&byte_cntr_data->byte_cntr_lock);
-	return len;
+    mutex_unlock(&byte_cntr_data->byte_cntr_lock);
+    return len;
 }
 
 void tmc_etr_byte_cntr_start(struct byte_cntr *byte_cntr_data)
