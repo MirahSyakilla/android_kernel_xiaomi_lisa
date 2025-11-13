@@ -378,10 +378,10 @@ unsigned long lruvec_lru_size(struct lruvec *lruvec, enum lru_list lru, int zone
 	int zid;
 
 	if (!mem_cgroup_disabled()) {
-		for (zid = 0; zid < MAX_NR_ZONES; zid++)
-			lru_size += mem_cgroup_get_zone_lru_size(lruvec, lru, zid);
-	} else
+		lru_size = mem_cgroup_get_lru_size(lruvec, lru);
+	} else {
 		lru_size = node_page_state(lruvec_pgdat(lruvec), NR_LRU_BASE + lru);
+	}
 
 	for (zid = zone_idx + 1; zid < MAX_NR_ZONES; zid++) {
 		struct zone *zone = &lruvec_pgdat(lruvec)->node_zones[zid];
@@ -390,16 +390,12 @@ unsigned long lruvec_lru_size(struct lruvec *lruvec, enum lru_list lru, int zone
 		if (!managed_zone(zone))
 			continue;
 
-		if (!mem_cgroup_disabled())
-			size = mem_cgroup_get_zone_lru_size(lruvec, lru, zid);
-		else
-			size = zone_page_state(&lruvec_pgdat(lruvec)->node_zones[zid],
+		size = zone_page_state(&lruvec_pgdat(lruvec)->node_zones[zid],
 				       NR_ZONE_LRU_BASE + lru);
 		lru_size -= min(size, lru_size);
 	}
 
 	return lru_size;
-
 }
 
 /*
@@ -1715,13 +1711,13 @@ int __isolate_lru_page(struct page *page, isolate_mode_t mode)
 	return ret;
 }
 
-
 /*
  * Update LRU sizes after isolating pages. The LRU size updates must
  * be complete before mem_cgroup_update_lru_size due to a santity check.
  */
 static __always_inline void update_lru_sizes(struct lruvec *lruvec,
-			enum lru_list lru, unsigned long *nr_zone_taken)
+			enum lru_list lru, unsigned long *nr_zone_taken,
+			unsigned long nr_taken)
 {
 	int zid;
 
@@ -1730,11 +1726,10 @@ static __always_inline void update_lru_sizes(struct lruvec *lruvec,
 			continue;
 
 		__update_lru_size(lruvec, lru, zid, -nr_zone_taken[zid]);
-#ifdef CONFIG_MEMCG
-		mem_cgroup_update_lru_size(lruvec, lru, zid, -nr_zone_taken[zid]);
-#endif
 	}
-
+#ifdef CONFIG_MEMCG
+	mem_cgroup_update_lru_size(lruvec, lru, -nr_taken);
+#endif
 }
 
 /**
@@ -1752,7 +1747,6 @@ static __always_inline void update_lru_sizes(struct lruvec *lruvec,
  * @dst:	The temp list to put pages on to.
  * @nr_scanned:	The number of pages that were scanned.
  * @sc:		The scan_control struct for this reclaim session
- * @mode:	One of the LRU isolation modes
  * @lru:	LRU list id for isolating
  *
  * returns how many pages were moved onto *@dst.
@@ -1819,12 +1813,12 @@ static unsigned long isolate_lru_pages(unsigned long nr_to_scan,
 	}
 
 	/*
-	 * Splice any skipped pages to the start of the LRU list. Note that
-	 * this disrupts the LRU order when reclaiming for lower zones but
-	 * we cannot splice to the tail. If we did then the SWAP_CLUSTER_MAX
-	 * scanning would soon rescan the same pages to skip and put the
-	 * system at risk of premature OOM.
-	 */
+		 * Splice any skipped pages to the start of the LRU list. Note that
+		 * this disrupts the LRU order when reclaiming for lower zones but
+		 * we cannot splice to the tail. If we did then the SWAP_CLUSTER_MAX
+		 * scanning would soon rescan the same pages to skip and put the
+		 * system at risk of premature OOM.
+		 */
 	if (!list_empty(&pages_skipped)) {
 		int zid;
 
@@ -1840,7 +1834,7 @@ static unsigned long isolate_lru_pages(unsigned long nr_to_scan,
 	*nr_scanned = total_scan;
 	trace_mm_vmscan_lru_isolate(sc->reclaim_idx, sc->order, nr_to_scan,
 				    total_scan, skipped, nr_taken, mode, lru);
-	update_lru_sizes(lruvec, lru, nr_zone_taken);
+	update_lru_sizes(lruvec, lru, nr_zone_taken, nr_taken);
 	return nr_taken;
 }
 
