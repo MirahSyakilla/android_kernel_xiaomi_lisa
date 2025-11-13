@@ -318,7 +318,7 @@ struct dsi_panel *dsi_panel_get(struct device *parent,
 				int topology_override,
 				bool trusted_vm_env);
 
-static void hbm_recover_backlight_delayed_work(struct work_struct *work);
+static __maybe_unused void hbm_recover_backlight_delayed_work(struct work_struct *work);
 int dsi_panel_set_hbm_mode(struct dsi_panel *panel, bool enable);
 
 int dsi_panel_trigger_esd_attack(struct dsi_panel *panel, bool trusted_vm_env);
