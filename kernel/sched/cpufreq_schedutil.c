@@ -896,6 +896,21 @@ static ssize_t up_rate_limit_us_store(struct gov_attr_set *attr_set,
 	if (kstrtouint(buf, 10, &rate_limit_us))
 		return -EINVAL;
 
+	/* --- Force CPU Override --- */
+	/* Identify the CPU for this tunable set */
+	if (!list_empty(&attr_set->policy_list)) {
+		sg_policy = list_first_entry(&attr_set->policy_list, struct sugov_policy, tunables_hook);
+		
+		/* If Little Cluster (CPU 0), enforce min 2000us */
+		if (sg_policy->policy->cpu == 0 && rate_limit_us < 2000) {
+			rate_limit_us = 2000;
+		}
+		/* If Big/Prime Cluster (CPU 4/7), enforce min 1000us */
+		else if (sg_policy->policy->cpu >= 4 && rate_limit_us < 1000) {
+			rate_limit_us = 1000;
+		}
+	}
+
 	tunables->up_rate_limit_us = rate_limit_us;
 
 	list_for_each_entry(sg_policy, &attr_set->policy_list, tunables_hook) {
@@ -915,6 +930,18 @@ static ssize_t down_rate_limit_us_store(struct gov_attr_set *attr_set,
 
 	if (kstrtouint(buf, 10, &rate_limit_us))
 		return -EINVAL;
+
+	/* --- Force Override --- */
+	if (!list_empty(&attr_set->policy_list)) {
+		sg_policy = list_first_entry(&attr_set->policy_list, struct sugov_policy, tunables_hook);
+		
+		if (sg_policy->policy->cpu == 0 && rate_limit_us < 2000) {
+			rate_limit_us = 2000;
+		}
+		else if (sg_policy->policy->cpu >= 4 && rate_limit_us < 1000) {
+			rate_limit_us = 1000;
+		}
+	}
 
 	tunables->down_rate_limit_us = rate_limit_us;
 
@@ -1236,21 +1263,29 @@ static int sugov_init(struct cpufreq_policy *policy)
 		goto stop_kthread;
 	}
 
-	tunables->up_rate_limit_us = cpufreq_policy_transition_delay_us(policy);
-	tunables->down_rate_limit_us = cpufreq_policy_transition_delay_us(policy);
+	/* REMOVED: tunables->up/down_rate_limit_us = cpufreq_policy_transition_delay_us(policy); */
+	/* Set these manually in the switch case below */
+	
 	tunables->hispeed_load = DEFAULT_HISPEED_LOAD;
 	tunables->hispeed_freq = 0;
 
 	switch (policy->cpu) {
 	default:
-	case 0:
+	case 0: /* Little Cluster - Battery Focus */
 		tunables->rtg_boost_freq = DEFAULT_CPU0_RTG_BOOST_FREQ;
+		tunables->up_rate_limit_us = 2000;   /* Delay frequency spikes by 2ms */
+		tunables->down_rate_limit_us = 2000; /* Hold frequency for 2ms */
+		tunables->hispeed_load = 95;         /* Resist jumping to high speeds */
 		break;
-	case 4:
+	case 4: /* Big Cluster - Balanced */
 		tunables->rtg_boost_freq = DEFAULT_CPU4_RTG_BOOST_FREQ;
+		tunables->up_rate_limit_us = 1000;
+		tunables->down_rate_limit_us = 1000;
 		break;
-	case 7:
+	case 7: /* Prime Core - Performance */
 		tunables->rtg_boost_freq = DEFAULT_CPU7_RTG_BOOST_FREQ;
+		tunables->up_rate_limit_us = 1000;
+		tunables->down_rate_limit_us = 1000;
 		break;
 	}
 
