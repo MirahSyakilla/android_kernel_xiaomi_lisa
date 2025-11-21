@@ -3243,20 +3243,21 @@ static int dwc3_msm_suspend(struct dwc3_msm *mdwc, bool force_power_collapse,
 
 	if (!mdwc->vbus_active && dwc->dr_mode == USB_DR_MODE_OTG &&
 		mdwc->drd_state == DRD_STATE_PERIPHERAL) {
-		/*
-		 * In some cases, the pm_runtime_suspend may be called by
-		 * usb_bam when there is pending lpm flag. However, if this is
-		 * done when cable was disconnected and otg state has not
-		 * yet changed to IDLE, then it means OTG state machine
-		 * is running and we race against it. So cancel LPM for now,
-		 * and OTG state machine will go for LPM later, after completing
-		 * transition to IDLE state.
+
+		dev_dbg(mdwc->dev, "Cable disconnected but state is PERIPHERAL. Flushing work queue...\n");
+		flush_delayed_work(&mdwc->sm_work);
+
+		/* 
+		 * Re-check the state.
+		 * If flush failed, we are stuck. We MUST force IDLE state.
+		 * 1. Forcing IDLE fixes ADB breaking on next plug (resetting the logic).
+		 * 2. Removing 'return -EBUSY' allows the device to Deep Sleep, 
+		 *    which pauses the infinite DHCP loop in Android userspace.
 		 */
-		dev_dbg(mdwc->dev,
-			"%s: cable disconnected while not in idle otg state\n",
-			__func__);
-		mutex_unlock(&mdwc->suspend_resume_mutex);
-		return -EBUSY;
+		if (mdwc->drd_state == DRD_STATE_PERIPHERAL) {
+			dev_err(mdwc->dev, "Flush failed. Forcing IDLE state to allow suspend.\n");
+			mdwc->drd_state = DRD_STATE_IDLE;
+		}
 	}
 
 	/*

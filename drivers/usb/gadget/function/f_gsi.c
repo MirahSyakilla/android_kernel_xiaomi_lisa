@@ -2622,8 +2622,17 @@ static void gsi_disable(struct usb_function *f)
 	del_timer(&gsi->gsi_rw_timer);
 	gsi->debugfs_rw_timer_enable = 0;
 
-	if (gsi->prot_id == IPA_USB_RNDIS)
+	if (gsi->prot_id == IPA_USB_RNDIS) {
+		/* 
+		 * Explicitly kill the network carrier immediately.
+		 * This stops the Android "DhcpClient" loop wakelocks instantly.
+		 */
+		if (gsi->params && gsi->params->dev) {
+			netif_carrier_off(gsi->params->dev);
+			netif_stop_queue(gsi->params->dev);
+		}
 		rndis_uninit(gsi->params);
+	}
 
 	if (gsi->prot_id == IPA_USB_RMNET)
 		gsi->rmnet_dtr_status = false;
