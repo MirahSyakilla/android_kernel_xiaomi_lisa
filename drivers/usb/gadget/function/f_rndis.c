@@ -616,6 +616,16 @@ static void rndis_disable(struct usb_function *f)
 
 	DBG(cdev, "rndis deactivated\n");
 
+	/* 
+	 * Explicitly kill the network carrier immediately.
+	 * This stops the Android "DhcpClient" loop wakelocks instantly
+	 * before the rest of the teardown logic runs.
+	 */
+	if (rndis->params && rndis->params->dev) {
+		netif_carrier_off(rndis->params->dev);
+		netif_stop_queue(rndis->params->dev);
+	}
+
 	rndis_uninit(rndis->params);
 	gether_disconnect(&rndis->port);
 
