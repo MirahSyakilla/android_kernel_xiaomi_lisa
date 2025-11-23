@@ -28,9 +28,9 @@
 				reg = <1>;
 				compatible = "arm,idle-state";
 				idle-state-name = "l3-pc";
-				entry-latency-us = <2752>;
+				entry-latency-us = <2000>;
 				exit-latency-us = <3048>;
-				min-residency-us = <6118>;
+				min-residency-us = <3000>;
 				arm,psci-suspend-param = <0x40>;
 				qcom,psci-mode = <0x4>;
 				qcom,is-reset;
@@ -55,9 +55,9 @@
 				reg = <3>;
 				compatible = "arm,idle-state";
 				idle-state-name = "llcc-off";
-				entry-latency-us = <3638>;
+				entry-latency-us = <3000>;
 				exit-latency-us = <6562>;
-				min-residency-us = <9826>;
+				min-residency-us = <5000>;
 				arm,psci-suspend-param = <0xb340>;
 				qcom,psci-mode = <0xb34>;
 				qcom,is-reset;
@@ -106,9 +106,9 @@
 					reg = <2>;
 					compatible = "arm,idle-state";
 					idle-state-name = "rail-pc";
-					entry-latency-us = <702>;
+					entry-latency-us = <500>;
 					exit-latency-us = <915>;
-					min-residency-us = <4001>;
+					min-residency-us = <2000>;
 					arm,psci-suspend-param = <0x40000004>;
 					qcom,psci-cpu-mode = <0x4>;
 					local-timer-stop;
@@ -154,9 +154,9 @@
 					reg = <2>;
 					compatible = "arm,idle-state";
 					idle-state-name = "rail-pc";
-					entry-latency-us = <526>;
+					entry-latency-us = <500>;
 					exit-latency-us = <1854>;
-					min-residency-us = <5555>;
+					min-residency-us = <2500>;
 					arm,psci-suspend-param = <0x40000004>;
 					qcom,psci-cpu-mode = <0x4>;
 					local-timer-stop;

@@ -227,7 +227,7 @@
 			pm8350c_flashlight: qcom,flashlight {
 				label = "flash";
 				qcom,led-name = "flashlight";
-				qcom,max-current-ma = <1500>;
+				qcom,max-current-ma = <300>;
 				qcom,default-led-trigger = "flashlight_trigger";
 				qcom,id = <4>;
 				qcom,flashlight-current-ma = <300>;		//each torch current
