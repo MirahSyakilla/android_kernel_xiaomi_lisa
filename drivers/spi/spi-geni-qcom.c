@@ -641,8 +641,12 @@ static int __maybe_unused spi_geni_suspend(struct device *dev)
 		return ret;
 
 	ret = pm_runtime_force_suspend(dev);
-	if (ret)
+	if (ret) {
+		/* Log the error but return 0 to prevent suspend abort */
+		dev_err(dev, "Force suspend failed %d, ignoring to allow sleep\n", ret);
 		spi_master_resume(spi);
+		return 0;
+	}
 
 	return ret;
 }
