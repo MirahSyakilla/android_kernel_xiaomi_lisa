@@ -683,7 +683,15 @@
 };
 
 &battery_charger {
-	qcom,thermal-mitigation = <3000000 1500000 1000000 500000>;
+    /* 
+     * Level 0: 5.0A (Max speed)
+     * Level 1: 4.0A (Slightly warm)
+     * Level 2: 3.0A (Warm)
+     * Level 3: 1.5A (Hot)
+     * Level 4: 1.0A (Very Hot)
+     * Level 5: 0.5A (Critical)
+     */
+	qcom,thermal-mitigation = <5000000 4000000 3000000 1500000 1000000 500000>;
 };
 
 &sdhc_1 {
@@ -810,4 +818,16 @@
 			qcom,s2-type = <PON_POWER_OFF_TYPE_HARD_RESET>;
 		};
 	};
+};
+
+&smb1390 {
+    status = "ok";
+};
+
+&smb1390_charger {
+    status = "ok";
+	/* Set max Fast Charge Current to 5A */
+    qcom,fcc-max-ua = <5000000>;
+	/* Ensure parallel charging is enabled */
+    qcom,parallel-output-mode = <1>;
 };
