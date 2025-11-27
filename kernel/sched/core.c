@@ -4817,7 +4817,7 @@ void rt_mutex_setprio(struct task_struct *p, struct task_struct *pi_task)
 	if (running)
 		set_next_task(rq, p);
 
-	check_class_changed(rq, p, prev_class, oldprio);
+check_class_changed(rq, p, prev_class, oldprio);
 out_unlock:
 	/* Avoid rq from going away on us: */
 	preempt_disable();
