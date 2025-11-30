@@ -237,6 +237,10 @@ static int rmnet_newlink(struct net *src_net, struct net_device *dev,
 		spin_unlock_irqrestore(&port->agg_lock, irq_flags);
 	}
 
+	netdev_dbg(dev, "rmnet_newlink called\n");
+	dev->hw_features &= ~(NETIF_F_GRO | NETIF_F_LRO);
+    dev->features &= ~(NETIF_F_GRO | NETIF_F_LRO);
+
 	return 0;
 
 err1:

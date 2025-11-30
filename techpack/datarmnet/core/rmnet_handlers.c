@@ -18,6 +18,7 @@
 #include <linux/if_arp.h>
 #include <linux/ip.h>
 #include <linux/ipv6.h>
+#include <linux/icmpv6.h>
 #include <net/sock.h>
 #include <linux/tracepoint.h>
 #include "rmnet_private.h"
@@ -114,6 +115,26 @@ rmnet_deliver_skb(struct sk_buff *skb, struct rmnet_port *port)
 	skb_reset_transport_header(skb);
 	skb_reset_network_header(skb);
 	rmnet_vnd_rx_fixup(skb->dev, skb->len);
+
+    /* Fix for netmgr_wl drain: Drop IPv6 Router Advertisements */
+    if (skb->protocol == htons(ETH_P_IPV6)) {
+        struct ipv6hdr *ip6h = ipv6_hdr(skb);
+        
+        /* Check if it is ICMPv6 */
+        if (ip6h->nexthdr == IPPROTO_ICMPV6) {
+            /* 
+             * Calculate location of ICMPv6 header.
+             * We use the raw value 134 for NDISC_ROUTER_ADVERTISEMENT
+             * to avoid header dependency issues in techpack.
+             */
+            struct icmp6hdr *icmp6h = (struct icmp6hdr *)(skb->data + sizeof(struct ipv6hdr));
+            
+            if (icmp6h->icmp6_type == 134) {
+                kfree_skb(skb);
+                return;
+            }
+        }
+    }
 
 	skb->pkt_type = PACKET_HOST;
 	skb_set_mac_header(skb, 0);
