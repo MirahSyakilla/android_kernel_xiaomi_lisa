@@ -131,8 +131,8 @@ static void mnt_free_id(struct mount *mnt)
  */
 static int mnt_alloc_group_id(struct mount *mnt)
 {
-	int res = ida_alloc_min(&mnt_group_ida, 1, GFP_KERNEL);
-
+	int res;
+	res = ida_alloc_min(&mnt_group_ida, 1, GFP_KERNEL);
 	if (res < 0)
 		return res;
 	mnt->mnt_group_id = res;
@@ -1005,15 +1005,19 @@ struct vfsmount *vfs_kern_mount(struct file_system_type *type,
 	if (name)
 		ret = vfs_parse_fs_string(fc, "source",
 					  name, strlen(name));
+
 	if (!ret)
 		ret = parse_monolithic_mount_data(fc, data);
 	if (!ret)
 		mnt = fc_mount(fc);
 	else
 		mnt = ERR_PTR(ret);
-
 	put_fs_context(fc);
 	return mnt;
+
+out_free_context:
+	put_fs_context(fc);
+	return ERR_PTR(-ENOMEM);
 }
 EXPORT_SYMBOL_GPL(vfs_kern_mount);
 
@@ -1690,6 +1694,47 @@ static inline bool may_mandlock(void)
 	return false;
 }
 #endif
+
+/**
+ * path_mounted - check whether path is mounted
+ * @path: path to check
+ *
+ * Determine whether @path refers to the root of a mount.
+ *
+ * Return: true if @path is the root of a mount, false if not.
+ */
+static inline bool path_mounted(const struct path *path)
+{
+	return path->mnt->mnt_root == path->dentry;
+}
+static int can_umount(const struct path *path, int flags)
+{
+	struct mount *mnt = real_mount(path->mnt);
+	if (!may_mount())
+		return -EPERM;
+	if (!path_mounted(path))
+		return -EINVAL;
+	if (!check_mnt(mnt))
+		return -EINVAL;
+	if (mnt->mnt.mnt_flags & MNT_LOCKED) /* Check optimistically */
+		return -EINVAL;
+	if (flags & MNT_FORCE && !capable(CAP_SYS_ADMIN))
+		return -EPERM;
+	return 0;
+}
+// caller is responsible for flags being sane
+int path_umount(struct path *path, int flags)
+{
+	struct mount *mnt = real_mount(path->mnt);
+	int ret;
+	ret = can_umount(path, flags);
+	if (!ret)
+		ret = do_umount(mnt, flags);
+	/* we mustn't call path_put() as that would clear mnt_expiry_mark */
+	dput(path->dentry);
+	mntput_no_expire(mnt);
+	return ret;
+}
 
 /*
  * Now umount can handle mount points as well as block devices.
@@ -3287,6 +3332,7 @@ long do_mount(const char *dev_name, const char __user *dir_name,
 	else
 		retval = do_new_mount(&path, type_page, sb_flags, mnt_flags,
 				      dev_name, data_page);
+
 dput_out:
 	path_put(&path);
 	return retval;
