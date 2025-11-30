@@ -1733,7 +1733,7 @@ static int lookup_fast(struct nameidata *nd,
 	rcu_found:
 		if (need_sus_check && dentry && !IS_ERR(dentry) && dentry->d_inode &&
 		    susfs_is_inode_sus_path(dentry->d_inode)) {
-			dput(dentry);
+			/* In RCU mode we don't hold a reference, so DO NOT call dput() */
 			dentry = __d_lookup_rcu(parent, &susfs_fake_qstr_name, &seq);
 		}
 #endif
@@ -2603,6 +2603,7 @@ int filename_lookup(int dfd, struct filename *name, unsigned flags,
 	restore_nameidata();
 #ifdef CONFIG_KSU_SUSFS_SUS_PATH
 	if (!retval && path->dentry->d_inode && unlikely(path->dentry->d_inode->i_mapping->flags & BIT_SUS_PATH)) {
+		path_put(path); /* Release the reference */
 		putname(name);
 		return -ENOENT;
 	}
