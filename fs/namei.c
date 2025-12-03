@@ -1105,6 +1105,7 @@ static int may_linkat(struct path *link)
 static int may_create_in_sticky(umode_t dir_mode, kuid_t dir_uid,
 				struct inode * const inode)
 {
+
 	if ((!sysctl_protected_fifos && S_ISFIFO(inode->i_mode)) ||
 	    (!sysctl_protected_regular && S_ISREG(inode->i_mode)) ||
 	    likely(!(dir_mode & S_ISVTX)) ||
@@ -1583,6 +1584,7 @@ static struct dentry *lookup_dcache(const struct qstr *name,
 				    unsigned int flags)
 {
 	struct dentry *dentry = d_lookup(dir, name);
+
 	if (dentry) {
 		int error = d_revalidate(dentry, flags);
 		if (unlikely(error <= 0)) {
@@ -1603,20 +1605,20 @@ static struct dentry *lookup_dcache(const struct qstr *name,
  * at all.
  */
 static struct dentry *__lookup_hash(const struct qstr *name,
-		struct dentry *base, unsigned int flags)
+				    struct dentry *base, unsigned int flags)
 {
 	struct dentry *dentry = lookup_dcache(name, base, flags);
 	struct dentry *old;
 	struct inode *dir = base->d_inode;
 
-	if (dentry)
+	if (dentry && !IS_ERR(dentry))
 		return dentry;
 
-	/* Don't create child dentry for a dead directory. */
 	if (unlikely(IS_DEADDIR(dir)))
 		return ERR_PTR(-ENOENT);
 
 	dentry = d_alloc(base, name);
+
 	if (unlikely(!dentry))
 		return ERR_PTR(-ENOMEM);
 
@@ -1629,22 +1631,17 @@ static struct dentry *__lookup_hash(const struct qstr *name,
 }
 
 static int lookup_fast(struct nameidata *nd,
-		       struct path *path, struct inode **inode,
-		       unsigned *seqp)
+		       struct path *path,
+		       struct inode **inode,
+		       unsigned int *seqp)
 {
 	struct vfsmount *mnt = nd->path.mnt;
 	struct dentry *dentry, *parent = nd->path.dentry;
 	int status = 1;
 	int err;
 
-	/*
-	 * Rename seqlock is not required here because in the off chance
-	 * of a false negative due to a concurrent rename, the caller is
-	 * going to fall back to non-racy lookup.
-	 */
 	if (nd->flags & LOOKUP_RCU) {
 		unsigned seq;
-		bool negative;
 		dentry = __d_lookup_rcu(parent, &nd->last, &seq);
 		if (unlikely(!dentry)) {
 			if (unlazy_walk(nd))
@@ -1652,33 +1649,16 @@ static int lookup_fast(struct nameidata *nd,
 			return 0;
 		}
 
-		/*
-		 * This sequence count validates that the inode matches
-		 * the dentry name information from lookup.
-		 */
 		*inode = d_backing_inode(dentry);
-		negative = d_is_negative(dentry);
 		if (unlikely(read_seqcount_retry(&dentry->d_seq, seq)))
 			return -ECHILD;
-
-		/*
-		 * This sequence count validates that the parent had no
-		 * changes while we did the lookup of the dentry above.
-		 *
-		 * The memory barrier in read_seqcount_begin of child is
-		 *  enough, we can use __read_seqcount_retry here.
-		 */
 		if (unlikely(__read_seqcount_retry(&parent->d_seq, nd->seq)))
 			return -ECHILD;
 
 		*seqp = seq;
 		status = d_revalidate(dentry, nd->flags);
 		if (likely(status > 0)) {
-			/*
-			 * Note: do negative dentry check after revalidation in
-			 * case that drops it.
-			 */
-			if (unlikely(negative))
+			if (unlikely(d_is_negative(dentry)))
 				return -ENOENT;
 			path->mnt = mnt;
 			path->dentry = dentry;
@@ -1688,14 +1668,15 @@ static int lookup_fast(struct nameidata *nd,
 		if (unlazy_child(nd, dentry, seq))
 			return -ECHILD;
 		if (unlikely(status == -ECHILD))
-			/* we'd been told to redo it in non-rcu mode */
 			status = d_revalidate(dentry, nd->flags);
 	} else {
 		dentry = __d_lookup(parent, &nd->last);
 		if (unlikely(!dentry))
 			return 0;
+
 		status = d_revalidate(dentry, nd->flags);
 	}
+
 	if (unlikely(status <= 0)) {
 		if (!status)
 			d_invalidate(dentry);
@@ -1716,9 +1697,7 @@ static int lookup_fast(struct nameidata *nd,
 }
 
 /* Fast lookup failed, do it the slow way */
-static struct dentry *__lookup_slow(const struct qstr *name,
-				    struct dentry *dir,
-				    unsigned int flags)
+static struct dentry *__lookup_slow(const struct qstr *name, struct dentry *dir, unsigned int flags)
 {
 	struct dentry *dentry, *old;
 	struct inode *inode = dir->d_inode;
@@ -1840,8 +1819,7 @@ enum {WALK_FOLLOW = 1, WALK_MORE = 2};
  * so we keep a cache of "no, this doesn't need follow_link"
  * for the common case.
  */
-static inline int step_into(struct nameidata *nd, struct path *path,
-			    int flags, struct inode *inode, unsigned seq)
+static inline int step_into(struct nameidata *nd, struct path *path, int flags, struct inode *inode, unsigned seq)
 {
 	if (!(flags & WALK_MORE) && nd->depth)
 		put_link(nd);
@@ -2159,7 +2137,6 @@ static int link_path_walk(const char *name, struct nameidata *nd)
 		err = may_lookup(nd);
 		if (err)
 			return err;
-
 		hash_len = hash_name(nd->path.dentry, name);
 
 		type = LAST_NORM;

@@ -1014,10 +1014,6 @@ struct vfsmount *vfs_kern_mount(struct file_system_type *type,
 		mnt = ERR_PTR(ret);
 	put_fs_context(fc);
 	return mnt;
-
-out_free_context:
-	put_fs_context(fc);
-	return ERR_PTR(-ENOMEM);
 }
 EXPORT_SYMBOL_GPL(vfs_kern_mount);
 

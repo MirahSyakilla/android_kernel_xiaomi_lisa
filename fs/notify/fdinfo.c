@@ -18,7 +18,7 @@
 #include "fdinfo.h"
 #include "fsnotify.h"
 
-#if defined(CONFIG_PROC_FS)
+#ifdef CONFIG_PROC_FS
 
 #if defined(CONFIG_INOTIFY_USER) || defined(CONFIG_FANOTIFY)
 
@@ -38,7 +38,7 @@ static void show_fdinfo(struct seq_file *m, struct file *f,
 	mutex_unlock(&group->mark_mutex);
 }
 
-#if defined(CONFIG_EXPORTFS)
+#ifdef CONFIG_EXPORTFS
 static void show_mark_fhandle(struct seq_file *m, struct inode *inode)
 {
 	struct {
@@ -83,14 +83,15 @@ static void inotify_fdinfo(struct seq_file *m, struct fsnotify_mark *mark)
 
 	inode_mark = container_of(mark, struct inotify_inode_mark, fsn_mark);
 	inode = igrab(fsnotify_conn_inode(mark->connector));
-	if (inode) {
-		seq_printf(m, "inotify wd:%x ino:%lx sdev:%x mask:%x ignored_mask:0 ",
-			   inode_mark->wd, inode->i_ino, inode->i_sb->s_dev,
-			   inotify_mark_user_mask(mark));
-		show_mark_fhandle(m, inode);
-		seq_putc(m, '\n');
-		iput(inode);
-	}
+	if (!inode)
+		return;
+
+	seq_printf(m, "inotify wd:%x ino:%lx sdev:%x mask:%x ignored_mask:0 ",
+		   inode_mark->wd, inode->i_ino, inode->i_sb->s_dev,
+		   inotify_mark_user_mask(mark));
+	show_mark_fhandle(m, inode);
+	seq_putc(m, '\n');
+	iput(inode);
 }
 
 void inotify_show_fdinfo(struct seq_file *m, struct file *f)

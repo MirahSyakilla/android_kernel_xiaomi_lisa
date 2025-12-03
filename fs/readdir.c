@@ -21,7 +21,6 @@
 #include <linux/unistd.h>
 #include <linux/compat.h>
 #include <linux/uaccess.h>
-
 #include <asm/unaligned.h>
 
 /*
@@ -35,7 +34,6 @@
 	unsafe_put_user(0, dst+len, label);			\
 	unsafe_copy_to_user(dst, src, len, label);		\
 } while (0)
-
 
 int iterate_dir(struct file *file, struct dir_context *ctx)
 {
@@ -240,6 +238,7 @@ static int filldir(struct dir_context *ctx, const char *name, int namlen,
 		buf->error = -EOVERFLOW;
 		return -EOVERFLOW;
 	}
+
 	prev_reclen = buf->prev_reclen;
 	if (prev_reclen && signal_pending(current))
 		return -EINTR;
@@ -284,7 +283,6 @@ SYSCALL_DEFINE3(getdents, unsigned int, fd,
 	f = fdget_pos(fd);
 	if (!f.file)
 		return -EBADF;
-
 	error = iterate_dir(f.file, &buf.ctx);
 	if (error >= 0)
 		error = buf.error;
@@ -329,6 +327,7 @@ static int filldir64(struct dir_context *ctx, const char *name, int namlen,
 	if (prev_reclen && signal_pending(current))
 		return -EINTR;
 	dirent = buf->current_dir;
+
 	prev = (void __user *)dirent - prev_reclen;
 	if (!user_access_begin(prev, reclen + prev_reclen))
 		goto efault;
@@ -420,6 +419,7 @@ static int compat_fillonedir(struct dir_context *ctx, const char *name,
 
 	if (buf->result)
 		return -EINVAL;
+
 	buf->result = verify_dirent_name(name, namlen);
 	if (buf->result < 0)
 		return buf->result;
@@ -495,6 +495,7 @@ static int compat_filldir(struct dir_context *ctx, const char *name, int namlen,
 	buf->error = -EINVAL;	/* only used if we fail.. */
 	if (reclen > buf->count)
 		return -EINVAL;
+
 	d_ino = ino;
 	if (sizeof(d_ino) < sizeof(ino) && d_ino != ino) {
 		buf->error = -EOVERFLOW;
@@ -504,6 +505,7 @@ static int compat_filldir(struct dir_context *ctx, const char *name, int namlen,
 	if (dirent) {
 		if (signal_pending(current))
 			return -EINTR;
+
 		if (__put_user(offset, &dirent->d_off))
 			goto efault;
 	}
