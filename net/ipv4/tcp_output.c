@@ -2025,7 +2025,7 @@ static bool tcp_tso_should_defer(struct sock *sk, struct sk_buff *skb,
 	/* If next ACK is likely to come too late,
 	 * ie in more than min(1ms, half srtt), do not defer.
 	 */
-	threshold = min(srtt_in_ns >> 1, (u64)NSEC_PER_MSEC);
+	threshold = min(srtt_in_ns >> 1, NSEC_PER_MSEC);
 
 	if ((s64)(how_far_is_the_ack - threshold) > 0)
 		goto send_now;
