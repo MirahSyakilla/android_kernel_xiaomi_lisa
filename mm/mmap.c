@@ -56,6 +56,9 @@
 
 #include "internal.h"
 
+#define CREATE_TRACE_POINTS
+#include <trace/events/mmap.h>
+
 #ifndef arch_mmap_check
 #define arch_mmap_check(addr, len, flags)	(0)
 #endif
@@ -2066,7 +2069,7 @@ unmap_and_free_vma:
 
 	/* Undo any partial mapping done by a device driver. */
 	unmap_region(mm, vma, prev, vma->vm_start, vma->vm_end);
-	if (writable_file_mapping)
+	if (vm_flags & VM_SHARED)
 		mapping_unmap_writable(file->f_mapping);
 	if (vm_flags & VM_DENYWRITE)
 		allow_write_access(file);
@@ -2088,7 +2091,7 @@ unacct_error:
  *
  * Return: A memory address or -ENOMEM.
  */
-static unsigned long unmapped_area(struct vm_unmapped_area_info *info)
+unsigned long unmapped_area(struct vm_unmapped_area_info *info)
 {
 	unsigned long length, gap;
 
@@ -2117,7 +2120,7 @@ static unsigned long unmapped_area(struct vm_unmapped_area_info *info)
  *
  * Return: A memory address or -ENOMEM.
  */
-static unsigned long unmapped_area_topdown(struct vm_unmapped_area_info *info)
+unsigned long unmapped_area_topdown(struct vm_unmapped_area_info *info)
 {
 	unsigned long length, gap;
 

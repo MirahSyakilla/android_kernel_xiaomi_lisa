@@ -529,6 +529,7 @@ static unsigned long move_vma(struct vm_area_struct *vma,
 		if (vm_flags & VM_ACCOUNT)
 			vm_unacct_memory(to_account >> PAGE_SHIFT);
 		return -ENOMEM;
+	}
 
 	moved_len = move_page_tables(vma, old_addr, new_vma, new_addr, old_len,
 				     need_rmap_locks);
@@ -685,6 +686,7 @@ static unsigned long mremap_to(unsigned long addr, unsigned long old_len,
 	struct vm_area_struct *vma;
 	unsigned long ret = -EINVAL;
 	unsigned long map_flags = 0;
+	unsigned long charged = 0;
 
 	if (offset_in_page(new_addr))
 		goto out;
@@ -733,10 +735,18 @@ static unsigned long mremap_to(unsigned long addr, unsigned long old_len,
 	}
 
 	/* MREMAP_DONTUNMAP expands by old_len since old_len == new_len */
-	if (flags & MREMAP_DONTUNMAP &&
-		!may_expand_vm(mm, vma->vm_flags, old_len >> PAGE_SHIFT)) {
-		ret = -ENOMEM;
-		goto out;
+	if (flags & MREMAP_DONTUNMAP) {
+		if (!may_expand_vm(mm, vma->vm_flags, old_len >> PAGE_SHIFT)) {
+			ret = -ENOMEM;
+			goto out;
+		}
+		if (vma->vm_flags & VM_ACCOUNT) {
+			charged = old_len >> PAGE_SHIFT;
+			if (security_vm_enough_memory_mm(mm, charged)) {
+				ret = -ENOMEM;
+				goto out;
+			}
+		}
 	}
 
 	if (flags & MREMAP_FIXED)

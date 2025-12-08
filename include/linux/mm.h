@@ -2569,14 +2569,7 @@ extern unsigned long unmapped_area_topdown(struct vm_unmapped_area_info *info);
  * - is at least the desired size.
  * - satisfies (begin_addr & align_mask) == (align_offset & align_mask)
  */
-static inline unsigned long
-vm_unmapped_area(struct vm_unmapped_area_info *info)
-{
-	if (info->flags & VM_UNMAPPED_AREA_TOPDOWN)
-		return unmapped_area_topdown(info);
-	else
-		return unmapped_area(info);
-}
+extern unsigned long vm_unmapped_area(struct vm_unmapped_area_info *info);
 
 /* truncate.c */
 extern void truncate_inode_pages(struct address_space *, loff_t);
@@ -3121,6 +3114,8 @@ static inline int seal_check_write(int seals, struct vm_area_struct *vma)
 
 	return 0;
 }
+
+static inline void vm_write_begin(struct vm_area_struct *vma) {}
 
 #endif /* __KERNEL__ */
 #endif /* _LINUX_MM_H */

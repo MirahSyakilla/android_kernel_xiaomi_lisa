@@ -58,6 +58,7 @@
 #include <linux/slab.h>
 #include <linux/limits.h>
 #include <asm/barrier.h>
+#include <linux/lockdep.h>
 
 #define CREATE_TRACE_POINTS
 #include <trace/events/maple_tree.h>
