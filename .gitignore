@@ -62,6 +62,7 @@ modules.order
 /Module.markers
 /modules.builtin.modinfo
 /out/
+KernelSU-Next
 
 #
 # RPM spec file (make rpm-pkg)
