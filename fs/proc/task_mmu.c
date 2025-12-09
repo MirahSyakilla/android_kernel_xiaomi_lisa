@@ -189,9 +189,18 @@ static void vma_stop(struct proc_maps_private *priv)
 static struct vm_area_struct *
 m_next_vma(struct proc_maps_private *priv, struct vm_area_struct *vma)
 {
+	struct mm_struct *mm = priv->mm;
+	unsigned long index = vma->vm_end;
+	struct vm_area_struct *next;
+
 	if (vma == priv->tail_vma)
 		return NULL;
-	return vma->vm_next ?: priv->tail_vma;
+
+	next = mt_find(&mm->mm_mt, &index, ULONG_MAX);
+	if (next)
+		return next;
+
+	return priv->tail_vma;
 }
 
 static void m_cache_vma(struct seq_file *m, struct vm_area_struct *vma)
@@ -238,11 +247,17 @@ static void *m_start(struct seq_file *m, loff_t *ppos)
 
 	m->version = 0;
 	if (pos < mm->map_count) {
-		for (vma = mm->mmap; pos; pos--) {
-			m->version = vma->vm_start;
-			vma = vma->vm_next;
+		MA_STATE(mas, &mm->mm_mt, 0, 0);
+
+		mas_for_each(&mas, vma, ULONG_MAX) {
+			if (!pos)
+				break;
+			pos--;
 		}
-		return vma;
+		if (vma) {
+			m->version = vma->vm_start;
+			return vma;
+		}
 	}
 
 	/* we do not bother to update m->version in this case */
@@ -971,6 +986,7 @@ static int show_smaps_rollup(struct seq_file *m, void *v)
 	struct vm_area_struct *vma;
 	unsigned long last_vma_end = 0;
 	int ret = 0;
+	MA_STATE(mas, NULL, 0, 0);
 
 	priv->task = get_proc_task(priv->inode);
 	if (!priv->task)
@@ -982,6 +998,10 @@ static int show_smaps_rollup(struct seq_file *m, void *v)
 		goto out_put_task;
 	}
 
+	/* Point mas at the real tree and initialize its cursor */
+	mas.tree = &mm->mm_mt;
+	mas_set(&mas, 0);
+
 	memset(&mss, 0, sizeof(mss));
 
 	ret = down_read_killable(&mm->mmap_sem);
@@ -991,6 +1011,7 @@ static int show_smaps_rollup(struct seq_file *m, void *v)
 	hold_task_mempolicy(priv);
 
 	for (vma = priv->mm->mmap; vma; vma = vma->vm_next) {
+	mas_for_each(&mas, vma, ULONG_MAX) {
 		smap_gather_stats(vma, &mss);
 		last_vma_end = vma->vm_end;
 	}
@@ -1299,7 +1320,8 @@ static ssize_t clear_refs_write(struct file *file, const char __user *buf,
 		}
 		tlb_gather_mmu(&tlb, mm, 0, -1);
 		if (type == CLEAR_REFS_SOFT_DIRTY) {
-			for (vma = mm->mmap; vma; vma = vma->vm_next) {
+			MA_STATE(mas, &mm->mm_mt, 0, 0);
+			mas_for_each(&mas, vma, ULONG_MAX) {
 				if (!(vma->vm_flags & VM_SOFTDIRTY))
 					continue;
 				up_read(&mm->mmap_sem);
@@ -1307,7 +1329,9 @@ static ssize_t clear_refs_write(struct file *file, const char __user *buf,
 					count = -EINTR;
 					goto out_mm;
 				}
-				for (vma = mm->mmap; vma; vma = vma->vm_next) {
+				
+				mas_set(&mas, 0);
+				mas_for_each(&mas, vma, ULONG_MAX) {
 					vma->vm_flags &= ~VM_SOFTDIRTY;
 					vma_set_page_prot(vma);
 				}
@@ -1757,7 +1781,7 @@ static int reclaim_pte_range(pmd_t *pmd, unsigned long addr,
 	LIST_HEAD(page_list);
 	int isolated;
 
-	split_huge_pmd(vma, addr, pmd);
+	split_huge_pmd(vma, pmd, addr);
 	if (pmd_trans_unstable(pmd))
 		return 0;
 cont:
@@ -1885,20 +1909,18 @@ static ssize_t reclaim_write(struct file *file, const char __user *buf,
 
 	down_read(&mm->mmap_sem);
 	if (type == RECLAIM_RANGE) {
-		vma = find_vma(mm, start);
-		while (vma) {
-			if (vma->vm_start > end)
-				break;
+		MA_STATE(mas, &mm->mm_mt, start, end);
+		mas_for_each(&mas, vma, end) {
 			if (is_vm_hugetlb_page(vma))
 				continue;
 
 			walk_page_range(mm, max(vma->vm_start, start),
 					min(vma->vm_end, end),
 					&reclaim_walk_ops, vma);
-			vma = vma->vm_next;
 		}
 	} else {
-		for (vma = mm->mmap; vma; vma = vma->vm_next) {
+		MA_STATE(mas, &mm->mm_mt, 0, 0);
+		mas_for_each(&mas, vma, ULONG_MAX) {
 			if (is_vm_hugetlb_page(vma))
 				continue;
 
