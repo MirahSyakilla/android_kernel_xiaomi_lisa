@@ -5611,12 +5611,21 @@ EXPORT_SYMBOL_GPL(mas_store_prealloc);
  */
 int mas_preallocate(struct ma_state *mas, void *entry, gfp_t gfp)
 {
+	int request;
 	int ret;
 
-	mas_node_count_gfp(mas, 1 + mas_mt_height(mas) * 3, gfp);
-	mas->mas_flags |= MA_STATE_PREALLOC;
-	if (likely(!mas_is_err(mas)))
+	/* 
+	 * Calculate the worst-case number of nodes needed.
+	 * 1 node for the entry itself + 3 nodes per level of tree height
+	 * to handle splitting all the way up to the root.
+	 */
+	request = 1 + mas_mt_height(mas) * 3;
+
+	mas_node_count_gfp(mas, request, gfp);
+	if (likely(!mas_is_err(mas))) {
+		mas->mas_flags |= MA_STATE_PREALLOC;
 		return 0;
+	}
 
 	mas_set_alloc_req(mas, 0);
 	ret = xa_err(mas->node);
