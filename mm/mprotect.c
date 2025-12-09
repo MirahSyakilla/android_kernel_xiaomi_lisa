@@ -601,7 +601,7 @@ static int do_mprotect_pkey(unsigned long start, size_t len,
 		if (nstart >= end)
 			goto out;
 
-		vma = prev->vm_next;
+		vma = find_vma(current->mm, nstart);
 		if (!vma || vma->vm_start != nstart) {
 			error = -ENOMEM;
 			goto out;
