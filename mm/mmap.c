@@ -13,7 +13,6 @@
 #include <linux/slab.h>
 #include <linux/backing-dev.h>
 #include <linux/mm.h>
-#include <linux/vmacache.h>
 #include <linux/shm.h>
 #include <linux/mman.h>
 #include <linux/pagemap.h>
@@ -841,8 +840,6 @@ static __always_inline void __vma_unlink(struct mm_struct *mm,
 {
 	vma_rb_erase_ignore(vma, &mm->mm_rb, ignore);
 	__vma_unlink_list(mm, vma);
-	/* Kill the cache */
-	vmacache_invalidate(mm);
 }
 
 /*
@@ -2319,18 +2316,8 @@ EXPORT_SYMBOL(get_unmapped_area);
  */
 struct vm_area_struct *find_vma(struct mm_struct *mm, unsigned long addr)
 {
-	struct vm_area_struct *vma;
 	unsigned long index = addr;
-
-	/* Check the cache first. */
-	vma = vmacache_find(mm, addr);
-	if (likely(vma))
-		return vma;
-
-	vma = mt_find(&mm->mm_mt, &index, ULONG_MAX);
-	if (vma)
-		vmacache_update(addr, vma);
-	return vma;
+	return mt_find(&mm->mm_mt, &index, ULONG_MAX);
 }
 EXPORT_SYMBOL(find_vma);
 
@@ -2758,9 +2745,6 @@ detach_vmas_to_be_unmapped(struct mm_struct *mm, struct ma_state *mas,
 	} else
 		mm->highest_vm_end = prev ? vm_end_gap(prev) : 0;
 	tail_vma->vm_next = NULL;
-
-	/* Kill the cache */
-	vmacache_invalidate(mm);
 
 	/*
 	 * Do not downgrade mmap_lock if we are next to VM_GROWSDOWN or
