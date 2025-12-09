@@ -1137,23 +1137,6 @@ int do_madvise(struct task_struct *target_task, struct mm_struct *mm,
 	if (write) {
 		if (down_write_killable(&mm->mmap_sem))
 			return -EINTR;
-
-		/*
-		 * We may have stolen the mm from another process
-		 * that is undergoing core dumping.
-		 *
-		 * Right now that's io_ring, in the future it may
-		 * be remote process management and not "current"
-		 * at all.
-		 *
-		 * We need to fix core dumping to not do this,
-		 * but for now we have the mmget_still_valid()
-		 * model.
-		 */
-		if (!mmget_still_valid(mm)) {
-			up_write(&mm->mmap_sem);
-			return -EINTR;
-		}
 	} else {
 		down_read(&mm->mmap_sem);
 	}

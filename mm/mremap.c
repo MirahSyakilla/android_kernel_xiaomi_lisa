@@ -210,7 +210,11 @@ static void move_ptes(struct vm_area_struct *vma, pmd_t *old_pmd,
 		drop_rmap_locks(vma);
 }
 
-#ifdef CONFIG_HAVE_MOVE_PMD
+/*
+ * Speculative page fault handlers will not detect page table changes done
+ * without ptl locking.
+ */
+#if defined(CONFIG_HAVE_MOVE_PMD) && !defined(CONFIG_SPECULATIVE_PAGE_FAULT)
 static bool move_normal_pmd(struct vm_area_struct *vma, unsigned long old_addr,
 		  unsigned long new_addr, unsigned long old_end,
 		  pmd_t *old_pmd, pmd_t *new_pmd)
@@ -682,6 +686,7 @@ static unsigned long mremap_to(unsigned long addr, unsigned long old_len,
 	struct vm_area_struct *vma;
 	unsigned long ret = -EINVAL;
 	unsigned long map_flags = 0;
+	unsigned long charged = 0;
 
 	if (offset_in_page(new_addr))
 		goto out;
@@ -730,10 +735,18 @@ static unsigned long mremap_to(unsigned long addr, unsigned long old_len,
 	}
 
 	/* MREMAP_DONTUNMAP expands by old_len since old_len == new_len */
-	if (flags & MREMAP_DONTUNMAP &&
-		!may_expand_vm(mm, vma->vm_flags, old_len >> PAGE_SHIFT)) {
-		ret = -ENOMEM;
-		goto out;
+	if (flags & MREMAP_DONTUNMAP) {
+		if (!may_expand_vm(mm, vma->vm_flags, old_len >> PAGE_SHIFT)) {
+			ret = -ENOMEM;
+			goto out;
+		}
+		if (vma->vm_flags & VM_ACCOUNT) {
+			charged = old_len >> PAGE_SHIFT;
+			if (security_vm_enough_memory_mm(mm, charged)) {
+				ret = -ENOMEM;
+				goto out;
+			}
+		}
 	}
 
 	if (flags & MREMAP_FIXED)
@@ -745,8 +758,8 @@ static unsigned long mremap_to(unsigned long addr, unsigned long old_len,
 	ret = get_unmapped_area(vma->vm_file, new_addr, new_len, vma->vm_pgoff +
 				((addr - vma->vm_start) >> PAGE_SHIFT),
 				map_flags);
-	if (offset_in_page(ret))
-		goto out;
+	if (IS_ERR_VALUE(ret))
+		goto out1;
 
 	/* We got a new mapping */
 	if (!(flags & MREMAP_FIXED))
@@ -754,6 +767,9 @@ static unsigned long mremap_to(unsigned long addr, unsigned long old_len,
 
 	ret = move_vma(vma, addr, old_len, new_len, new_addr, locked, flags, uf,
 		       uf_unmap);
+
+out1:
+	vm_unacct_memory(charged);
 
 out:
 	return ret;
@@ -919,7 +935,7 @@ SYSCALL_DEFINE5(mremap, unsigned long, addr, unsigned long, old_len,
 					vma->vm_pgoff +
 					((addr - vma->vm_start) >> PAGE_SHIFT),
 					map_flags);
-		if (offset_in_page(new_addr)) {
+		if (IS_ERR_VALUE(new_addr)) {
 			ret = new_addr;
 			goto out;
 		}
