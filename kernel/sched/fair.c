@@ -10809,7 +10809,6 @@ void update_max_interval(void)
 	unsigned int available_cpus;
 #ifdef CONFIG_SCHED_WALT
 	cpumask_t avail_mask;
-
 	cpumask_andnot(&avail_mask, cpu_online_mask, cpu_isolated_mask);
 	available_cpus = cpumask_weight(&avail_mask);
 #else
