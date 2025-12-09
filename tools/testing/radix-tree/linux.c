@@ -87,7 +87,12 @@ void *kmalloc(size_t size, gfp_t gfp)
 	return ret;
 }
 
-void kfree(void *p)
+void kmem_cache_shrink(struct kmem_cache *cachep)
+{
+}
+
+int kmem_cache_alloc_bulk(struct kmem_cache *cachep, gfp_t gfp, size_t size,
+			  void **p)
 {
 	if (!p)
 		return;
