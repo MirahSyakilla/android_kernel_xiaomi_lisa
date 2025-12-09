@@ -1010,7 +1010,6 @@ static int show_smaps_rollup(struct seq_file *m, void *v)
 
 	hold_task_mempolicy(priv);
 
-	for (vma = priv->mm->mmap; vma; vma = vma->vm_next) {
 	mas_for_each(&mas, vma, ULONG_MAX) {
 		smap_gather_stats(vma, &mss);
 		last_vma_end = vma->vm_end;
