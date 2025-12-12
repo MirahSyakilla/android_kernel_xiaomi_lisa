@@ -932,7 +932,11 @@ int qrtr_endpoint_post(struct qrtr_endpoint *ep, const void *data, size_t len)
 	if (cb->type != QRTR_TYPE_DATA || cb->dst_node != qrtr_local_nid) {
 		skb_queue_tail(&node->rx_queue, skb);
 		kthread_queue_work(&node->kworker, &node->read_data);
-		pm_wakeup_ws_event(node->ws, qrtr_wakeup_ms, true);
+		
+		/* Only wake up for DATA packets, ignore control/broadcasts */
+		if (cb->type == QRTR_TYPE_DATA) {
+			pm_wakeup_ws_event(node->ws, qrtr_wakeup_ms, true);
+		}
 	} else {
 		ipc = qrtr_port_lookup(cb->dst_port);
 		if (!ipc) {
