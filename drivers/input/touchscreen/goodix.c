@@ -995,6 +995,7 @@ static int __maybe_unused goodix_suspend(struct device *dev)
 {
 	struct i2c_client *client = to_i2c_client(dev);
 	struct goodix_ts_data *ts = i2c_get_clientdata(client);
+	int retry = 3;
 	int error;
 
 	/* We need gpio pins to suspend/resume */
@@ -1006,6 +1007,8 @@ static int __maybe_unused goodix_suspend(struct device *dev)
 	wait_for_completion(&ts->firmware_loading_complete);
 
 	/* Free IRQ as IRQ pin is used as output in the suspend sequence */
+	/* Explicitly disable first to prevent race conditions */
+	disable_irq(client->irq);
 	goodix_free_irq(ts);
 
 	/* Output LOW on the INT pin for 5 ms */
@@ -1017,14 +1020,17 @@ static int __maybe_unused goodix_suspend(struct device *dev)
 
 	usleep_range(5000, 6000);
 
-	error = goodix_i2c_write_u8(ts->client, GOODIX_REG_COMMAND,
-				    GOODIX_CMD_SCREEN_OFF);
-	if (error) {
-		dev_err(&ts->client->dev, "Screen off command failed\n");
-		gpiod_direction_input(ts->gpiod_int);
-		goodix_request_irq(ts);
-		return -EAGAIN;
-	}
+	/* Retry screen off command */
+	do {
+		error = goodix_i2c_write_u8(ts->client, GOODIX_REG_COMMAND,
+					    GOODIX_CMD_SCREEN_OFF);
+		if (!error)
+			break;
+		usleep_range(2000, 3000);
+	} while (--retry > 0);
+
+	if (error)
+		dev_err(&ts->client->dev, "Screen off command failed after retries, ignoring\n");
 
 	/*
 	 * The datasheet specifies that the interval between sending screen-off
