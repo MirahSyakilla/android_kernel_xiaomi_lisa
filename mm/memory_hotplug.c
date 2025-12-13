@@ -1415,6 +1415,13 @@ do_migrate_range(unsigned long start_pfn, unsigned long end_pfn)
 				}
 			}
 			putback_movable_pages(&source);
+			
+			/*
+			 * If we ran out of memory, further migration attempts 
+			 * are likely to fail as well.
+			 */
+            if (ret == -ENOMEM)
+                return ret;
 		}
 	}
 

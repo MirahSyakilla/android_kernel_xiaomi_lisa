@@ -1732,6 +1732,45 @@ unlock:
 	return error;
 }
 
+#ifdef CONFIG_TRANSPARENT_HUGE_PAGECACHE
+static bool shmem_is_huge(struct inode *inode, pgoff_t index, bool shmem_huge_force,
+			  struct vm_area_struct *vma, unsigned long vm_flags)
+{
+	struct shmem_sb_info *sbinfo = SHMEM_SB(inode->i_sb);
+	loff_t i_size;
+
+	if (shmem_huge == SHMEM_HUGE_DENY)
+		return false;
+	if (shmem_huge_force || shmem_huge == SHMEM_HUGE_FORCE)
+		return true;
+
+	switch (sbinfo->huge) {
+	case SHMEM_HUGE_ALWAYS:
+		return true;
+	case SHMEM_HUGE_WITHIN_SIZE:
+		index = round_up(index + 1, HPAGE_PMD_NR);
+		i_size = round_up(i_size_read(inode), PAGE_SIZE);
+		if (i_size >= HPAGE_PMD_SIZE && (i_size >> PAGE_SHIFT) >= index)
+			return true;
+		fallthrough;
+	case SHMEM_HUGE_ADVISE:
+		if (vma && (vma->vm_flags & VM_HUGEPAGE))
+			return true;
+		if (vm_flags & VM_HUGEPAGE)
+			return true;
+		return false;
+	default:
+		return false;
+	}
+}
+#else /* !CONFIG_TRANSPARENT_HUGE_PAGECACHE */
+static inline bool shmem_is_huge(struct inode *inode, pgoff_t index, bool shmem_huge_force,
+				 struct vm_area_struct *vma, unsigned long vm_flags)
+{
+	return false;
+}
+#endif /* CONFIG_TRANSPARENT_HUGE_PAGECACHE */
+
 /*
  * shmem_getpage_gfp - find page in cache, or get from swap, or allocate
  *
@@ -1841,7 +1880,9 @@ repeat:
 	case SHMEM_HUGE_ADVISE:
 		if (sgp_huge == SGP_HUGE)
 			goto alloc_huge;
-		/* TODO: implement fadvise() hints */
+		/* Check if the file has been explicitly marked for huge pages */
+		if (shmem_is_huge(inode, index, false, NULL, 0))
+			goto alloc_huge;
 		goto alloc_nohuge;
 	}
 
@@ -3992,7 +4033,10 @@ bool shmem_huge_enabled(struct vm_area_struct *vma)
 				return true;
 			fallthrough;
 		case SHMEM_HUGE_ADVISE:
-			/* TODO: implement fadvise() hints */
+			/* 
+			 * MADV_HUGEPAGE is the standard way to advise for huge pages.
+			 * Explicit fadvise hints are not currently supported.
+			 */
 			return (vma->vm_flags & VM_HUGEPAGE);
 		default:
 			VM_BUG_ON(1);

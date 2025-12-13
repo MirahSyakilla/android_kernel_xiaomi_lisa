@@ -18,10 +18,6 @@
 #endif
 #include "internal.h"
 
-/*
- * TODO: teach PAGE_OWNER_STACK_DEPTH (__dump_page_owner and save_stack)
- * to use off stack temporal storage
- */
 #define PAGE_OWNER_STACK_DEPTH (16)
 
 struct page_owner {
@@ -124,26 +120,28 @@ static inline bool check_recursive_alloc(unsigned long *entries,
 	return false;
 }
 
+static DEFINE_PER_CPU(unsigned long[PAGE_OWNER_STACK_DEPTH], page_owner_stack_entries);
+
 static noinline depot_stack_handle_t save_stack(gfp_t flags)
 {
-	unsigned long entries[PAGE_OWNER_STACK_DEPTH];
+	unsigned long *entries;
 	depot_stack_handle_t handle;
 	unsigned int nr_entries;
+	unsigned long flags_irq;
 
-	nr_entries = stack_trace_save(entries, ARRAY_SIZE(entries), 2);
+	/* Use per-cpu buffer to avoid stack overflow */
+	local_irq_save(flags_irq);
+	entries = this_cpu_ptr(page_owner_stack_entries);
+	nr_entries = stack_trace_save(entries, PAGE_OWNER_STACK_DEPTH, 2);
 
-	/*
-	 * We need to check recursion here because our request to
-	 * stackdepot could trigger memory allocation to save new
-	 * entry. New memory allocation would reach here and call
-	 * stack_depot_save_entries() again if we don't catch it. There is
-	 * still not enough memory in stackdepot so it would try to
-	 * allocate memory again and loop forever.
-	 */
-	if (check_recursive_alloc(entries, nr_entries, _RET_IP_))
+	if (check_recursive_alloc(entries, nr_entries, _RET_IP_)) {
+		local_irq_restore(flags_irq);
 		return dummy_handle;
+	}
 
 	handle = stack_depot_save(entries, nr_entries, flags);
+	local_irq_restore(flags_irq);
+    
 	if (!handle)
 		handle = failure_handle;
 
