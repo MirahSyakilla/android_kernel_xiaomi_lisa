@@ -1869,7 +1869,7 @@ xa_unlocked:
 	unlock_page(new_page);
 out:
 	VM_BUG_ON(!list_empty(&pagelist));
-	/* TODO: tracepoints */
+	trace_mm_collapse_huge_page(mm, result == SCAN_SUCCEED ? 1 : 0, result);
 }
 
 static void khugepaged_scan_file(struct mm_struct *mm,
@@ -1945,7 +1945,7 @@ static void khugepaged_scan_file(struct mm_struct *mm,
 		}
 	}
 
-	/* TODO: tracepoints */
+	trace_mm_collapse_huge_page(mm, result == SCAN_SUCCEED ? 1 : 0, result);
 }
 #else
 static void khugepaged_scan_file(struct mm_struct *mm,
