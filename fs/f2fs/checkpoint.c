@@ -1164,6 +1164,11 @@ static bool __need_flush_quota(struct f2fs_sb_info *sbi)
 	if (!is_journalled_quota(sbi))
 		return false;
 
+	/* Optimization: Check flags before taking the lock */
+	if (!is_sbi_flag_set(sbi, SBI_QUOTA_NEED_FLUSH) &&
+	    !get_pages(sbi, F2FS_DIRTY_QDATA))
+		return false;
+
 	if (!down_write_trylock(&sbi->quota_sem))
 		return true;
 	if (is_sbi_flag_set(sbi, SBI_QUOTA_SKIP_FLUSH)) {
