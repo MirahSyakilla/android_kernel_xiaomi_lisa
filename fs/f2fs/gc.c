@@ -107,8 +107,12 @@ do_gc:
 		sync_mode = F2FS_OPTION(sbi).bggc_mode == BGGC_MODE_SYNC;
 
 		/* if return value is not zero, no victim was selected */
-		if (f2fs_gc(sbi, sync_mode, true, NULL_SEGNO))
-			wait_ms = gc_th->no_gc_sleep_time;
+		if (f2fs_gc(sbi, sync_mode, true, NULL_SEGNO)) {
+			if (sbi->gc_mode == GC_URGENT)
+				wait_ms = gc_th->urgent_sleep_time;
+			else
+				wait_ms = gc_th->no_gc_sleep_time;
+		}
 
 		trace_f2fs_background_gc(sbi->sb, wait_ms,
 				prefree_segments(sbi), free_segments(sbi));
@@ -207,7 +211,6 @@ static void select_policy(struct f2fs_sb_info *sbi, int gc_type,
 	 * foreground GC and urgent GC cases.
 	 */
 	if (gc_type != FG_GC &&
-			(sbi->gc_mode != GC_URGENT) &&
 			p->max_search > sbi->max_victim_search)
 		p->max_search = sbi->max_victim_search;
 
