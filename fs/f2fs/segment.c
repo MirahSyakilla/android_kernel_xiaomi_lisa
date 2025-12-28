@@ -1093,7 +1093,7 @@ static void __init_discard_policy(struct f2fs_sb_info *sbi,
 		dpolicy->sync = false;
 		dpolicy->ordered = true;
 		if (utilization(sbi) > DEF_DISCARD_URGENT_UTIL) {
-			dpolicy->granularity = 1;
+			dpolicy->granularity = granularity;
 			dpolicy->max_interval = DEF_MIN_DISCARD_ISSUE_TIME;
 		}
 	} else if (discard_type == DPOLICY_FORCE) {
@@ -4181,7 +4181,8 @@ static int build_sit_entries(struct f2fs_sb_info *sbi)
 	block_t total_node_blocks = 0;
 
 	do {
-		readed = f2fs_ra_meta_pages(sbi, start_blk, BIO_MAX_PAGES,
+		/* Optimization: Increase readahead for faster mount/SIT build */
+		readed = f2fs_ra_meta_pages(sbi, start_blk, BIO_MAX_PAGES * 4,
 							META_SIT, true);
 
 		start = start_blk * sit_i->sents_per_block;
