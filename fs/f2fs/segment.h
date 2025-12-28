@@ -12,8 +12,8 @@
 #define NULL_SEGNO			((unsigned int)(~0))
 #define NULL_SECNO			((unsigned int)(~0))
 
-#define DEF_RECLAIM_PREFREE_SEGMENTS	5	/* 5% over total segments */
-#define DEF_MAX_RECLAIM_PREFREE_SEGMENTS	4096	/* 8GB in maximum */
+#define DEF_RECLAIM_PREFREE_SEGMENTS	15	/* 15% over total segments */
+#define DEF_MAX_RECLAIM_PREFREE_SEGMENTS	8192	/* 16GB in maximum */
 
 #define F2FS_MIN_SEGMENTS	9 /* SB + 2 (CP + SIT + NAT) + SSA + MAIN */
 #define F2FS_MIN_META_SEGMENTS	8 /* SB + 2 (CP + SIT + NAT) + SSA */
@@ -562,18 +562,30 @@ static inline bool has_curseg_enough_space(struct f2fs_sb_info *sbi,
 static inline bool has_not_enough_free_secs(struct f2fs_sb_info *sbi,
 					int freed, int needed)
 {
-	unsigned int total_node_blocks = get_pages(sbi, F2FS_DIRTY_NODES) +
-					get_pages(sbi, F2FS_DIRTY_DENTS) +
-					get_pages(sbi, F2FS_DIRTY_IMETA);
-	unsigned int total_dent_blocks = get_pages(sbi, F2FS_DIRTY_DENTS);
-	unsigned int node_secs = total_node_blocks / BLKS_PER_SEC(sbi);
-	unsigned int dent_secs = total_dent_blocks / BLKS_PER_SEC(sbi);
-	unsigned int node_blocks = total_node_blocks % BLKS_PER_SEC(sbi);
-	unsigned int dent_blocks = total_dent_blocks % BLKS_PER_SEC(sbi);
+	unsigned int total_node_blocks, total_dent_blocks;
+	unsigned int node_secs, dent_secs;
+	unsigned int node_blocks, dent_blocks;
 	unsigned int free, need_lower, need_upper;
 
 	if (unlikely(is_sbi_flag_set(sbi, SBI_POR_DOING)))
 		return false;
+
+	/*
+	 * Fast path: If we have plenty of free sections, skip the expensive
+	 * atomic reads and calculations below.
+	 */
+	if (free_sections(sbi) + freed > reserved_sections(sbi) + needed +
+			SM_I(sbi)->min_ssr_sections + SM_I(sbi)->min_hot_blocks)
+		return false;
+
+	total_node_blocks = get_pages(sbi, F2FS_DIRTY_NODES) +
+					get_pages(sbi, F2FS_DIRTY_DENTS) +
+					get_pages(sbi, F2FS_DIRTY_IMETA);
+	total_dent_blocks = get_pages(sbi, F2FS_DIRTY_DENTS);
+	node_secs = total_node_blocks / BLKS_PER_SEC(sbi);
+	dent_secs = total_dent_blocks / BLKS_PER_SEC(sbi);
+	node_blocks = total_node_blocks % BLKS_PER_SEC(sbi);
+	dent_blocks = total_dent_blocks % BLKS_PER_SEC(sbi);
 
 	free = free_sections(sbi) + freed;
 	need_lower = node_secs + dent_secs + reserved_sections(sbi) + needed;
@@ -622,7 +634,7 @@ static inline int utilization(struct f2fs_sb_info *sbi)
  * F2FS_IPU_NOCACHE - disable IPU bio cache.
  * F2FS_IPUT_DISABLE - disable IPU. (=default option in LFS mode)
  */
-#define DEF_MIN_IPU_UTIL	70
+#define DEF_MIN_IPU_UTIL	90
 #define DEF_MIN_FSYNC_BLOCKS	8
 #define DEF_MIN_HOT_BLOCKS	16
 
