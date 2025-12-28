@@ -100,7 +100,7 @@ unsigned long f2fs_shrink_scan(struct shrinker *shrink,
 		sbi->shrinker_run_no = run_no;
 
 		/* shrink extent cache entries */
-		freed += f2fs_shrink_extent_tree(sbi, nr >> 1);
+		freed += f2fs_shrink_extent_tree(sbi, nr >> 2);
 
 		/* shrink clean nat cache entries */
 		if (freed < nr)
