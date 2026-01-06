@@ -397,6 +397,9 @@ static int qmp_send_data(struct mbox_chan *chan, void *data)
 	if (!mbox || !completion_done(&mbox->ch_complete))
 		return -EINVAL;
 
+	if (!pkt->data && pkt->size)
+		return -EINVAL;
+
 	mdev = mbox->mdev;
 
 	spin_lock_irqsave(&mbox->tx_lock, flags);
