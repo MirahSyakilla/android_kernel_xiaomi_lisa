@@ -31,6 +31,12 @@
 #include "avc_ss.h"
 #include "classmap.h"
 
+#ifdef CONFIG_KSU_SUSFS
+extern u32 susfs_ksu_sid;
+extern u32 susfs_priv_app_sid;
+bool susfs_is_avc_log_spoofing_enabled = false;
+#endif
+
 #define AVC_CACHE_SLOTS			512
 #define AVC_DEF_CACHE_THRESHOLD		512
 #define AVC_CACHE_RECLAIM		16
@@ -708,8 +714,9 @@ static void avc_audit_post_callback(struct audit_buffer *ab, void *a)
 	u32 scontext_len;
 	int rc;
 
-	rc = security_sid_to_context(sad->state, sad->ssid, &scontext,
-				     &scontext_len);
+	/* source context */
+	rc = security_sid_to_context(sad->state, sad->ssid,
+				     &scontext, &scontext_len);
 	if (rc)
 		audit_log_format(ab, " ssid=%d", sad->ssid);
 	else {
@@ -717,8 +724,22 @@ static void avc_audit_post_callback(struct audit_buffer *ab, void *a)
 		kfree(scontext);
 	}
 
-	rc = security_sid_to_context(sad->state, sad->tsid, &scontext,
-				     &scontext_len);
+	/* target context */
+	rc = security_sid_to_context(sad->state, sad->tsid,
+				     &scontext, &scontext_len);
+
+#ifdef CONFIG_KSU_SUSFS
+	if (unlikely(sad->tsid == susfs_ksu_sid &&
+		     susfs_is_avc_log_spoofing_enabled)) {
+		if (rc)
+			audit_log_format(ab, " tsid=%d",
+					 susfs_priv_app_sid);
+		else
+			audit_log_format(ab, " tcontext=%s",
+					 "u:r:priv_app:s0:c512,c768");
+		goto bypass_orig_flow;
+	}
+#endif
 
 	if (rc)
 		audit_log_format(ab, " tsid=%d", sad->tsid);
@@ -727,14 +748,19 @@ static void avc_audit_post_callback(struct audit_buffer *ab, void *a)
 		kfree(scontext);
 	}
 
-	audit_log_format(ab, " tclass=%s", secclass_map[sad->tclass-1].name);
+#ifdef CONFIG_KSU_SUSFS
+bypass_orig_flow:
+#endif
+	audit_log_format(ab, " tclass=%s",
+			 secclass_map[sad->tclass - 1].name);
 
 	if (sad->denied)
-		audit_log_format(ab, " permissive=%u", sad->result ? 0 : 1);
+		audit_log_format(ab, " permissive=%u",
+				 sad->result ? 0 : 1);
 
-	/* in case of invalid context report also the actual context string */
-	rc = security_sid_to_context_inval(sad->state, sad->ssid, &scontext,
-					   &scontext_len);
+	/* raw source context (invalid cases) */
+	rc = security_sid_to_context_inval(sad->state, sad->ssid,
+					   &scontext, &scontext_len);
 	if (!rc && scontext) {
 		if (scontext_len && scontext[scontext_len - 1] == '\0')
 			scontext_len--;
@@ -743,8 +769,9 @@ static void avc_audit_post_callback(struct audit_buffer *ab, void *a)
 		kfree(scontext);
 	}
 
-	rc = security_sid_to_context_inval(sad->state, sad->tsid, &scontext,
-					   &scontext_len);
+	/* raw target context (invalid cases) */
+	rc = security_sid_to_context_inval(sad->state, sad->tsid,
+					   &scontext, &scontext_len);
 	if (!rc && scontext) {
 		if (scontext_len && scontext[scontext_len - 1] == '\0')
 			scontext_len--;

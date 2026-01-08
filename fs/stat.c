@@ -17,9 +17,24 @@
 #include <linux/syscalls.h>
 #include <linux/pagemap.h>
 #include <linux/compat.h>
+#ifdef CONFIG_KSU_SUSFS
+#include <linux/susfs_def.h>
+#include <linux/version.h>
+#include "internal.h"
+#include "mount.h"
+#endif
 
 #include <linux/uaccess.h>
 #include <asm/unistd.h>
+
+#ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
+extern void susfs_sus_ino_for_generic_fillattr(unsigned long ino,
+					       struct kstat *stat);
+#endif
+
+#ifdef CONFIG_KSU_SUSFS_SUS_PATH
+extern bool susfs_is_inode_sus_path(struct inode *inode);
+#endif
 
 /**
  * generic_fillattr - Fill in the basic attributes from the inode struct
@@ -32,6 +47,17 @@
  */
 void generic_fillattr(struct inode *inode, struct kstat *stat)
 {
+#ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
+	if (likely(susfs_is_current_proc_umounted()) &&
+	    unlikely(inode->i_mapping->flags & BIT_SUS_KSTAT)) {
+		susfs_sus_ino_for_generic_fillattr(inode->i_ino, stat);
+		stat->mode = inode->i_mode;
+		stat->rdev = inode->i_rdev;
+		stat->uid  = inode->i_uid;
+		stat->gid  = inode->i_gid;
+		return;
+	}
+#endif
 	stat->dev = inode->i_sb->s_dev;
 	stat->ino = inode->i_ino;
 	stat->mode = inode->i_mode;
@@ -112,6 +138,11 @@ int vfs_getattr(const struct path *path, struct kstat *stat,
 {
 	int retval;
 
+#ifdef CONFIG_KSU_SUSFS_SUS_PATH
+	if (susfs_is_inode_sus_path(path->dentry->d_inode))
+		return -ENOENT;
+#endif
+
 	retval = security_inode_getattr(path);
 	if (retval)
 		return retval;
@@ -150,6 +181,15 @@ int vfs_statx_fd(unsigned int fd, struct kstat *stat,
 }
 EXPORT_SYMBOL(vfs_statx_fd);
 
+#ifdef CONFIG_KSU_SUSFS
+extern bool ksu_su_compat_enabled __read_mostly;
+extern bool __ksu_is_allow_uid_for_current(uid_t uid);
+
+extern int ksu_handle_stat(int *dfd,
+			   const char __user **filename_user,
+			   int *flags);
+#endif
+
 /**
  * vfs_statx - Get basic and extra attributes by filename
  * @dfd: A file descriptor representing the base dir for a relative filename
@@ -171,6 +211,14 @@ int vfs_statx(int dfd, const char __user *filename, int flags,
 	struct path path;
 	int error = -EINVAL;
 	unsigned int lookup_flags = LOOKUP_FOLLOW | LOOKUP_AUTOMOUNT;
+
+#ifdef CONFIG_KSU_SUSFS
+	if (!susfs_is_current_proc_umounted() &&
+	    ksu_su_compat_enabled &&
+	    unlikely(__ksu_is_allow_uid_for_current(current_uid().val))) {
+		ksu_handle_stat(&dfd, &filename, &flags);
+	}
+#endif
 
 	if ((flags & ~(AT_SYMLINK_NOFOLLOW | AT_NO_AUTOMOUNT |
 		       AT_EMPTY_PATH | KSTAT_QUERY_FLAGS)) != 0)
@@ -357,21 +405,13 @@ SYSCALL_DEFINE2(newlstat, const char __user *, filename,
 	return cp_new_stat(&stat, statbuf);
 }
 
-#ifdef CONFIG_KSU
-__attribute__((hot)) 
-extern int ksu_handle_stat(int *dfd, const char __user **filename_user,
-				int *flags);
-#endif
-
 #if !defined(__ARCH_WANT_STAT64) || defined(__ARCH_WANT_SYS_NEWFSTATAT)
 SYSCALL_DEFINE4(newfstatat, int, dfd, const char __user *, filename,
 		struct stat __user *, statbuf, int, flag)
 {
 	struct kstat stat;
 	int error;
-#ifdef CONFIG_KSU
-	ksu_handle_stat(&dfd, &filename, &flag);
-#endif
+
 	error = vfs_fstatat(dfd, filename, &stat, flag);
 	if (error)
 		return error;
