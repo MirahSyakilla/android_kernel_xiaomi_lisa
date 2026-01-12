@@ -385,7 +385,15 @@ update_window_start(struct rq *rq, u64 wallclock, int event)
 	if (delta < sched_ravg_window)
 		return old_window_start;
 
-	nr_windows = div64_u64(delta, sched_ravg_window);
+	/* 
+	 * Most of the time we only roll over one window.
+	 * Avoid expensive 64-bit division for the common case.
+	 */
+	if (likely(delta < 2 * sched_ravg_window))
+		nr_windows = 1;
+	else
+		nr_windows = div64_u64(delta, sched_ravg_window);
+
 	rq->wrq.window_start += (u64)nr_windows * (u64)sched_ravg_window;
 
 	rq->wrq.cum_window_demand_scaled =
@@ -2046,7 +2054,15 @@ static u64 update_task_demand(struct task_struct *p, struct rq *rq,
 	 * window_start to first window boundary after mark_start.
 	 */
 	delta = window_start - mark_start;
-	nr_full_windows = div64_u64(delta, window_size);
+
+	/* Avoid division for common small deltas */
+	if (likely(delta < window_size))
+		nr_full_windows = 0;
+	else if (likely(delta < 2 * window_size))
+		nr_full_windows = 1;
+	else
+		nr_full_windows = div64_u64(delta, window_size);
+
 	window_start -= (u64)nr_full_windows * (u64)window_size;
 
 	/* Process (window_start - mark_start) first */
@@ -2189,7 +2205,12 @@ void walt_update_task_ravg(struct task_struct *p, struct rq *rq, int event,
 done:
 	p->wts.mark_start = wallclock;
 
-	run_walt_irq_work(old_window_start, rq);
+	/* 
+	 * Only call the irq_work handler if the window actually rolled over.
+	 * This saves a function call in the absolute hottest path of the scheduler.
+	 */
+	if (unlikely(old_window_start != rq->wrq.window_start))
+		run_walt_irq_work(old_window_start, rq);
 }
 
 u32 sched_get_init_task_load(struct task_struct *p)
