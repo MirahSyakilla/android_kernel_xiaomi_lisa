@@ -11124,7 +11124,7 @@ static void nohz_balancer_kick(struct rq *rq)
 		return;
 #else
 	cpumask_copy(&cpumask, nohz.idle_cpus_mask);
-	if (likely(!atomic_read(&nohz.nr_cpus)))
+	if (unlikely(!atomic_read(&nohz.nr_cpus)))
 		return;
 #endif
 
