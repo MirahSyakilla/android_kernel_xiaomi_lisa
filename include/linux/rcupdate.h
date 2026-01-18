@@ -34,6 +34,11 @@
 #define ULONG_CMP_LT(a, b)	(ULONG_MAX / 2 < (a) - (b))
 #define ulong2long(a)		(*(long *)(&(a)))
 
+/* Backport: Map RCU Trace to RCU Tasks */
+#define call_rcu_tasks_trace call_rcu_tasks
+#define rcu_read_lock_trace() rcu_read_lock()
+#define rcu_read_unlock_trace() rcu_read_unlock()
+
 /* Exported common interfaces */
 void call_rcu(struct rcu_head *head, rcu_callback_t func);
 void rcu_barrier_tasks(void);

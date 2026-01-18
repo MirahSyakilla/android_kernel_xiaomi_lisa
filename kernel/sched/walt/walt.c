@@ -8,9 +8,14 @@
 #include <linux/jiffies.h>
 #include <linux/sched/stat.h>
 #include <trace/events/sched.h>
+#include <linux/sysctl.h>
 #include "qc_vas.h"
 
 #include <trace/events/sched.h>
+
+/* Backport fix: Forward declaration for WALT sysctl handler */
+int proc_douintvec_ravg_window(struct ctl_table *table, int write, 
+                               void __user *buffer, size_t *lenp, loff_t *ppos);
 
 const char *task_event_names[] = {"PUT_PREV_TASK", "PICK_NEXT_TASK",
 				  "TASK_WAKE", "TASK_MIGRATE", "TASK_UPDATE",

@@ -8,6 +8,10 @@
 
 #include "qc_vas.h"
 
+/* Backport fix: Forward declaration */
+int proc_douintvec_capacity(struct ctl_table *table, int write,
+                            void __user *buffer, size_t *lenp, loff_t *ppos);
+
 #ifdef CONFIG_SCHED_WALT
 /* 1ms default for 20ms window size scaled to 1024 */
 unsigned int sysctl_sched_min_task_util_for_boost = 51;

@@ -6,6 +6,20 @@
 
 struct ctl_table;
 
+/* Backport fixes for sysctl.c visibility */
+extern unsigned int sysctl_sched_rt_period;
+extern int sysctl_sched_rt_runtime;
+extern int sysctl_sched_rr_timeslice;
+
+/* Handlers made non-static in rt.c */
+int sched_rt_handler(struct ctl_table *table, int write, void __user *buffer, size_t *lenp, loff_t *ppos);
+int sched_rr_handler(struct ctl_table *table, int write, void __user *buffer, size_t *lenp, loff_t *ppos);
+
+/* UClamp variables (if uclamp is enabled in your kernel) */
+extern unsigned int sysctl_sched_uclamp_util_min;
+extern unsigned int sysctl_sched_uclamp_util_max;
+int sysctl_sched_uclamp_handler(struct ctl_table *table, int write, void __user *buffer, size_t *lenp, loff_t *ppos);
+
 #ifdef CONFIG_DETECT_HUNG_TASK
 extern int	     sysctl_hung_task_check_count;
 extern unsigned int  sysctl_hung_task_panic;

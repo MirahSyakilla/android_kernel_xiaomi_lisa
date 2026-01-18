@@ -17,6 +17,12 @@
 	(BPF_F_NUMA_NODE | BPF_F_RDONLY | BPF_F_WRONLY |	\
 	 BPF_F_STACK_BUILD_ID)
 
+/* Backport helper for 5.4 */
+static bool irq_work_is_busy(struct irq_work *work)
+{
+    return work->flags & IRQ_WORK_BUSY;
+}
+
 struct stack_map_bucket {
 	struct pcpu_freelist_node fnode;
 	u32 hash;

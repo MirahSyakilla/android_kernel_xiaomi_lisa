@@ -57,6 +57,7 @@
 #include <linux/file.h>
 #include <linux/fs_parser.h>
 #include <linux/sched/cputime.h>
+#include <linux/sched/deadline.h>
 #include <linux/psi.h>
 #include <net/sock.h>
 
@@ -67,6 +68,9 @@
 					 MAX_CFTYPE_NAME + 2)
 /* let's not notify more than 100 times per second */
 #define CGROUP_FILE_NOTIFY_MIN_INTV	DIV_ROUND_UP(HZ, 100)
+
+/* Backport stub: dec_dl_tasks_cs is missing in 5.4 scheduler */
+void dec_dl_tasks_cs(struct task_struct *p) {}
 
 /*
  * cgroup_mutex is the master lock.  Any modification to cgroup or its
@@ -114,31 +118,8 @@ DEFINE_PERCPU_RWSEM(cgroup_threadgroup_rwsem);
  * of concurrent destructions.  Use a separate workqueue so that cgroup
  * destruction work items don't end up filling up max_active of system_wq
  * which may lead to deadlock.
- *
- * A cgroup destruction should enqueue work sequentially to:
- * cgroup_offline_wq: use for css offline work
- * cgroup_release_wq: use for css release work
- * cgroup_free_wq: use for free work
- *
- * Rationale for using separate workqueues:
- * The cgroup root free work may depend on completion of other css offline
- * operations. If all tasks were enqueued to a single workqueue, this could
- * create a deadlock scenario where:
- * - Free work waits for other css offline work to complete.
- * - But other css offline work is queued after free work in the same queue.
- *
- * Example deadlock scenario with single workqueue (cgroup_destroy_wq):
- * 1. umount net_prio
- * 2. net_prio root destruction enqueues work to cgroup_destroy_wq (CPUx)
- * 3. perf_event CSS A offline enqueues work to same cgroup_destroy_wq (CPUx)
- * 4. net_prio cgroup_destroy_root->cgroup_lock_and_drain_offline.
- * 5. net_prio root destruction blocks waiting for perf_event CSS A offline,
- *    which can never complete as it's behind in the same queue and
- *    workqueue's max_active is 1.
  */
-static struct workqueue_struct *cgroup_offline_wq;
-static struct workqueue_struct *cgroup_release_wq;
-static struct workqueue_struct *cgroup_free_wq;
+static struct workqueue_struct *cgroup_destroy_wq;
 
 /* generate an array of cgroup subsystem pointers */
 #define SUBSYS(_x) [_x ## _cgrp_id] = &_x ## _cgrp_subsys,
@@ -767,6 +748,8 @@ EXPORT_SYMBOL_GPL(of_css);
 			;						\
 		else
 
+static struct kmem_cache *cgrp_cset_link_pool;
+
 /*
  * The default css_set - used by init and its children prior to any
  * hierarchies being mounted. It contains a pointer to the root state
@@ -1000,7 +983,7 @@ void put_css_set_locked(struct css_set *cset)
 		list_del(&link->cgrp_link);
 		if (cgroup_parent(link->cgrp))
 			cgroup_put(link->cgrp);
-		kfree(link);
+		kmem_cache_free(cgrp_cset_link_pool, link);
 	}
 
 	if (css_set_threaded(cset)) {
@@ -1150,7 +1133,7 @@ static void free_cgrp_cset_links(struct list_head *links_to_free)
 
 	list_for_each_entry_safe(link, tmp_link, links_to_free, cset_link) {
 		list_del(&link->cset_link);
-		kfree(link);
+		kmem_cache_free(cgrp_cset_link_pool, link);
 	}
 }
 
@@ -1170,7 +1153,7 @@ static int allocate_cgrp_cset_links(int count, struct list_head *tmp_links)
 	INIT_LIST_HEAD(tmp_links);
 
 	for (i = 0; i < count; i++) {
-		link = kzalloc(sizeof(*link), GFP_KERNEL);
+		link = kmem_cache_zalloc(cgrp_cset_link_pool, GFP_KERNEL);
 		if (!link) {
 			free_cgrp_cset_links(tmp_links);
 			return -ENOMEM;
@@ -1383,7 +1366,7 @@ static void cgroup_destroy_root(struct cgroup_root *root)
 	list_for_each_entry_safe(link, tmp_link, &cgrp->cset_links, cset_link) {
 		list_del(&link->cset_link);
 		list_del(&link->cgrp_link);
-		kfree(link);
+		kmem_cache_free(cgrp_cset_link_pool, link);
 	}
 
 	spin_unlock_irq(&css_set_lock);
@@ -3764,32 +3747,22 @@ static int cpu_stat_show(struct seq_file *seq, void *v)
 #ifdef CONFIG_PSI
 static int cgroup_io_pressure_show(struct seq_file *seq, void *v)
 {
-<<<<<<< HEAD
-	struct cgroup *cgroup = seq_css(seq)->cgroup;
-	struct psi_group *psi = cgroup->id == 1 ? &psi_system : &cgroup->psi;
-=======
 	struct cgroup *cgrp = seq_css(seq)->cgroup;
-	struct psi_group *psi = cgroup_id(cgrp) == 1 ? &psi_system : cgrp->psi;
->>>>>>> e80c9e9c9abf (UPSTREAM: cgroup: use cgrp->kn->id as the cgroup ID)
+	struct psi_group *psi = cgroup_id(cgrp) == 1 ? &psi_system : &cgrp->psi;
 
 	return psi_show(seq, psi, PSI_IO);
 }
 static int cgroup_memory_pressure_show(struct seq_file *seq, void *v)
 {
-<<<<<<< HEAD
-	struct cgroup *cgroup = seq_css(seq)->cgroup;
-	struct psi_group *psi = cgroup->id == 1 ? &psi_system : &cgroup->psi;
-=======
 	struct cgroup *cgrp = seq_css(seq)->cgroup;
-	struct psi_group *psi = cgroup_id(cgrp) == 1 ? &psi_system : cgrp->psi;
->>>>>>> e80c9e9c9abf (UPSTREAM: cgroup: use cgrp->kn->id as the cgroup ID)
+	struct psi_group *psi = cgroup_id(cgrp) == 1 ? &psi_system : &cgrp->psi;
 
 	return psi_show(seq, psi, PSI_MEM);
 }
 static int cgroup_cpu_pressure_show(struct seq_file *seq, void *v)
 {
 	struct cgroup *cgrp = seq_css(seq)->cgroup;
-	struct psi_group *psi = cgroup_id(cgrp) == 1 ? &psi_system : cgrp->psi;
+	struct psi_group *psi = cgroup_id(cgrp) == 1 ? &psi_system : &cgrp->psi;
 
 	return psi_show(seq, psi, PSI_CPU);
 }
@@ -3856,6 +3829,12 @@ static __poll_t cgroup_pressure_poll(struct kernfs_open_file *of,
 	return psi_trigger_poll(&ctx->psi.trigger, of->file, pt);
 }
 
+static int cgroup_pressure_open(struct kernfs_open_file *of)
+{
+	return (of->file->f_mode & FMODE_WRITE && !capable(CAP_SYS_RESOURCE)) ?
+		-EPERM : 0;
+}
+
 static void cgroup_pressure_release(struct kernfs_open_file *of)
 {
 	struct cgroup_file_ctx *ctx = of->priv;
@@ -3865,6 +3844,9 @@ static void cgroup_pressure_release(struct kernfs_open_file *of)
 
 bool cgroup_psi_enabled(void)
 {
+	if (static_branch_likely(&psi_disabled))
+		return false;
+
 	return (cgroup_feature_disable_mask & (1 << OPT_FEATURE_PRESSURE)) == 0;
 }
 
@@ -5157,6 +5139,7 @@ static struct cftype cgroup_base_files[] = {
 	{
 		.name = "io.pressure",
 		.flags = CFTYPE_PRESSURE,
+		.open = cgroup_pressure_open,
 		.seq_show = cgroup_io_pressure_show,
 		.write = cgroup_io_pressure_write,
 		.poll = cgroup_pressure_poll,
@@ -5165,6 +5148,7 @@ static struct cftype cgroup_base_files[] = {
 	{
 		.name = "memory.pressure",
 		.flags = CFTYPE_PRESSURE,
+		.open = cgroup_pressure_open,
 		.seq_show = cgroup_memory_pressure_show,
 		.write = cgroup_memory_pressure_write,
 		.poll = cgroup_pressure_poll,
@@ -5173,6 +5157,7 @@ static struct cftype cgroup_base_files[] = {
 	{
 		.name = "cpu.pressure",
 		.flags = CFTYPE_PRESSURE,
+		.open = cgroup_pressure_open,
 		.seq_show = cgroup_cpu_pressure_show,
 		.write = cgroup_cpu_pressure_write,
 		.poll = cgroup_pressure_poll,
@@ -5306,7 +5291,7 @@ static void css_release_work_fn(struct work_struct *work)
 	mutex_unlock(&cgroup_mutex);
 
 	INIT_RCU_WORK(&css->destroy_rwork, css_free_rwork_fn);
-	queue_rcu_work(cgroup_free_wq, &css->destroy_rwork);
+	queue_rcu_work(cgroup_destroy_wq, &css->destroy_rwork);
 }
 
 static void css_release(struct percpu_ref *ref)
@@ -5315,7 +5300,7 @@ static void css_release(struct percpu_ref *ref)
 		container_of(ref, struct cgroup_subsys_state, refcnt);
 
 	INIT_WORK(&css->destroy_work, css_release_work_fn);
-	queue_work(cgroup_release_wq, &css->destroy_work);
+	queue_work(cgroup_destroy_wq, &css->destroy_work);
 }
 
 static void init_and_link_css(struct cgroup_subsys_state *css,
@@ -5446,7 +5431,7 @@ err_list_del:
 err_free_css:
 	list_del_rcu(&css->rstat_css_node);
 	INIT_RCU_WORK(&css->destroy_rwork, css_free_rwork_fn);
-	queue_rcu_work(cgroup_free_wq, &css->destroy_rwork);
+	queue_rcu_work(cgroup_destroy_wq, &css->destroy_rwork);
 	return ERR_PTR(err);
 }
 
@@ -5686,7 +5671,7 @@ static void css_killed_ref_fn(struct percpu_ref *ref)
 
 	if (atomic_dec_and_test(&css->online_cnt)) {
 		INIT_WORK(&css->destroy_work, css_killed_work_fn);
-		queue_work(cgroup_offline_wq, &css->destroy_work);
+		queue_work(cgroup_destroy_wq, &css->destroy_work);
 	}
 }
 
@@ -5955,6 +5940,8 @@ int __init cgroup_init(void)
 	struct cgroup_subsys *ss;
 	int ssid;
 
+	cgrp_cset_link_pool = KMEM_CACHE(cgrp_cset_link, SLAB_HWCACHE_ALIGN | SLAB_PANIC);
+
 	BUILD_BUG_ON(CGROUP_SUBSYS_COUNT > 16);
 	BUG_ON(cgroup_init_cftypes(NULL, cgroup_base_files));
 	BUG_ON(cgroup_init_cftypes(NULL, cgroup1_base_files));
@@ -6063,14 +6050,8 @@ static int __init cgroup_wq_init(void)
 	 * We would prefer to do this in cgroup_init() above, but that
 	 * is called before init_workqueues(): so leave this until after.
 	 */
-	cgroup_offline_wq = alloc_workqueue("cgroup_offline", 0, 1);
-	BUG_ON(!cgroup_offline_wq);
-
-	cgroup_release_wq = alloc_workqueue("cgroup_release", 0, 1);
-	BUG_ON(!cgroup_release_wq);
-
-	cgroup_free_wq = alloc_workqueue("cgroup_free", 0, 1);
-	BUG_ON(!cgroup_free_wq);
+	cgroup_destroy_wq = alloc_workqueue("cgroup_destroy", 0, 1);
+	BUG_ON(!cgroup_destroy_wq);
 	return 0;
 }
 core_initcall(cgroup_wq_init);
@@ -6342,6 +6323,9 @@ void cgroup_exit(struct task_struct *tsk)
 		css_set_move_task(tsk, cset, NULL, false);
 		list_add_tail(&tsk->cg_list, &cset->dying_tasks);
 		cset->nr_tasks--;
+
+		if (dl_task(tsk))
+			dec_dl_tasks_cs(tsk);
 
 		WARN_ON_ONCE(cgroup_task_frozen(tsk));
 		if (unlikely(cgroup_task_freeze(tsk)))

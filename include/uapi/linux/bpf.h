@@ -73,7 +73,7 @@ struct bpf_insn {
 /* Key of an a BPF_MAP_TYPE_LPM_TRIE entry */
 struct bpf_lpm_trie_key {
 	__u32	prefixlen;	/* up to 32 for AF_INET, 128 for AF_INET6 */
-	__u8	data[];	/* Arbitrary size */
+	__u8	data[0];	/* Arbitrary size */
 };
 
 struct bpf_cgroup_storage_key {
@@ -199,6 +199,7 @@ enum bpf_prog_type {
 	BPF_PROG_TYPE_EXT,
 	BPF_PROG_TYPE_LSM,
 	BPF_PROG_TYPE_SK_LOOKUP,
+	BPF_PROG_TYPE_FUSE,
 };
 
 enum bpf_attach_type {
@@ -909,6 +910,7 @@ union bpf_attr {
  * 		for updates resulting in a null checksum the value is set to
  * 		**CSUM_MANGLED_0** instead. Flag **BPF_F_PSEUDO_HDR** indicates
  * 		the checksum is to be computed against a pseudo-header.
+ * 		Flag **BPF_F_IPV6** should be set for IPv6 packets.
  *
  * 		This helper works in combination with **bpf_csum_diff**\ (),
  * 		which does not update the checksum in-place, but offers more
@@ -2165,8 +2167,8 @@ union bpf_attr {
  *
  * 			# sysctl kernel.perf_event_max_stack=<new value>
  * 	Return
- * 		The non-negative copied *buf* length equal to or less than
- * 		*size* on success, or a negative error in case of failure.
+ * 		A non-negative value equal to or less than *size* on success,
+ * 		or a negative error in case of failure.
  *
  * long bpf_skb_load_bytes_relative(const void *skb, u32 offset, void *to, u32 len, u32 start_header)
  * 	Description
@@ -2942,14 +2944,6 @@ union bpf_attr {
  *
  *		**-EPROTONOSUPPORT** IP packet version is not 4 or 6
  *
- * u64 bpf_ktime_get_boot_ns(void)
- * 	Description
- * 		Return the time elapsed since system boot, in nanoseconds.
- * 		Does include the time the system was suspended.
- * 		See: clock_gettime(CLOCK_BOOTTIME)
- * 	Return
- * 		Current *ktime*.
- *
  * long bpf_skb_output(void *ctx, struct bpf_map *map, u64 flags, void *data, u64 size)
  * 	Description
  * 		Write raw *data* blob into a special BPF perf event held by
@@ -3461,8 +3455,8 @@ union bpf_attr {
  *
  *			# sysctl kernel.perf_event_max_stack=<new value>
  *	Return
- * 		The non-negative copied *buf* length equal to or less than
- * 		*size* on success, or a negative error in case of failure.
+ *		A non-negative value equal to or less than *size* on success,
+ *		or a negative error in case of failure.
  *
  * long bpf_load_hdr_opt(struct bpf_sock_ops *skops, void *searchby_res, u32 len, u64 flags)
  *	Description
@@ -3945,6 +3939,7 @@ enum {
 	BPF_F_PSEUDO_HDR		= (1ULL << 4),
 	BPF_F_MARK_MANGLED_0		= (1ULL << 5),
 	BPF_F_MARK_ENFORCE		= (1ULL << 6),
+	BPF_F_IPV6			= (1ULL << 7),
 };
 
 /* BPF_FUNC_clone_redirect and BPF_FUNC_redirect flags. */
@@ -5020,7 +5015,10 @@ struct bpf_pidns_info {
 
 /* User accessible data for SK_LOOKUP programs. Add new fields at the end. */
 struct bpf_sk_lookup {
-	__bpf_md_ptr(struct bpf_sock *, sk); /* Selected socket */
+	union {
+		__bpf_md_ptr(struct bpf_sock *, sk); /* Selected socket */
+		__u64 cookie; /* Non-zero if socket was selected in PROG_TEST_RUN */
+	};
 
 	__u32 family;		/* Protocol family (AF_INET, AF_INET6) */
 	__u32 protocol;		/* IP protocol (IPPROTO_TCP, IPPROTO_UDP) */

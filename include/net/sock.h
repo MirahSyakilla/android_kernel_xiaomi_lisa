@@ -233,27 +233,7 @@ struct sock_common {
 	/* public: */
 };
 
-struct sk_security_struct {
-#ifdef CONFIG_NETLABEL
-	enum {				/* NetLabel state */
-		NLBL_UNSET = 0,
-		NLBL_REQUIRE,
-		NLBL_LABELED,
-		NLBL_REQSKB,
-		NLBL_CONNLABELED,
-	} nlbl_state;
-	struct netlbl_lsm_secattr *nlbl_secattr; /* NetLabel sec attributes */
-#endif
-	u32 sid;			/* SID of this object */
-	u32 peer_sid;			/* SID of peer */
-	u16 sclass;			/* sock security class */
-	enum {				/* SCTP association state */
-		SCTP_ASSOC_UNSET = 0,
-		SCTP_ASSOC_SET,
-	} sctp_assoc_state;
-};
-
-struct bpf_local_storage;
+struct bpf_sk_storage;
 
 /**
   *	struct sock - network layer representation of sockets

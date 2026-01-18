@@ -208,7 +208,7 @@ DEFINE_MUTEX(sched_energy_mutex);
 bool sched_energy_update;
 
 #ifdef CONFIG_PROC_SYSCTL
-static int sched_energy_aware_handler(struct ctl_table *table, int write,
+int sched_energy_aware_handler(struct ctl_table *table, int write,
 		void *buffer, size_t *lenp, loff_t *ppos)
 {
 	int ret, state;

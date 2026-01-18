@@ -25,6 +25,9 @@
 #include <linux/btf_ids.h>
 #include <net/sock.h>
 
+/* Backport compatibility */
+#define copy_from_kernel_nofault(dst, src, size) probe_kernel_read(dst, src, size)
+
 /* BTF (BPF Type Format) is the meta data format which describes
  * the data types of BPF program/map.  Hence, it basically focus
  * on the C programming language which the modern BPF is primary

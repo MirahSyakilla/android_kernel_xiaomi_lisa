@@ -75,6 +75,12 @@ probe_load(enum bpf_prog_type prog_type, const struct bpf_insn *insns,
 	case BPF_PROG_TYPE_CGROUP_SOCK_ADDR:
 		xattr.expected_attach_type = BPF_CGROUP_INET4_CONNECT;
 		break;
+	case BPF_PROG_TYPE_CGROUP_SOCKOPT:
+		xattr.expected_attach_type = BPF_CGROUP_GETSOCKOPT;
+		break;
+	case BPF_PROG_TYPE_SK_LOOKUP:
+		xattr.expected_attach_type = BPF_SK_LOOKUP;
+		break;
 	case BPF_PROG_TYPE_KPROBE:
 		xattr.kern_version = get_kernel_version();
 		break;
@@ -101,7 +107,9 @@ probe_load(enum bpf_prog_type prog_type, const struct bpf_insn *insns,
 	case BPF_PROG_TYPE_SK_REUSEPORT:
 	case BPF_PROG_TYPE_FLOW_DISSECTOR:
 	case BPF_PROG_TYPE_CGROUP_SYSCTL:
-	case BPF_PROG_TYPE_CGROUP_SOCKOPT:
+	case BPF_PROG_TYPE_TRACING:
+	case BPF_PROG_TYPE_STRUCT_OPS:
+	case BPF_PROG_TYPE_EXT:
 	case BPF_PROG_TYPE_LSM:
 	default:
 		break;
@@ -233,6 +241,11 @@ bool bpf_probe_map_type(enum bpf_map_type map_type, __u32 ifindex)
 		if (btf_fd < 0)
 			return false;
 		break;
+	case BPF_MAP_TYPE_RINGBUF:
+		key_size = 0;
+		value_size = 0;
+		max_entries = sysconf(_SC_PAGE_SIZE);
+		break;
 	case BPF_MAP_TYPE_UNSPEC:
 	case BPF_MAP_TYPE_HASH:
 	case BPF_MAP_TYPE_ARRAY:
@@ -252,6 +265,7 @@ bool bpf_probe_map_type(enum bpf_map_type map_type, __u32 ifindex)
 	case BPF_MAP_TYPE_XSKMAP:
 	case BPF_MAP_TYPE_SOCKHASH:
 	case BPF_MAP_TYPE_REUSEPORT_SOCKARRAY:
+	case BPF_MAP_TYPE_STRUCT_OPS:
 	default:
 		break;
 	}
@@ -321,4 +335,25 @@ bool bpf_probe_helper(enum bpf_func_id id, enum bpf_prog_type prog_type,
 	}
 
 	return res;
+}
+
+/*
+ * Probe for availability of kernel commit (5.3):
+ *
+ * c04c0d2b968a ("bpf: increase complexity limit and maximum program size")
+ */
+bool bpf_probe_large_insn_limit(__u32 ifindex)
+{
+	struct bpf_insn insns[BPF_MAXINSNS + 1];
+	int i;
+
+	for (i = 0; i < BPF_MAXINSNS; i++)
+		insns[i] = BPF_MOV64_IMM(BPF_REG_0, 1);
+	insns[BPF_MAXINSNS] = BPF_EXIT_INSN();
+
+	errno = 0;
+	probe_load(BPF_PROG_TYPE_SCHED_CLS, insns, ARRAY_SIZE(insns), NULL, 0,
+		   ifindex);
+
+	return errno != E2BIG && errno != EINVAL;
 }

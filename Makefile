@@ -1248,6 +1248,19 @@ cmd_link-vmlinux =                                                 \
 	$(CONFIG_SHELL) $< $(LD) $(KBUILD_LDFLAGS) $(LDFLAGS_vmlinux) ;    \
 	$(if $(ARCH_POSTLINK), $(MAKE) -f $(ARCH_POSTLINK) $@, true)
 
+# Backport BPF: Build resolve_btfids automatically
+ifdef CONFIG_DEBUG_INFO_BTF
+RESOLVE_BTFIDS := tools/bpf/resolve_btfids/resolve_btfids
+$(RESOLVE_BTFIDS):
+	$(Q)mkdir -p $(objtree)/tools/bpf/resolve_btfids
+	$(Q)$(MAKE) -sC $(srctree)/tools/bpf/resolve_btfids \
+		O=$(abspath $(objtree))/tools/bpf/resolve_btfids \
+		CC=$(HOSTCC) LD=$(HOSTLD) \
+		EXTRA_CFLAGS="-Wno-switch-enum -Wno-error=switch-enum"
+
+vmlinux: $(RESOLVE_BTFIDS)
+endif
+
 vmlinux: scripts/link-vmlinux.sh autoksyms_recursive $(vmlinux-deps) FORCE
 	+$(call if_changed,link-vmlinux)
 

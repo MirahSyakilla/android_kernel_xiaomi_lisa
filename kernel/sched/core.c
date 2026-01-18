@@ -1237,7 +1237,6 @@ static void uclamp_sync_util_min_rt_default(void)
 
 	rcu_read_lock();
 	for_each_process_thread(g, p)
-		uclamp_update_util_min_rt_default(p);
 	rcu_read_unlock();
 }
 
@@ -2976,7 +2975,7 @@ static void __sched_fork(unsigned long clone_flags, struct task_struct *p)
 
 	INIT_LIST_HEAD(&p->rt.run_list);
 	p->rt.timeout		= 0;
-	p->rt.time_slice	= sched_rr_timeslice;
+	p->rt.time_slice	= RR_TIMESLICE;
 	p->rt.on_rq		= 0;
 	p->rt.on_list		= 0;
 
@@ -3078,7 +3077,7 @@ static void __init init_schedstats(void)
 }
 
 #ifdef CONFIG_PROC_SYSCTL
-static int sysctl_schedstats(struct ctl_table *table, int write, void *buffer,
+int sysctl_schedstats(struct ctl_table *table, int write, void *buffer,
 		size_t *lenp, loff_t *ppos)
 {
 	struct ctl_table t;

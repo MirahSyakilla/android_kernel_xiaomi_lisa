@@ -639,7 +639,7 @@ static inline void bpf_jit_set_header_magic(struct bpf_binary_header *hdr)
 
 #define __BPF_PROG_RUN(prog, ctx, dfunc)	({			\
 	u32 ret;							\
-	cant_migrate();							\
+	cant_sleep();							\
 	if (static_branch_unlikely(&bpf_stats_enabled_key)) {		\
 		struct bpf_prog_stats *stats;				\
 		u64 start = sched_clock();				\
