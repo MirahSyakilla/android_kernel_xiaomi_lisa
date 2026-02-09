@@ -605,6 +605,13 @@ KBUILD_CPPFLAGS	+= $(CLANG_FLAGS)
 export CLANG_FLAGS
 endif
 
+# --- Meow: Clean kernel version string ---
+# Disable compiler version, username, and hostname in built kernel string
+override CC_VERSION_TEXT :=
+export CC_VERSION_TEXT
+export KBUILD_BUILD_USER :=
+export KBUILD_BUILD_HOST :=
+
 ifdef config-build
 # ===========================================================================
 # *config targets only - make sure prerequisites are updated, and descend
