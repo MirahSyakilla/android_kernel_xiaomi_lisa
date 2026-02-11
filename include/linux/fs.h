@@ -3365,10 +3365,7 @@ static inline int vfs_fstatat(int dfd, const char __user *filename,
 	return vfs_statx(dfd, filename, flags | AT_NO_AUTOMOUNT,
 			 stat, STATX_BASIC_STATS);
 }
-static inline int vfs_fstat(int fd, struct kstat *stat)
-{
-	return vfs_statx_fd(fd, stat, STATX_BASIC_STATS, 0);
-}
+extern int vfs_fstat(int fd, struct kstat *stat);
 
 
 extern const char *vfs_get_link(struct dentry *, struct delayed_call *);
