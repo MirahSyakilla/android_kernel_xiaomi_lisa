@@ -4411,27 +4411,30 @@ void susfs_reorder_mnt_id(void) {
 	struct mount *mnt;
 	int first_mnt_id = 0;
 
-	if (!mnt_ns) {
-		return;
-	}
-
 	// Do not reorder the mnt_id if there is no any ksu mount at all
-	if (atomic64_read(&susfs_ksu_mounts) == 0) {
+	if (atomic64_read(&susfs_ksu_mounts) == 0)
 		return;
-	}
 
-	get_mnt_ns(mnt_ns);
+	down_read(&namespace_sem); // needed when manipulating mnt_namespace
+	// lock_ns_list(mnt_ns); // Not needed/available in 5.4
+	lock_mount_hash(); // needed when modifying mount
 
+	// - It is safe here as there should not be any first mnt with the sus mnt_id,
+	//   mount cloned by ksu proc is already handled in clone_mnt()
 	first_mnt_id = list_first_entry(&mnt_ns->list, struct mount, mnt_list)->mnt_id;
 	list_for_each_entry(mnt, &mnt_ns->list, mnt_list) {
+		// mnt_is_cursor check removed for 5.4 compatibility
+		
 		// It is very important that we don't reorder the sus mount if it is not umounted
-		if (mnt->mnt_id == DEFAULT_KSU_MNT_ID) {
+		if (mnt->mnt_id == DEFAULT_KSU_MNT_ID)
 			continue;
-		}
+		// We just still explicitly tell compiler not to optimizie this
 		WRITE_ONCE(mnt->mnt.susfs_mnt_id_backup, READ_ONCE(mnt->mnt_id));
 		WRITE_ONCE(mnt->mnt_id, first_mnt_id++);
 	}
 
-	put_mnt_ns(mnt_ns);
+	unlock_mount_hash();
+	// unlock_ns_list(mnt_ns); // Not needed/available in 5.4
+	up_read(&namespace_sem);
 }
 #endif
