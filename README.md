@@ -4,7 +4,7 @@
 ```bash
 mkdir -p ~/clang
 curl -L https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/tags/android-14.0.0_r18/clang-r487747c.tar.gz | tar -xzC ~/clang
-export PATH="~/clang/bin:$PATH"
+export PATH="$HOME/clang/bin:$PATH"
 export ARCH=arm64
 export CLANG_TRIPLE=aarch64-linux-gnu-
 export CROSS_COMPILE=aarch64-linux-android-
@@ -13,6 +13,7 @@ export LLVM=1
 export LLVM_IAS=1
 
 make O=out ARCH=arm64 lisa_defconfig
+make O=out nconfig
 make -j$(nproc) O=out
 ```
 </details>
