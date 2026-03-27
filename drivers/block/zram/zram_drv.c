@@ -29,12 +29,34 @@
 #include <linux/vmalloc.h>
 #include <linux/err.h>
 #include <linux/idr.h>
+#include <linux/fs.h>
+#include <linux/version.h>
 #include <linux/sysfs.h>
 #include <linux/debugfs.h>
 #include <linux/cpuhotplug.h>
-#include <linux/kernel_read_file.h>
 
 #include "zram_drv.h"
+
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 10, 0)
+#define kmap_local_page(page) kmap_atomic(page)
+#define kunmap_local(addr) kunmap_atomic(addr)
+
+static inline void memcpy_to_bvec(struct bio_vec *bvec, const void *from)
+{
+	void *to = kmap_atomic(bvec->bv_page);
+
+	memcpy(to + bvec->bv_offset, from, bvec->bv_len);
+	kunmap_atomic(to);
+}
+
+static inline void memcpy_from_bvec(void *to, const struct bio_vec *bvec)
+{
+	void *from = kmap_atomic(bvec->bv_page);
+
+	memcpy(to, from + bvec->bv_offset, bvec->bv_len);
+	kunmap_atomic(from);
+}
+#endif
 
 static DEFINE_IDR(zram_index_idr);
 /* idr index must be protected */
@@ -105,7 +127,7 @@ static void zram_slot_unlock(struct zram *zram, u32 index)
 {
 	unsigned long *lock = &zram->table[index].flags;
 
-	mutex_release(slot_dep_map(zram, index), _RET_IP_);
+	mutex_release(slot_dep_map(zram, index), 1, _RET_IP_);
 	clear_and_wake_up_bit(ZRAM_ENTRY_LOCK, lock);
 }
 
@@ -1218,20 +1240,21 @@ static int comp_params_store(struct zram *zram, u32 prio, s32 level,
 			     const char *dict_path)
 {
 	ssize_t sz = 0;
+	loff_t dict_sz = 0;
 
 	comp_params_reset(zram, prio);
 
 	if (dict_path) {
-		sz = kernel_read_file_from_path(dict_path, 0,
+		sz = kernel_read_file_from_path(dict_path,
 						&zram->params[prio].dict,
+						&dict_sz,
 						INT_MAX,
-						NULL,
 						READING_POLICY);
 		if (sz < 0)
 			return -EINVAL;
 	}
 
-	zram->params[prio].dict_sz = sz;
+	zram->params[prio].dict_sz = dict_sz;
 	zram->params[prio].level = level;
 	return 0;
 }
@@ -1824,7 +1847,7 @@ compress_again:
 				   __GFP_KSWAPD_RECLAIM |
 				   __GFP_NOWARN |
 				   __GFP_HIGHMEM |
-				   __GFP_MOVABLE);
+				   __GFP_MOVABLE |
 				   __GFP_CMA |
 				   __GFP_OFFLINABLE);
 	if (IS_ERR_VALUE(handle)) {
