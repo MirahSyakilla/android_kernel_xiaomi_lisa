@@ -14,12 +14,7 @@
 #include <linux/zstd.h>
 #include <crypto/internal/scompress.h>
 
-<<<<<<< HEAD
 #define ZSTD_DEF_LEVEL	1
-=======
-
-#define ZSTD_DEF_LEVEL	1
->>>>>>> 21b86989e90d (zstd: Merge optimizations from Samsung)
 
 struct zstd_ctx {
 	zstd_cctx *cctx;
@@ -30,11 +25,7 @@ struct zstd_ctx {
 
 static zstd_parameters zstd_params(void)
 {
-<<<<<<< HEAD
 	return zstd_get_params(ZSTD_DEF_LEVEL, PAGE_SIZE);
-=======
-	return zstd_get_params(ZSTD_DEF_LEVEL, PAGE_SIZE);
->>>>>>> 21b86989e90d (zstd: Merge optimizations from Samsung)
 }
 
 static int zstd_comp_init(struct zstd_ctx *ctx)

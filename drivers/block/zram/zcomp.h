@@ -12,6 +12,15 @@ struct zcomp_strm {
 	struct crypto_comp *tfm;
 };
 
+/* Keep compatible with newer zram front-end fields. */
+#define ZCOMP_PARAM_NO_LEVEL	-1
+
+struct zcomp_params {
+	s32 level;
+	size_t dict_sz;
+	void *dict;
+};
+
 /* dynamic per-device compression frontend */
 struct zcomp {
 	struct zcomp_strm * __percpu *stream;
