@@ -4326,9 +4326,6 @@ out:
 		set_bit(ICNSS_PM_SUSPEND_NOIRQ, &priv->state);
 	} else {
 		priv->stats.pm_suspend_noirq_err++;
-		/* Force success even if driver returns error */
-		icnss_pr_info("Ignoring PM suspend_noirq failure, ret: %d\n", ret);
-		ret = 0;
 	}
 	return ret;
 }
