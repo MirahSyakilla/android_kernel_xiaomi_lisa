@@ -77,6 +77,16 @@ config TASKS_RCU
 	  only voluntary context switch (not preemption!), idle, and
 	  user-mode execution as quiescent states.
 
+config TASKS_TRACE_RCU
+	bool
+	select SRCU
+	default n
+	help
+	  This option enables a tracing-focused task-based RCU API used by
+	  newer BPF tracing paths (rcu_read_lock_trace()/call_rcu_tasks_trace()).
+	  On this tree, it is provided via compatibility wrappers over the
+	  existing RCU/task-RCU implementation.
+
 config RCU_STALL_COMMON
 	def_bool ( TREE_RCU || PREEMPT_RCU )
 	help
