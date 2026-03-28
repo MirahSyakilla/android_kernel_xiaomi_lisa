@@ -217,6 +217,21 @@ do {                                                            \
 	preempt_enable();                                       \
 } while (0)
 
+/*
+ * Local kmap interfaces were introduced later upstream. On this tree,
+ * provide equivalent behavior on top of atomic kmap so call sites can use
+ * the newer helper names.
+ */
+static inline void *kmap_local_page(struct page *page)
+{
+	return kmap_atomic(page);
+}
+
+static inline void kunmap_local(void *addr)
+{
+	kunmap_atomic(addr);
+}
+
 
 /* when CONFIG_HIGHMEM is not set these will be plain clear/copy_page */
 #ifndef clear_user_highpage

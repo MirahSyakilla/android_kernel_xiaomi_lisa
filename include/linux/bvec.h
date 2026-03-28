@@ -227,7 +227,10 @@ static inline void memcpy_to_bvec(struct bio_vec *bvec, const char *from)
  */
 static inline void memzero_bvec(struct bio_vec *bvec)
 {
-	memzero_page(bvec->bv_page, bvec->bv_offset, bvec->bv_len);
+	char *to = bvec_kmap_local(bvec);
+
+	memset(to, 0, bvec->bv_len);
+	kunmap_local(to);
 }
 
 #endif /* __LINUX_BVEC_ITER_H */

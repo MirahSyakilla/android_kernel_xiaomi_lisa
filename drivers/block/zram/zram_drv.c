@@ -30,33 +30,11 @@
 #include <linux/err.h>
 #include <linux/idr.h>
 #include <linux/fs.h>
-#include <linux/version.h>
 #include <linux/sysfs.h>
 #include <linux/debugfs.h>
 #include <linux/cpuhotplug.h>
 
 #include "zram_drv.h"
-
-#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 10, 0)
-#define kmap_local_page(page) kmap_atomic(page)
-#define kunmap_local(addr) kunmap_atomic(addr)
-
-static inline void memcpy_to_bvec(struct bio_vec *bvec, const void *from)
-{
-	void *to = kmap_atomic(bvec->bv_page);
-
-	memcpy(to + bvec->bv_offset, from, bvec->bv_len);
-	kunmap_atomic(to);
-}
-
-static inline void memcpy_from_bvec(void *to, const struct bio_vec *bvec)
-{
-	void *from = kmap_atomic(bvec->bv_page);
-
-	memcpy(to, from + bvec->bv_offset, bvec->bv_len);
-	kunmap_atomic(from);
-}
-#endif
 
 static DEFINE_IDR(zram_index_idr);
 /* idr index must be protected */
