@@ -7855,7 +7855,7 @@ again:
 		}
 
 		put_prev_entity(cfs_rq, pse);
-		set_next_entity(cfs_rq, se);
+		set_next_entity(cfs_rq, se, false);
 	}
 
 	goto done;
@@ -7866,7 +7866,7 @@ simple:
 
 	do {
 		se = pick_next_entity(cfs_rq, NULL);
-		set_next_entity(cfs_rq, se);
+		set_next_entity(cfs_rq, se, false);
 		cfs_rq = group_cfs_rq(se);
 	} while (cfs_rq);
 

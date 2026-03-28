@@ -1237,7 +1237,7 @@ static void uclamp_sync_util_min_rt_default(void)
 
 	rcu_read_lock();
 	for_each_process_thread(g, p)
-		uclamp_update_util_min_rt_default(p);
+		uclamp_update_active(p);
 	rcu_read_unlock();
 }
 
@@ -6687,7 +6687,7 @@ static struct task_struct *__pick_migrate_task(struct rq *rq)
 	for_each_class(class) {
 		next = class->pick_next_task(rq, NULL, NULL);
 		if (next) {
-			next->sched_class->put_prev_task(rq, next);
+			next->sched_class->put_prev_task(rq, next, NULL);
 			return next;
 		}
 	}
