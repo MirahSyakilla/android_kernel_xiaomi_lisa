@@ -97,7 +97,7 @@
 #include <linux/sched/stat.h>
 #include <linux/posix-timers.h>
 #include <linux/cpufreq_times.h>
-#ifdef CONFIG_KSU_SUSFS_SUS_MAP
+#ifdef CONFIG_SUSFS_REMOVED_SUS_MAP
 #include <linux/susfs_def.h>
 #endif
 #include <trace/events/oom.h>
@@ -892,7 +892,7 @@ static ssize_t mem_rw(struct file *file, char __user *buf,
 	ssize_t copied;
 	char *page;
 	unsigned int flags;
-#ifdef CONFIG_KSU_SUSFS_SUS_MAP
+#ifdef CONFIG_SUSFS_REMOVED_SUS_MAP
 	struct vm_area_struct *vma;
 #endif
 
@@ -914,7 +914,7 @@ static ssize_t mem_rw(struct file *file, char __user *buf,
 	while (count > 0) {
 		size_t this_len = min_t(size_t, count, PAGE_SIZE);
 
-#ifdef CONFIG_KSU_SUSFS_SUS_MAP
+#ifdef CONFIG_SUSFS_REMOVED_SUS_MAP
 		vma = find_vma(mm, addr);
 		if (vma && vma->vm_file) {
 			struct inode *inode = file_inode(vma->vm_file);
@@ -2392,7 +2392,7 @@ proc_map_files_readdir(struct file *file, struct dir_context *ctx)
 		if (++pos <= ctx->pos)
 			continue;
 
-#ifdef CONFIG_KSU_SUSFS_SUS_MAP
+#ifdef CONFIG_SUSFS_REMOVED_SUS_MAP
 		if (unlikely(file_inode(vma->vm_file)->i_mapping->flags & BIT_SUS_MAPS) &&
 		    susfs_is_current_proc_umounted()) {
 			continue;

@@ -30,14 +30,14 @@
 #include <uapi/linux/mount.h>
 #include <linux/fs_context.h>
 #include <linux/shmem_fs.h>
-#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
+#ifdef CONFIG_SUSFS_REMOVED_SUS_MOUNT
 #include <linux/susfs_def.h>
 #endif
 
 #include "pnode.h"
 #include "internal.h"
 
-#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
+#ifdef CONFIG_SUSFS_REMOVED_SUS_MOUNT
 extern bool susfs_is_current_ksu_domain(void);
 extern bool susfs_is_boot_completed_triggered __read_mostly;
 
@@ -136,7 +136,7 @@ static int mnt_alloc_id(struct mount *mnt)
 
 static void mnt_free_id(struct mount *mnt)
 {
-#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
+#ifdef CONFIG_SUSFS_REMOVED_SUS_MOUNT
 	/*
 	 * SUS mount that never had a real ID
 	 */
@@ -164,7 +164,7 @@ static int mnt_alloc_group_id(struct mount *mnt)
 {
 	int res;
 
-#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
+#ifdef CONFIG_SUSFS_REMOVED_SUS_MOUNT
 	if (!susfs_is_boot_completed_triggered &&
 	    mnt->mnt.susfs_mnt_id_backup == DEFAULT_KSU_MNT_ID) {
 
@@ -191,7 +191,7 @@ static int mnt_alloc_group_id(struct mount *mnt)
  */
 void mnt_release_group_id(struct mount *mnt)
 {
-#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
+#ifdef CONFIG_SUSFS_REMOVED_SUS_MOUNT
 	if (mnt->mnt.susfs_mnt_id_backup == DEFAULT_KSU_MNT_ID) {
 		ida_free(&susfs_ksu_mnt_group_ida, mnt->mnt_group_id);
 		mnt->mnt_group_id = 0;
@@ -235,7 +235,7 @@ int mnt_get_count(struct mount *mnt)
 #endif
 }
 
-#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
+#ifdef CONFIG_SUSFS_REMOVED_SUS_MOUNT
 /* A copy of alloc_vfsmnt() but reuse the original mnt_id to mnt */
 static struct mount *susfs_reuse_sus_vfsmnt(const char *name, int orig_mnt_id)
 {
@@ -288,7 +288,7 @@ out_free_cache:
 }
 #endif
 
-#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
+#ifdef CONFIG_SUSFS_REMOVED_SUS_MOUNT
 /* A copy of alloc_vfsmnt() but allocates the fake mnt_id to mnt */
 static struct mount *susfs_alloc_sus_vfsmnt(const char *name)
 {
@@ -370,7 +370,7 @@ static struct mount *alloc_vfsmnt(const char *name)
 
 		mnt->mnt.data = NULL;
 
-#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
+#ifdef CONFIG_SUSFS_REMOVED_SUS_MOUNT
 		/* Must always be initialized for non-SUS mounts */
 		mnt->mnt.susfs_mnt_id_backup = 0;
 #endif
@@ -1112,7 +1112,7 @@ struct vfsmount *vfs_create_mount(struct fs_context *fc)
 		return ERR_PTR(-EINVAL);
 	sb = fc->root->d_sb;
 
-#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
+#ifdef CONFIG_SUSFS_REMOVED_SUS_MOUNT
 	/*
 	 * Redirect mount allocation for KSU domain before boot completion
 	 */
@@ -1133,7 +1133,7 @@ struct vfsmount *vfs_create_mount(struct fs_context *fc)
 	if (fc->fs_type->alloc_mnt_data) {
 		mnt->mnt.data = fc->fs_type->alloc_mnt_data();
 		if (!mnt->mnt.data) {
-#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
+#ifdef CONFIG_SUSFS_REMOVED_SUS_MOUNT
 			if (mnt->mnt.susfs_mnt_id_backup == 0)
 				mnt_free_id(mnt);
 #else
@@ -1227,11 +1227,11 @@ static struct mount *clone_mnt(struct mount *old,
 	struct super_block *sb = old->mnt.mnt_sb;
 	struct mount *mnt;
 	int err;
-#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
+#ifdef CONFIG_SUSFS_REMOVED_SUS_MOUNT
 	bool is_sus_mnt = false;
 #endif
 
-#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
+#ifdef CONFIG_SUSFS_REMOVED_SUS_MOUNT
 	/*
 	 * After boot completed, skip KSU process checks
 	 */
@@ -1266,7 +1266,7 @@ static struct mount *clone_mnt(struct mount *old,
 	/* Normal mount clone */
 	mnt = alloc_vfsmnt(old->mnt_devname);
 
-#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
+#ifdef CONFIG_SUSFS_REMOVED_SUS_MOUNT
 alloc_done:
 #endif
 	if (!mnt)
@@ -1330,7 +1330,7 @@ alloc_done:
 	return mnt;
 
 out_free:
-#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
+#ifdef CONFIG_SUSFS_REMOVED_SUS_MOUNT
 	if (!is_sus_mnt)
 		mnt_free_id(mnt);
 #else
@@ -3665,7 +3665,7 @@ struct mnt_namespace *copy_mnt_ns(unsigned long flags, struct mnt_namespace *ns,
 	copy_flags = CL_COPY_UNBINDABLE | CL_EXPIRE;
 	if (user_ns != ns->user_ns)
 		copy_flags |= CL_SHARED_TO_SLAVE;
-#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
+#ifdef CONFIG_SUSFS_REMOVED_SUS_MOUNT
 		copy_flags |= CL_COPY_MNT_NS;
 #endif
 	new = copy_tree(old, old->mnt.mnt_root, copy_flags);
@@ -4451,7 +4451,7 @@ const struct proc_ns_operations mntns_operations = {
 	.owner		= mntns_owner,
 };
 
-#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
+#ifdef CONFIG_SUSFS_REMOVED_SUS_MOUNT
 /* Reorder the mnt_id after all sus mounts are umounted during ksu_handle_setuid() */
 void susfs_reorder_mnt_id(void) {
 	struct mnt_namespace *mnt_ns = current->nsproxy->mnt_ns;

@@ -9,7 +9,7 @@
 #include <linux/security.h>
 #include <linux/uaccess.h>
 #include <linux/compat.h>
-#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
+#ifdef CONFIG_SUSFS_REMOVED_SUS_MOUNT
 #include <linux/susfs_def.h>
 #include "mount.h"
 #endif
@@ -88,7 +88,7 @@ EXPORT_SYMBOL(vfs_get_fsid);
 int vfs_statfs(const struct path *path, struct kstatfs *buf)
 {
 	int error;
-#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
+#ifdef CONFIG_SUSFS_REMOVED_SUS_MOUNT
 	struct mount *mnt;
 
 	mnt = real_mount(path->mnt);

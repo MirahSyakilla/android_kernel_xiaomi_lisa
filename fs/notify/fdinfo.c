@@ -13,7 +13,7 @@
 #include <linux/seq_file.h>
 #include <linux/proc_fs.h>
 #include <linux/exportfs.h>
-#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
+#ifdef CONFIG_SUSFS_REMOVED_SUS_MOUNT
 #include <linux/susfs_def.h>
 #endif
 
@@ -25,7 +25,7 @@
 
 #if defined(CONFIG_INOTIFY_USER) || defined(CONFIG_FANOTIFY)
 
-#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
+#ifdef CONFIG_SUSFS_REMOVED_SUS_MOUNT
 static void show_fdinfo(struct seq_file *m, struct file *f,
 			void (*show)(struct seq_file *m,
 				     struct fsnotify_mark *mark,
@@ -41,7 +41,7 @@ static void show_fdinfo(struct seq_file *m, struct file *f,
 
 	mutex_lock(&group->mark_mutex);
 	list_for_each_entry(mark, &group->marks_list, g_list) {
-#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
+#ifdef CONFIG_SUSFS_REMOVED_SUS_MOUNT
 		show(m, mark, f);
 #else
 		show(m, mark);
@@ -87,7 +87,7 @@ static void show_mark_fhandle(struct seq_file *m, struct inode *inode)
 
 #ifdef CONFIG_INOTIFY_USER
 
-#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
+#ifdef CONFIG_SUSFS_REMOVED_SUS_MOUNT
 static void inotify_fdinfo(struct seq_file *m,
 			   struct fsnotify_mark *mark,
 			   struct file *file)
@@ -99,7 +99,7 @@ static void inotify_fdinfo(struct seq_file *m,
 	struct inotify_inode_mark *inode_mark;
 	struct inode *inode;
 
-#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
+#ifdef CONFIG_SUSFS_REMOVED_SUS_MOUNT
 	struct mount *mnt;
 #endif
 
@@ -111,7 +111,7 @@ static void inotify_fdinfo(struct seq_file *m,
 	if (!inode)
 		return;
 
-#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
+#ifdef CONFIG_SUSFS_REMOVED_SUS_MOUNT
 	mnt = real_mount(file->f_path.mnt);
 	if (likely(susfs_is_current_proc_umounted()) &&
 	    mnt->mnt_id >= DEFAULT_KSU_MNT_ID) {

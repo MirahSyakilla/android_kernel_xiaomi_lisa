@@ -68,9 +68,6 @@
 #include <asm/mmu_context.h>
 #include <asm/tlb.h>
 
-#ifdef CONFIG_KSU_SUSFS
-#include <linux/susfs_def.h>
-#endif
 
 #include <trace/events/task.h>
 #include "internal.h"
@@ -1908,35 +1905,11 @@ out_ret:
 	return retval;
 }
 
-#ifdef CONFIG_KSU_SUSFS
-extern bool ksu_execveat_hook __read_mostly;
-extern bool ksu_su_compat_enabled __read_mostly;
-extern bool susfs_is_boot_completed_triggered __read_mostly;
-extern bool __ksu_is_allow_uid_for_current(uid_t uid);
-extern int ksu_handle_execveat(int *fd, struct filename **filename_ptr, void *argv,
-			void *envp, int *flags);
-extern int ksu_handle_execveat_sucompat(int *fd, struct filename **filename_ptr, void *argv,
-				void *envp, int *flags);
-#endif
-
 static int do_execveat_common(int fd, struct filename *filename,
 			      struct user_arg_ptr argv,
 			      struct user_arg_ptr envp,
 			      int flags)
 {
-#ifdef CONFIG_KSU_SUSFS
-	if (likely(susfs_is_current_proc_umounted()) || !ksu_su_compat_enabled) {
-		goto orig_flow;
-	}
-
-	if (unlikely(ksu_execveat_hook || !susfs_is_boot_completed_triggered)) {
-		ksu_handle_execveat(&fd, &filename, &argv, &envp, &flags);
-	} else if ((__ksu_is_allow_uid_for_current(current_uid().val))) {
-		ksu_handle_execveat_sucompat(&fd, &filename, &argv, &envp, &flags);
-	}
-
-orig_flow:
-#endif
 	return __do_execve_file(fd, filename, argv, envp, flags, NULL);
 }
 
@@ -1952,9 +1925,11 @@ int do_execve(struct filename *filename,
 	const char __user *const __user *__argv,
 	const char __user *const __user *__envp)
 {
+	int fd = AT_FDCWD;
+	int flags = 0;
 	struct user_arg_ptr argv = { .ptr.native = __argv };
 	struct user_arg_ptr envp = { .ptr.native = __envp };
-	return do_execveat_common(AT_FDCWD, filename, argv, envp, 0);
+	return do_execveat_common(fd, filename, argv, envp, flags);
 }
 
 int do_execveat(int fd, struct filename *filename,
@@ -1973,6 +1948,8 @@ static int compat_do_execve(struct filename *filename,
 	const compat_uptr_t __user *__argv,
 	const compat_uptr_t __user *__envp)
 {
+	int fd = AT_FDCWD;
+	int flags = 0;
 	struct user_arg_ptr argv = {
 		.is_compat = true,
 		.ptr.compat = __argv,
@@ -1981,7 +1958,7 @@ static int compat_do_execve(struct filename *filename,
 		.is_compat = true,
 		.ptr.compat = __envp,
 	};
-	return do_execveat_common(AT_FDCWD, filename, argv, envp, 0);
+	return do_execveat_common(fd, filename, argv, envp, flags);
 }
 
 static int compat_do_execveat(int fd, struct filename *filename,

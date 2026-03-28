@@ -12,7 +12,7 @@
 #include <linux/fs.h>
 
 #include <linux/proc_fs.h>
-#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
+#ifdef CONFIG_SUSFS_REMOVED_SUS_MOUNT
 #include <linux/susfs_def.h>
 #endif
 
@@ -26,7 +26,7 @@ static int seq_show(struct seq_file *m, void *v)
 	int f_flags = 0, ret = -ENOENT;
 	struct file *file = NULL;
 	struct task_struct *task;
-#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
+#ifdef CONFIG_SUSFS_REMOVED_SUS_MOUNT
 	struct mount *mnt = NULL;
 #endif
 
@@ -59,7 +59,7 @@ static int seq_show(struct seq_file *m, void *v)
 	if (ret)
 		return ret;
 
-#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
+#ifdef CONFIG_SUSFS_REMOVED_SUS_MOUNT
 	mnt = real_mount(file->f_path.mnt);
 	if (likely(susfs_is_current_proc_umounted()) &&
 	    mnt->mnt_id >= DEFAULT_KSU_MNT_ID) {
