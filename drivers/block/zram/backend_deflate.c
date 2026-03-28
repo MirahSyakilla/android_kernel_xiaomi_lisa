@@ -14,12 +14,26 @@
 struct deflate_ctx {
 	struct z_stream_s cctx;
 	struct z_stream_s dctx;
-	s32 level;
 };
 
-static void deflate_destroy(void *ctx)
+static void deflate_release_params(struct zcomp_params *params)
 {
-	struct deflate_ctx *zctx = ctx;
+}
+
+static int deflate_setup_params(struct zcomp_params *params)
+{
+	if (params->level == ZCOMP_PARAM_NO_LEVEL)
+		params->level = Z_DEFAULT_COMPRESSION;
+
+	return 0;
+}
+
+static void deflate_destroy(struct zcomp_ctx *ctx)
+{
+	struct deflate_ctx *zctx = ctx->context;
+
+	if (!zctx)
+		return;
 
 	if (zctx->cctx.workspace) {
 		zlib_deflateEnd(&zctx->cctx);
@@ -32,53 +46,48 @@ static void deflate_destroy(void *ctx)
 	kfree(zctx);
 }
 
-static void *deflate_create(struct zcomp_params *params)
+static int deflate_create(struct zcomp_params *params, struct zcomp_ctx *ctx)
 {
-	struct deflate_ctx *ctx;
+	struct deflate_ctx *zctx;
 	size_t sz;
 	int ret;
 
-	ctx = kzalloc(sizeof(*ctx), GFP_KERNEL);
-	if (!ctx)
-		return NULL;
+	zctx = kzalloc(sizeof(*zctx), GFP_KERNEL);
+	if (!zctx)
+		return -ENOMEM;
 
-	if (params->level != ZCOMP_PARAM_NO_LEVEL)
-		ctx->level = params->level;
-	else
-		ctx->level = Z_DEFAULT_COMPRESSION;
-
+	ctx->context = zctx;
 	sz = zlib_deflate_workspacesize(-DEFLATE_DEF_WINBITS, MAX_MEM_LEVEL);
-	ctx->cctx.workspace = vzalloc(sz);
-	if (!ctx->cctx.workspace)
+	zctx->cctx.workspace = vzalloc(sz);
+	if (!zctx->cctx.workspace)
 		goto error;
 
-	ret = zlib_deflateInit2(&ctx->cctx, ctx->level, Z_DEFLATED,
+	ret = zlib_deflateInit2(&zctx->cctx, params->level, Z_DEFLATED,
 				-DEFLATE_DEF_WINBITS, DEFLATE_DEF_MEMLEVEL,
 				Z_DEFAULT_STRATEGY);
 	if (ret != Z_OK)
 		goto error;
 
 	sz = zlib_inflate_workspacesize();
-	ctx->dctx.workspace = vzalloc(sz);
-	if (!ctx->dctx.workspace)
+	zctx->dctx.workspace = vzalloc(sz);
+	if (!zctx->dctx.workspace)
 		goto error;
 
-	ret = zlib_inflateInit2(&ctx->dctx, -DEFLATE_DEF_WINBITS);
+	ret = zlib_inflateInit2(&zctx->dctx, -DEFLATE_DEF_WINBITS);
 	if (ret != Z_OK)
 		goto error;
 
-	return ctx;
+	return 0;
 
 error:
 	deflate_destroy(ctx);
-	return NULL;
+	return -EINVAL;
 }
 
-static int deflate_compress(void *ctx, const unsigned char *src,
-			    size_t src_len, unsigned char *dst,
-			    size_t *dst_len)
+static int deflate_compress(struct zcomp_params *params, struct zcomp_ctx *ctx,
+			    struct zcomp_req *req)
 {
-	struct deflate_ctx *zctx = ctx;
+	struct deflate_ctx *zctx = ctx->context;
 	struct z_stream_s *deflate;
 	int ret;
 
@@ -87,24 +96,24 @@ static int deflate_compress(void *ctx, const unsigned char *src,
 	if (ret != Z_OK)
 		return -EINVAL;
 
-	deflate->next_in = (u8 *)src;
-	deflate->avail_in = src_len;
-	deflate->next_out = (u8 *)dst;
-	deflate->avail_out = *dst_len;
+	deflate->next_in = (u8 *)req->src;
+	deflate->avail_in = req->src_len;
+	deflate->next_out = (u8 *)req->dst;
+	deflate->avail_out = req->dst_len;
 
 	ret = zlib_deflate(deflate, Z_FINISH);
 	if (ret != Z_STREAM_END)
 		return -EINVAL;
 
-	*dst_len = deflate->total_out;
+	req->dst_len = deflate->total_out;
 	return 0;
 }
 
-static int deflate_decompress(void *ctx, const unsigned char *src,
-			      size_t src_len, unsigned char *dst,
-			      size_t dst_len)
+static int deflate_decompress(struct zcomp_params *params,
+			      struct zcomp_ctx *ctx,
+			      struct zcomp_req *req)
 {
-	struct deflate_ctx *zctx = ctx;
+	struct deflate_ctx *zctx = ctx->context;
 	struct z_stream_s *inflate;
 	int ret;
 
@@ -114,10 +123,10 @@ static int deflate_decompress(void *ctx, const unsigned char *src,
 	if (ret != Z_OK)
 		return -EINVAL;
 
-	inflate->next_in = (u8 *)src;
-	inflate->avail_in = src_len;
-	inflate->next_out = (u8 *)dst;
-	inflate->avail_out = dst_len;
+	inflate->next_in = (u8 *)req->src;
+	inflate->avail_in = req->src_len;
+	inflate->next_out = (u8 *)req->dst;
+	inflate->avail_out = req->dst_len;
 
 	ret = zlib_inflate(inflate, Z_SYNC_FLUSH);
 	if (ret != Z_STREAM_END)
@@ -131,5 +140,7 @@ const struct zcomp_ops backend_deflate = {
 	.decompress	= deflate_decompress,
 	.create_ctx	= deflate_create,
 	.destroy_ctx	= deflate_destroy,
+	.setup_params	= deflate_setup_params,
+	.release_params	= deflate_release_params,
 	.name		= "deflate",
 };
