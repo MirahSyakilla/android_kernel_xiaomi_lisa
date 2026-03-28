@@ -135,7 +135,7 @@ const struct sched_class stop_sched_class = {
 
 	.check_preempt_curr	= check_preempt_curr_stop,
 
-	.pick_task		= pick_task_stop,
+	.pick_next_task		= pick_next_task_stop,
 	.put_prev_task		= put_prev_task_stop,
 	.set_next_task          = set_next_task_stop,
 
