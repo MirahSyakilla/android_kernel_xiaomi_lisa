@@ -242,21 +242,13 @@ int cnss_set_cpus_allowed_ptr(struct task_struct *task, ulong cpu)
 }
 EXPORT_SYMBOL(cnss_set_cpus_allowed_ptr);
 
-#define ENTRIES_COUNT 32
+/* wlan prop driver cannot invoke show_stack
+ * function directly, so to invoke this function it
+ * call wcnss_dump_stack function
+ */
 void cnss_dump_stack(struct task_struct *task)
 {
-	const int cnss_spaces = 4;
-	unsigned long cnss_entries[ENTRIES_COUNT] = {0};
-	struct stack_trace cnss_trace = {
-		.nr_entries = 0,
-		.skip = 0,
-		.entries = &cnss_entries[0],
-		.max_entries = ENTRIES_COUNT,
-	};
-
-	save_stack_trace_tsk(task, &cnss_trace);
-	stack_trace_print(cnss_entries, cnss_trace.nr_entries,
-			  cnss_spaces);
+	show_stack(task, NULL);
 }
 EXPORT_SYMBOL(cnss_dump_stack);
 
