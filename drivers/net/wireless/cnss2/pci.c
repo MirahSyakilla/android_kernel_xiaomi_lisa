@@ -3211,10 +3211,9 @@ static int cnss_pci_suspend_driver(struct cnss_pci_data *pci_priv)
 	if (driver_ops && driver_ops->suspend) {
 		ret = driver_ops->suspend(pci_dev, state);
 		if (ret) {
-			cnss_pr_err("Failed to suspend host driver, err = %d. Forcing suspend.\n",
+			cnss_pr_err("Failed to suspend host driver, err = %d\n",
 				    ret);
-			/* Force Success */
-			ret = 0;
+			ret = -EAGAIN;
 		}
 	}
 
