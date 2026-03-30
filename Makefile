@@ -1675,6 +1675,11 @@ help:
 	@echo  '  headers_install - Install sanitised kernel headers to INSTALL_HDR_PATH'; \
 	 echo  '                    (default: $(INSTALL_HDR_PATH))'; \
 	 echo  ''
+	@echo  'Release helpers:'
+	@echo  '  ak3             - Copy Image/dtbo.img to $(AK3_DIR) and create'
+	@echo  '                    $(AK3_RELEASE_DIR)/$(AK3_ZIP_PREFIX)_<version>.zip'
+	@echo  '  adb_push        - adb push the versioned zip to /storage/emulated/0/'
+	@echo  ''
 	@echo  'Static analysers:'
 	@echo  '  checkstack      - Generate a list of stack hogs'
 	@echo  '  namespacecheck  - Name space analysis on compiled kernel'
@@ -1966,7 +1971,14 @@ namespacecheck:
 export_report:
 	$(PERL) $(srctree)/scripts/export_report.pl
 
-PHONY += checkstack kernelrelease kernelversion image_name
+AK3_DIR := $(HOME)/AnyKernel3
+AK3_RELEASE_DIR := $(HOME)/KernelReleases
+AK3_VERSION_FILE := $(AK3_DIR)/version.txt
+AK3_ZIP_PREFIX := MeowKernel
+AK3_IMAGE_SRC := $(objtree)/arch/$(SRCARCH)/boot/Image
+AK3_DTBO_SRC := $(objtree)/arch/$(SRCARCH)/boot/dtbo.img
+
+PHONY += checkstack kernelrelease kernelversion image_name ak3 adb_push
 
 # UML needs a little special treatment here.  It wants to use the host
 # toolchain, so needs $(SUBARCH) passed to checkstack.pl.  Everyone
@@ -1990,6 +2002,51 @@ kernelversion:
 
 image_name:
 	@echo $(KBUILD_IMAGE)
+
+ak3:
+	@set -e; \
+	if [ ! -f "$(AK3_IMAGE_SRC)" ]; then \
+		echo "Missing kernel image: $(AK3_IMAGE_SRC)"; \
+		exit 1; \
+	fi; \
+	if [ ! -f "$(AK3_DTBO_SRC)" ]; then \
+		echo "Missing dtbo image: $(AK3_DTBO_SRC)"; \
+		exit 1; \
+	fi; \
+	if [ ! -f "$(AK3_VERSION_FILE)" ]; then \
+		echo "Missing version file: $(AK3_VERSION_FILE)"; \
+		exit 1; \
+	fi; \
+	cp -f "$(AK3_IMAGE_SRC)" "$(AK3_DIR)/Image"; \
+	cp -f "$(AK3_DTBO_SRC)" "$(AK3_DIR)/dtbo.img"; \
+	version=$$(tr -d '\r\n' < "$(AK3_VERSION_FILE)"); \
+	if [ -z "$$version" ]; then \
+		echo "Version file is empty: $(AK3_VERSION_FILE)"; \
+		exit 1; \
+	fi; \
+	mkdir -p "$(AK3_RELEASE_DIR)"; \
+	zip_file="$(AK3_RELEASE_DIR)/$(AK3_ZIP_PREFIX)_$$version.zip"; \
+	rm -f "$$zip_file"; \
+	(cd "$(AK3_DIR)" && zip -rq "$$zip_file" .); \
+	echo "Created $$zip_file"
+
+adb_push:
+	@set -e; \
+	if [ ! -f "$(AK3_VERSION_FILE)" ]; then \
+		echo "Missing version file: $(AK3_VERSION_FILE)"; \
+		exit 1; \
+	fi; \
+	version=$$(tr -d '\r\n' < "$(AK3_VERSION_FILE)"); \
+	if [ -z "$$version" ]; then \
+		echo "Version file is empty: $(AK3_VERSION_FILE)"; \
+		exit 1; \
+	fi; \
+	zip_file="$(AK3_RELEASE_DIR)/$(AK3_ZIP_PREFIX)_$$version.zip"; \
+	if [ ! -f "$$zip_file" ]; then \
+		echo "Missing zip: $$zip_file (run 'make ak3' first)"; \
+		exit 1; \
+	fi; \
+	adb push "$$zip_file" /storage/emulated/0/
 
 # Clear a bunch of variables before executing the submake
 
