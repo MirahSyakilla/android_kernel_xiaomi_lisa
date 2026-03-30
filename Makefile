@@ -2003,7 +2003,7 @@ kernelversion:
 image_name:
 	@echo $(KBUILD_IMAGE)
 
-ak3:
+ak3: Image dtbo.img
 	@set -e; \
 	if [ ! -f "$(AK3_IMAGE_SRC)" ]; then \
 		echo "Missing kernel image: $(AK3_IMAGE_SRC)"; \
@@ -2030,7 +2030,7 @@ ak3:
 	(cd "$(AK3_DIR)" && zip -rq "$$zip_file" .); \
 	echo "Created $$zip_file"
 
-adb_push:
+adb_push: ak3
 	@set -e; \
 	if [ ! -f "$(AK3_VERSION_FILE)" ]; then \
 		echo "Missing version file: $(AK3_VERSION_FILE)"; \
