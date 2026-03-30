@@ -44175,7 +44175,12 @@ static int msm_routing_probe(struct snd_soc_component *component)
 	msm_crus_pb_add_controls(component);
 #endif
 	/* for elus start */
-#ifdef CONFIG_ELUS_PROXIMITY
+#if defined(CONFIG_ELUS_PROXIMITY) && !defined(CONFIG_MIUS_PROXIMITY)
+	/*
+	 * Avoid registering both ELUS and MIUS ultrasound mixer controls at
+	 * the same time. On MIUS devices, ELUS control writes can fail on DSP
+	 * and destabilize proximity start/stop state transitions.
+	 */
 	elliptic_add_component_controls(component);
 #endif
 	/* for elus end */
