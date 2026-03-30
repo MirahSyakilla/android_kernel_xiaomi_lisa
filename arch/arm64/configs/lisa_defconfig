@@ -6191,9 +6191,10 @@ CONFIG_INTERCONNECT_QCOM_QOS=y
 #
 CONFIG_KSU=y
 # CONFIG_KPM=y
-# CONFIG_KSU_MANUAL_HOOK is not set
-CONFIG_KSU_SYSCALL_HOOK=y
-CONFIG_KSU_TAMPER_SYSCALL_TABLE=y
+CONFIG_KSU_MANUAL_HOOK=y
+# CONFIG_KSU_KPROBES_HOOK=y
+# CONFIG_KSU_SYSCALL_HOOK=y
+# CONFIG_KSU_TAMPER_SYSCALL_TABLE=y
 # CONFIG_KSU_SUSFS=y
 # CONFIG_KSU_SUSFS_SUS_PATH=y
 # CONFIG_KSU_SUSFS_SUS_MOUNT=y
@@ -6206,7 +6207,7 @@ CONFIG_KSU_TAMPER_SYSCALL_TABLE=y
 # CONFIG_KSU_SUSFS_SUS_MAP=y
 # CONFIG_KSU_DEBUG is not set
 # CONFIG_KSU_ALLOWLIST_WORKAROUND is not set
-# CONFIG_KSU_LSM_SECURITY_HOOKS=y
+CONFIG_KSU_LSM_SECURITY_HOOKS=y
 # end of KernelSU
 # end of Device Drivers
 
@@ -6478,8 +6479,7 @@ CONFIG_INTEGRITY_AUDIT=y
 # CONFIG_EVM is not set
 CONFIG_DEFAULT_SECURITY_SELINUX=y
 # CONFIG_DEFAULT_SECURITY_DAC is not set
-# CONFIG_LSM="lockdown,yama,loadpin,safesetid,integrity,selinux,smack,tomoyo,apparmor,baseband_guard"
-CONFIG_LSM="lockdown,yama,loadpin,safesetid,integrity,selinux,smack,tomoyo,apparmor"
+CONFIG_LSM="lockdown,yama,loadpin,safesetid,integrity,selinux,smack,tomoyo,apparmor,baseband_guard"
 
 #
 # Kernel hardening options
@@ -7109,4 +7109,4 @@ CONFIG_CORESIGHT_OST=y
 # CONFIG_CORESIGHT_FUSE is not set
 # end of Kernel hacking
 
-CONFIG_BBG=n
+CONFIG_BBG=y
