@@ -101,7 +101,7 @@ static u64 cpuacct_cpuusage_read(struct cpuacct *ca, int cpu,
 
 	/*
 	 * We allow index == CPUACCT_STAT_NSTATS here to read
-	 * the sum of suages.
+	 * the sum of usages.
 	 */
 	BUG_ON(index > CPUACCT_STAT_NSTATS);
 
@@ -109,7 +109,7 @@ static u64 cpuacct_cpuusage_read(struct cpuacct *ca, int cpu,
 	/*
 	 * Take rq->lock to make 64-bit read safe on 32-bit platforms.
 	 */
-	raw_spin_lock_irq(&cpu_rq(cpu)->lock);
+	raw_spin_rq_lock_irq(cpu_rq(cpu));
 #endif
 
 	switch (index) {
@@ -126,7 +126,7 @@ static u64 cpuacct_cpuusage_read(struct cpuacct *ca, int cpu,
 	}
 
 #ifndef CONFIG_64BIT
-	raw_spin_unlock_irq(&cpu_rq(cpu)->lock);
+	raw_spin_rq_unlock_irq(cpu_rq(cpu));
 #endif
 
 	return data;
@@ -145,7 +145,7 @@ static void cpuacct_cpuusage_write(struct cpuacct *ca, int cpu)
 	/*
 	 * Take rq->lock to make 64-bit write safe on 32-bit platforms.
 	 */
-	raw_spin_lock_irq(&cpu_rq(cpu)->lock);
+	raw_spin_rq_lock_irq(cpu_rq(cpu));
 #endif
 	*cpuusage = 0;
 	cpustat[CPUTIME_USER] = cpustat[CPUTIME_NICE] = 0;
@@ -153,7 +153,7 @@ static void cpuacct_cpuusage_write(struct cpuacct *ca, int cpu)
 	cpustat[CPUTIME_SOFTIRQ] = 0;
 
 #ifndef CONFIG_64BIT
-	raw_spin_unlock_irq(&cpu_rq(cpu)->lock);
+	raw_spin_rq_unlock_irq(cpu_rq(cpu));
 #endif
 }
 
@@ -331,7 +331,7 @@ void cpuacct_charge(struct task_struct *tsk, u64 cputime)
 	unsigned int cpu = task_cpu(tsk);
 	struct cpuacct *ca;
 
-	lockdep_assert_held(&cpu_rq(cpu)->lock);
+	lockdep_assert_rq_held(cpu_rq(cpu));
 
 	for (ca = task_ca(tsk); ca; ca = parent_ca(ca))
 		*per_cpu_ptr(ca->cpuusage, cpu) += cputime;

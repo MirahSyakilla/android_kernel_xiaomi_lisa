@@ -665,14 +665,27 @@ static void free_tio(struct dm_target_io *tio)
 	bio_put(&tio->clone);
 }
 
-u64 dm_start_time_ns_from_clone(struct bio *bio)
+static bool md_in_flight_bios(struct mapped_device *md)
 {
-	struct dm_target_io *tio = container_of(bio, struct dm_target_io, clone);
-	struct dm_io *io = tio->io;
+	int cpu;
+	struct hd_struct *part = &dm_disk(md)->part0;
+	long sum = 0;
 
-	return jiffies_to_nsecs(io->start_time);
+	for_each_possible_cpu(cpu) {
+		sum += part_stat_local_read_cpu(part, in_flight[0], cpu);
+		sum += part_stat_local_read_cpu(part, in_flight[1], cpu);
+	}
+
+	return sum != 0;
 }
-EXPORT_SYMBOL_GPL(dm_start_time_ns_from_clone);
+
+static bool md_in_flight(struct mapped_device *md)
+{
+	if (queue_is_mq(md->queue))
+		return blk_mq_queue_inflight(md->queue);
+	else
+		return md_in_flight_bios(md);
+}
 
 static void start_io_acct(struct dm_io *io)
 {
@@ -2558,33 +2571,19 @@ void dm_put(struct mapped_device *md)
 }
 EXPORT_SYMBOL_GPL(dm_put);
 
-static bool md_in_flight_bios(struct mapped_device *md)
-{
-	int cpu;
-	struct hd_struct *part = &dm_disk(md)->part0;
-	long sum = 0;
-
-	for_each_possible_cpu(cpu) {
-		sum += part_stat_local_read_cpu(part, in_flight[0], cpu);
-		sum += part_stat_local_read_cpu(part, in_flight[1], cpu);
-	}
-
-	return sum != 0;
-}
-
-static int dm_wait_for_bios_completion(struct mapped_device *md, long task_state)
+static int dm_wait_for_completion(struct mapped_device *md, unsigned int task_state)
 {
 	int r = 0;
 	DEFINE_WAIT(wait);
 
-	while (true) {
+	while (1) {
 		prepare_to_wait(&md->wait, &wait, task_state);
 
-		if (!md_in_flight_bios(md))
+		if (!md_in_flight(md))
 			break;
 
 		if (signal_pending_state(task_state, current)) {
-			r = -ERESTARTSYS;
+			r = -EINTR;
 			break;
 		}
 
@@ -2593,28 +2592,6 @@ static int dm_wait_for_bios_completion(struct mapped_device *md, long task_state
 	finish_wait(&md->wait, &wait);
 
 	smp_rmb();
-
-	return r;
-}
-
-static int dm_wait_for_completion(struct mapped_device *md, long task_state)
-{
-	int r = 0;
-
-	if (!queue_is_mq(md->queue))
-		return dm_wait_for_bios_completion(md, task_state);
-
-	while (true) {
-		if (!blk_mq_queue_inflight(md->queue))
-			break;
-
-		if (signal_pending_state(task_state, current)) {
-			r = -ERESTARTSYS;
-			break;
-		}
-
-		msleep(5);
-	}
 
 	return r;
 }
@@ -2742,12 +2719,12 @@ static void unlock_fs(struct mapped_device *md)
  * are being added to md->deferred list.
  */
 static int __dm_suspend(struct mapped_device *md, struct dm_table *map,
-			unsigned suspend_flags, long task_state,
+			unsigned suspend_flags, unsigned int task_state,
 			int dmf_suspended_flag)
 {
 	bool do_lockfs = suspend_flags & DM_SUSPEND_LOCKFS_FLAG;
 	bool noflush = suspend_flags & DM_SUSPEND_NOFLUSH_FLAG;
-	int r = 0;
+	int r;
 
 	lockdep_assert_held(&md->suspend_lock);
 
@@ -2800,7 +2777,7 @@ static int __dm_suspend(struct mapped_device *md, struct dm_table *map,
 	 * Stop md->queue before flushing md->wq in case request-based
 	 * dm defers requests to md->wq from md->queue.
 	 */
-	if (map && dm_request_based(md))
+	if (dm_request_based(md))
 		dm_stop_queue(md->queue);
 
 	flush_workqueue(md->wq);
@@ -2810,8 +2787,7 @@ static int __dm_suspend(struct mapped_device *md, struct dm_table *map,
 	 * We call dm_wait_for_completion to wait for all existing requests
 	 * to finish.
 	 */
-	if (map)
-		r = dm_wait_for_completion(md, task_state);
+	r = dm_wait_for_completion(md, task_state);
 	if (!r)
 		set_bit(dmf_suspended_flag, &md->flags);
 
