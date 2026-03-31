@@ -45,26 +45,21 @@ do {						\
 } while (0)
 # define lockdep_softirq_enter()		\
 do {						\
-	if (!current->hardirq_context++)	\
-		current->hardirq_threaded = 0;	\
-} while (0)
-# define trace_hardirq_threaded()		\
-do {						\
-	current->hardirq_threaded = 1;		\
+	current->softirq_context++;		\
 } while (0)
 # define lockdep_softirq_exit()			\
 do {						\
 	current->softirq_context--;		\
 } while (0)
 
-# define lockdep_irq_work_enter(__work)					\
+# define lockdep_irq_work_enter(_flags)					\
 	  do {								\
-		  if (!(atomic_read(&__work->flags) & IRQ_WORK_HARD_IRQ))\
+		  if (!((_flags) & IRQ_WORK_HARD_IRQ))			\
 			current->irq_config = 1;			\
 	  } while (0)
-# define lockdep_irq_work_exit(__work)					\
+# define lockdep_irq_work_exit(_flags)					\
 	  do {								\
-		  if (!(atomic_read(&__work->flags) & IRQ_WORK_HARD_IRQ))\
+		  if (!((_flags) & IRQ_WORK_HARD_IRQ))			\
 			current->irq_config = 0;			\
 	  } while (0)
 
@@ -76,7 +71,6 @@ do {						\
 # define trace_hardirqs_enabled(p)	0
 # define trace_softirqs_enabled(p)	0
 # define trace_hardirq_enter()		do { } while (0)
-# define trace_hardirq_threaded()	do { } while (0)
 # define trace_hardirq_exit()		do { } while (0)
 # define lockdep_softirq_enter()	do { } while (0)
 # define lockdep_softirq_exit()		do { } while (0)

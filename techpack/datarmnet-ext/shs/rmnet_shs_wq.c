@@ -16,6 +16,7 @@
 #include "rmnet_shs_wq_mem.h"
 #include <linux/workqueue.h>
 #include <linux/list_sort.h>
+#include <linux/sched/isolation.h>
 #include <net/sock.h>
 #include <linux/skbuff.h>
 #include "rmnet_shs_modules.h"
@@ -504,9 +505,10 @@ DATARMNETecc0627c70.DATARMNETba3f7a11ef;rm_err(
 "\x65\x70\x5f\x72\x70\x73\x5f\x6d\x61\x73\x6b\x20\x3d\x20\x30\x78\x25\x78\x20\x7c\x20\x63\x70\x75\x5f\x6f\x6e\x6c\x69\x6e\x65\x28\x64\x65\x73\x74\x29\x20\x3d\x20\x25\x64"
 "\x63\x70\x75\x5f\x69\x6e\x5f\x72\x70\x73\x5f\x6d\x61\x73\x6b\x20\x3d\x20\x25\x64\x20\x7c\x63\x70\x75\x20\x69\x73\x6f\x6c\x61\x74\x65\x64\x28\x64\x65\x73\x74\x29\x20\x3d\x20\x25\x64"
 ,DATARMNET7c894c2f8f,DATARMNET208ea67e1d,ep->DATARMNET9fb369ce5f,cpu_online(
-DATARMNET208ea67e1d),DATARMNET553df5e12a,cpu_isolated(DATARMNET208ea67e1d));if(
+DATARMNET208ea67e1d),DATARMNET553df5e12a,!housekeeping_cpu(DATARMNET208ea67e1d,
+HK_FLAG_DOMAIN));if(
 DATARMNET7c894c2f8f==DATARMNET208ea67e1d||!cpu_online(DATARMNET208ea67e1d)||!
-DATARMNET553df5e12a||cpu_isolated(DATARMNET208ea67e1d)){return(0xd2d+202-0xdf7);
+DATARMNET553df5e12a||!housekeeping_cpu(DATARMNET208ea67e1d,HK_FLAG_DOMAIN)){return(0xd2d+202-0xdf7);
 }return(0xd26+209-0xdf6);}int DATARMNET5f72606f6f(u16 DATARMNETc790ff30fc,u16 
 DATARMNET208ea67e1d,u32 DATARMNET4da4612f1e,u32 DATARMNETa3f89581b5){unsigned 
 long flags;struct DATARMNET9b44b71ee9*ep;if(DATARMNETc790ff30fc>=
@@ -556,7 +558,8 @@ DATARMNET42a992465f].flows;rm_err(
 DATARMNETf632b170b1->DATARMNETbb80fccd97,DATARMNETf632b170b1->
 DATARMNET69770f8ef7,DATARMNETf632b170b1->DATARMNET17380ba0f8,DATARMNETf632b170b1
 ->DATARMNET14b0d18481,DATARMNETf632b170b1->DATARMNETae196235f2,
-DATARMNETf632b170b1->DATARMNET8b9956a3f9,cpu_isolated(DATARMNET42a992465f));
+DATARMNETf632b170b1->DATARMNET8b9956a3f9,!housekeeping_cpu(DATARMNET42a992465f,
+HK_FLAG_DOMAIN));
 list_for_each_entry(DATARMNETd2a694d52a,&DATARMNET9825511866,DATARMNET6de26f0feb
 ){if(DATARMNETd2a694d52a->DATARMNET0dc393a345==(0xd2d+202-0xdf7))continue;if(
 DATARMNETd2a694d52a->DATARMNET63b1a086d5){if(DATARMNETd2a694d52a->

@@ -17,7 +17,9 @@
 #include <linux/module.h>
 #include <linux/input.h>
 #include <linux/kthread.h>
+#ifdef CONFIG_SCHED_WALT
 #include <linux/sched/core_ctl.h>
+#endif
 #include <soc/qcom/msm_performance.h>
 #include <linux/spinlock.h>
 #include <linux/circ_buf.h>
@@ -807,6 +809,7 @@ static int init_events_group(void)
 	return 0;
 }
 
+#ifdef CONFIG_SCHED_WALT
 static void nr_notify_userspace(struct work_struct *work)
 {
 	sysfs_notify(notify_kobj, NULL, "aggr_top_load");
@@ -880,6 +883,7 @@ static const struct kernel_param_ops param_ops_cc_register = {
 };
 module_param_cb(core_ctl_register, &param_ops_cc_register,
 		&core_ctl_register, 0644);
+#endif
 
 void  msm_perf_events_update(enum evt_update_t update_typ,
 			enum gfx_evt_t evt_typ, pid_t pid,
