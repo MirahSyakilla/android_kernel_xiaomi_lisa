@@ -30,6 +30,10 @@
 #include <linux/hugetlb.h>
 #include <linux/pgsize_migration.h>
 
+#ifndef FAULT_FLAG_INTERRUPTIBLE
+#define FAULT_FLAG_INTERRUPTIBLE FAULT_FLAG_KILLABLE
+#endif
+
 int sysctl_unprivileged_userfaultfd __read_mostly;
 
 static struct kmem_cache *userfaultfd_ctx_cachep __read_mostly;
