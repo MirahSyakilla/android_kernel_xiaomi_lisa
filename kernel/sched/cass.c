@@ -26,6 +26,9 @@
  */
 #include <linux/string.h>
 
+#define CASS_TINY_UTIL		(SCHED_CAPACITY_SCALE / 16) /* 6.25% */
+#define CASS_SMALL_UTIL		(SCHED_CAPACITY_SCALE / 8)  /* 12.5% */
+
 struct cass_cpu_cand {
 	int cpu;
 	unsigned int exit_lat;
@@ -218,8 +221,8 @@ bool cass_allow_prime_avoidance(unsigned long p_util, unsigned long uc_min, bool
 	/* Never avoid prime CPU for sync wakes or uclamp-min constrained tasks */
 	if (sync || uc_min)
 		return false;
-	/* Only avoid for tasks using < 12.5% of a single CPU */
-	return p_util < (SCHED_CAPACITY_SCALE / 8);
+	/* Only avoid for tasks using < 6.25% of a single CPU */
+	return p_util < CASS_TINY_UTIL;
 }
 
 static int cass_best_cpu(struct task_struct *p, int prev_cpu, bool sync, bool rt)
@@ -251,13 +254,13 @@ static int cass_best_cpu(struct task_struct *p, int prev_cpu, bool sync, bool rt
 	 * Prefer idle CPUs for sync wakes and for "heavy enough" work; otherwise,
 	 * prefer packing onto an already-active CPU.
 	 */
-	prefer_idle = sync || rt || uc_min || p_util >= (SCHED_CAPACITY_SCALE / 8);
+	prefer_idle = sync || rt || uc_min || p_util >= CASS_TINY_UTIL;
 
 	if (!rt)
 		p_vruntime = READ_ONCE(p->se.vruntime);
 
 	eevdf_lag_margin = SCHED_CAPACITY_SCALE / 16;
-	if (!rt && !sync && !uc_min && p_util < (SCHED_CAPACITY_SCALE / 8)) {
+	if (!rt && !sync && !uc_min && p_util < CASS_SMALL_UTIL) {
 		cfs_rq = &cpu_rq(this_cpu)->cfs;
 		this_lag = READ_ONCE(cfs_rq->avg_vruntime) - (s64)p_vruntime;
 
