@@ -45,6 +45,33 @@
 #define HIF_IC_MAX_IRQ 52
 
 static uint16_t ic_irqnum[HIF_IC_MAX_IRQ];
+
+#ifdef HIF_CPU_PERF_AFFINE_MASK
+static void hif_ahb_set_irq_affinity_hint(uint32_t irq, const char *name)
+{
+	qdf_cpu_mask irq_cpu_mask;
+	unsigned int cpu;
+	int ret;
+	const uint32_t irq_align_mask = 0xF0;
+
+	if ((int)irq <= 0)
+		return;
+
+	qdf_cpumask_clear(&irq_cpu_mask);
+	qdf_for_each_online_cpu(cpu) {
+		if (cpu < 32 && (irq_align_mask & (1U << cpu)))
+			qdf_cpumask_set_cpu(cpu, &irq_cpu_mask);
+	}
+
+	if (qdf_cpumask_empty(&irq_cpu_mask))
+		return;
+
+	ret = qdf_dev_set_irq_affinity(irq, &irq_cpu_mask);
+	if (ret)
+		hif_err("Failed to set IRQ %u affinity hint for %s",
+			irq, name ? name : "unknown");
+}
+#endif
 /* integrated chip irq names */
 const char *ic_irqname[HIF_IC_MAX_IRQ] = {
 "misc-pulse1",
@@ -302,6 +329,10 @@ int hif_ahb_configure_irq(struct hif_pci_softc *sc)
 			ret = -EFAULT;
 			goto end;
 		}
+#ifdef HIF_CPU_PERF_AFFINE_MASK
+		hif_ahb_set_irq_affinity_hint(
+			irq, ic_irqname[HIF_IC_CE0_IRQ_OFFSET + i]);
+#endif
 		hif_ahb_irq_enable(scn, i);
 	}
 
@@ -352,6 +383,10 @@ int hif_ahb_configure_grp_irq(struct hif_softc *scn,
 			ret = -EFAULT;
 			goto end;
 		}
+#ifdef HIF_CPU_PERF_AFFINE_MASK
+		hif_ahb_set_irq_affinity_hint(
+			irq, ic_irqname[hif_ext_group->irq[j]]);
+#endif
 	}
 	qdf_spin_unlock_irqrestore(&hif_ext_group->irq_lock);
 

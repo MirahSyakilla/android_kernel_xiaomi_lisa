@@ -575,13 +575,13 @@ static void hif_ipci_ce_irq_set_affinity_hint(struct hif_softc *scn)
 	struct CE_attr *host_ce_conf;
 	int ce_id;
 	qdf_cpu_mask ce_cpu_mask;
+	const uint32_t irq_align_mask = 0xF0;
 
 	host_ce_conf = ce_sc->host_ce_config;
 	qdf_cpumask_clear(&ce_cpu_mask);
 
 	qdf_for_each_online_cpu(cpus) {
-		if (qdf_topology_physical_package_id(cpus) ==
-			CPU_CLUSTER_TYPE_PERF) {
+		if (cpus < 32 && (irq_align_mask & (1U << cpus))) {
 			qdf_cpumask_set_cpu(cpus,
 					    &ce_cpu_mask);
 		}
@@ -596,13 +596,9 @@ static void hif_ipci_ce_irq_set_affinity_hint(struct hif_softc *scn)
 		qdf_cpumask_clear(&ipci_sc->ce_irq_cpu_mask[ce_id]);
 		qdf_cpumask_copy(&ipci_sc->ce_irq_cpu_mask[ce_id],
 				 &ce_cpu_mask);
-		qdf_dev_modify_irq_status(ipci_sc->ce_msi_irq_num[ce_id],
-					  IRQ_NO_BALANCING, 0);
 		ret = qdf_dev_set_irq_affinity(
 		       ipci_sc->ce_msi_irq_num[ce_id],
 		       (struct qdf_cpu_mask *)&ipci_sc->ce_irq_cpu_mask[ce_id]);
-		qdf_dev_modify_irq_status(ipci_sc->ce_msi_irq_num[ce_id],
-					  0, IRQ_NO_BALANCING);
 		if (ret)
 			hif_err_rl("Set affinity %*pbl fails for CE IRQ %d",
 				   qdf_cpumask_pr_args(

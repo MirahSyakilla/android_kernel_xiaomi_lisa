@@ -93,6 +93,36 @@ static void reschedule_ce_tasklet_work_handler(struct work_struct *work)
 static struct tasklet_work tasklet_workers[CE_ID_MAX];
 static bool work_initialized;
 
+#ifdef HIF_CPU_PERF_AFFINE_MASK
+static void ce_set_irq_affinity_hint(struct hif_softc *scn, int ce_id)
+{
+	qdf_cpu_mask irq_cpu_mask;
+	unsigned int cpu;
+	int irq, ret;
+	const uint32_t irq_align_mask = 0xF0;
+
+	if (!scn || !scn->bus_ops.hif_map_ce_to_irq)
+		return;
+
+	irq = scn->bus_ops.hif_map_ce_to_irq(scn, ce_id);
+	if (irq <= 0)
+		return;
+
+	qdf_cpumask_clear(&irq_cpu_mask);
+	qdf_for_each_online_cpu(cpu) {
+		if (cpu < 32 && (irq_align_mask & (1U << cpu)))
+			qdf_cpumask_set_cpu(cpu, &irq_cpu_mask);
+	}
+
+	if (qdf_cpumask_empty(&irq_cpu_mask))
+		return;
+
+	ret = qdf_dev_set_irq_affinity(irq, &irq_cpu_mask);
+	if (ret)
+		hif_err("Failed to set CE%d IRQ %d affinity hint", ce_id, irq);
+}
+#endif
+
 /**
  * init_tasklet_work() - init_tasklet_work
  * @work: struct work_struct
@@ -876,6 +906,9 @@ QDF_STATUS ce_register_irq(struct HIF_CE_state *hif_ce_state, uint32_t mask)
 				ce_unregister_irq(hif_ce_state, done_mask);
 				return QDF_STATUS_E_FAULT;
 			}
+#ifdef HIF_CPU_PERF_AFFINE_MASK
+			ce_set_irq_affinity_hint(scn, id);
+#endif
 			done_mask |= 1 << id;
 		}
 	}

@@ -2976,14 +2976,14 @@ void hif_pci_irq_set_affinity_hint(
 	int i, ret;
 	unsigned int cpus;
 	bool mask_set = false;
+	const uint32_t irq_align_mask = 0xF0;
 
 	for (i = 0; i < hif_ext_group->numirq; i++)
 		qdf_cpumask_clear(&hif_ext_group->new_cpu_mask[i]);
 
 	for (i = 0; i < hif_ext_group->numirq; i++) {
 		qdf_for_each_online_cpu(cpus) {
-			if (qdf_topology_physical_package_id(cpus) ==
-				CPU_CLUSTER_TYPE_PERF) {
+			if (cpus < 32 && (irq_align_mask & (1U << cpus))) {
 				qdf_cpumask_set_cpu(cpus,
 						    &hif_ext_group->
 						    new_cpu_mask[i]);
@@ -2993,14 +2993,10 @@ void hif_pci_irq_set_affinity_hint(
 	}
 	for (i = 0; i < hif_ext_group->numirq; i++) {
 		if (mask_set) {
-			qdf_dev_modify_irq_status(hif_ext_group->os_irq[i],
-						  IRQ_NO_BALANCING, 0);
 			ret = qdf_dev_set_irq_affinity(hif_ext_group->os_irq[i],
 						       (struct qdf_cpu_mask *)
 						       &hif_ext_group->
 						       new_cpu_mask[i]);
-			qdf_dev_modify_irq_status(hif_ext_group->os_irq[i],
-						  0, IRQ_NO_BALANCING);
 			if (ret)
 				qdf_err("Set affinity %*pbl fails for IRQ %d ",
 					qdf_cpumask_pr_args(&hif_ext_group->
@@ -3028,13 +3024,13 @@ void hif_pci_ce_irq_set_affinity_hint(
 	struct CE_attr *host_ce_conf;
 	int ce_id;
 	qdf_cpu_mask ce_cpu_mask;
+	const uint32_t irq_align_mask = 0xF0;
 
 	host_ce_conf = ce_sc->host_ce_config;
 	qdf_cpumask_clear(&ce_cpu_mask);
 
 	qdf_for_each_online_cpu(cpus) {
-		if (qdf_topology_physical_package_id(cpus) ==
-			CPU_CLUSTER_TYPE_PERF) {
+		if (cpus < 32 && (irq_align_mask & (1U << cpus))) {
 			qdf_cpumask_set_cpu(cpus,
 					    &ce_cpu_mask);
 		} else {
@@ -3052,13 +3048,9 @@ void hif_pci_ce_irq_set_affinity_hint(
 		qdf_cpumask_clear(&pci_sc->ce_irq_cpu_mask[ce_id]);
 		qdf_cpumask_copy(&pci_sc->ce_irq_cpu_mask[ce_id],
 				 &ce_cpu_mask);
-		qdf_dev_modify_irq_status(pci_sc->ce_msi_irq_num[ce_id],
-					  IRQ_NO_BALANCING, 0);
 		ret = qdf_dev_set_irq_affinity(
 			pci_sc->ce_msi_irq_num[ce_id],
 			(struct qdf_cpu_mask *)&pci_sc->ce_irq_cpu_mask[ce_id]);
-		qdf_dev_modify_irq_status(pci_sc->ce_msi_irq_num[ce_id],
-					  0, IRQ_NO_BALANCING);
 		if (ret)
 			hif_err_rl("Set affinity %*pbl fails for CE IRQ %d",
 				   qdf_cpumask_pr_args(
