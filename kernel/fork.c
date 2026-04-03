@@ -1769,7 +1769,16 @@ static __poll_t pidfd_poll(struct file *file, struct poll_table_struct *pts)
 
 bool thread_group_exited(struct pid *pid)
 {
-	return !pid_has_task(pid, PIDTYPE_TGID);
+	struct task_struct *task;
+	bool exited;
+
+	rcu_read_lock();
+	task = pid_task(pid, PIDTYPE_PID);
+	exited = !task ||
+		(READ_ONCE(task->exit_state) && thread_group_empty(task));
+	rcu_read_unlock();
+
+	return exited;
 }
 
 const struct file_operations pidfd_fops = {
