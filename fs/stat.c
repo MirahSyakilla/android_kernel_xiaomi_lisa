@@ -357,15 +357,14 @@ SYSCALL_DEFINE2(newlstat, const char __user *, filename,
 	return cp_new_stat(&stat, statbuf);
 }
 
-#ifdef CONFIG_KSU
-__attribute__((hot))
+#ifdef CONFIG_KSU_MANUAL_HOOK
+__attribute__((hot)) 
 extern int ksu_handle_stat(int *dfd, const char __user **filename_user,
 				int *flags);
-extern void ksu_handle_newfstat_ret(unsigned int *fd,
-				    struct stat __user **statbuf_ptr);
+
+extern void ksu_handle_newfstat_ret(unsigned int *fd, struct stat __user **statbuf_ptr);
 #if defined(__ARCH_WANT_STAT64) || defined(__ARCH_WANT_COMPAT_STAT64)
-extern void ksu_handle_fstat64_ret(unsigned long *fd,
-				   struct stat64 __user **statbuf_ptr);
+extern void ksu_handle_fstat64_ret(unsigned long *fd, struct stat64 __user **statbuf_ptr); // optional
 #endif
 #endif
 
@@ -376,7 +375,7 @@ SYSCALL_DEFINE4(newfstatat, int, dfd, const char __user *, filename,
 	struct kstat stat;
 	int error;
 
-#ifdef CONFIG_KSU
+#ifdef CONFIG_KSU_MANUAL_HOOK
 	ksu_handle_stat(&dfd, &filename, &flag);
 #endif
 
@@ -395,7 +394,7 @@ SYSCALL_DEFINE2(newfstat, unsigned int, fd, struct stat __user *, statbuf)
 	if (!error)
 		error = cp_new_stat(&stat, statbuf);
 
-#ifdef CONFIG_KSU
+#ifdef CONFIG_KSU_MANUAL_HOOK
 	ksu_handle_newfstat_ret(&fd, &statbuf);
 #endif
 	return error;
@@ -525,7 +524,7 @@ SYSCALL_DEFINE2(fstat64, unsigned long, fd, struct stat64 __user *, statbuf)
 	if (!error)
 		error = cp_new_stat64(&stat, statbuf);
 
-#ifdef CONFIG_KSU // for 32-bit
+#ifdef CONFIG_KSU_MANUAL_HOOK // for 32-bit
 	ksu_handle_fstat64_ret(&fd, &statbuf);
 #endif
 	return error;
@@ -537,7 +536,7 @@ SYSCALL_DEFINE4(fstatat64, int, dfd, const char __user *, filename,
 	struct kstat stat;
 	int error;
 
-#ifdef CONFIG_KSU // 32-bit su
+#ifdef CONFIG_KSU_MANUAL_HOOK // 32-bit su
 	ksu_handle_stat(&dfd, &filename, &flag);
 #endif
 
