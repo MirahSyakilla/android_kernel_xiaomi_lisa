@@ -64,4 +64,9 @@ static inline bool mmap_lock_is_locked(struct mm_struct *mm)
 	return rwsem_is_locked(&mm->mmap_lock);
 }
 
+static inline int mmap_lock_is_contended(struct mm_struct *mm)
+{
+	return rwsem_is_contended(&mm->mmap_lock);
+}
+
 #endif /* _LINUX_MMAP_LOCK_H */
