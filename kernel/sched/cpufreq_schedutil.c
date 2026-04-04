@@ -20,6 +20,10 @@ struct sugov_tunables {
 	struct gov_attr_set	attr_set;
 	unsigned int		up_rate_limit_us;
 	unsigned int		down_rate_limit_us;
+	unsigned int		hispeed_freq;
+	unsigned int		hispeed_load;
+	unsigned int		pl;
+	unsigned int		rtg_boost_freq;
 };
 
 struct sugov_policy {
@@ -566,6 +570,34 @@ static ssize_t down_rate_limit_us_show(struct gov_attr_set *attr_set, char *buf)
 	return sprintf(buf, "%u\n", tunables->down_rate_limit_us);
 }
 
+static ssize_t hispeed_freq_show(struct gov_attr_set *attr_set, char *buf)
+{
+	struct sugov_tunables *tunables = to_sugov_tunables(attr_set);
+
+	return sprintf(buf, "%u\n", tunables->hispeed_freq);
+}
+
+static ssize_t hispeed_load_show(struct gov_attr_set *attr_set, char *buf)
+{
+	struct sugov_tunables *tunables = to_sugov_tunables(attr_set);
+
+	return sprintf(buf, "%u\n", tunables->hispeed_load);
+}
+
+static ssize_t pl_show(struct gov_attr_set *attr_set, char *buf)
+{
+	struct sugov_tunables *tunables = to_sugov_tunables(attr_set);
+
+	return sprintf(buf, "%u\n", tunables->pl);
+}
+
+static ssize_t rtg_boost_freq_show(struct gov_attr_set *attr_set, char *buf)
+{
+	struct sugov_tunables *tunables = to_sugov_tunables(attr_set);
+
+	return sprintf(buf, "%u\n", tunables->rtg_boost_freq);
+}
+
 static ssize_t up_rate_limit_us_store(struct gov_attr_set *attr_set,
 				      const char *buf, size_t count)
 {
@@ -606,12 +638,72 @@ static ssize_t down_rate_limit_us_store(struct gov_attr_set *attr_set,
 	return count;
 }
 
+static ssize_t hispeed_freq_store(struct gov_attr_set *attr_set,
+				  const char *buf, size_t count)
+{
+	struct sugov_tunables *tunables = to_sugov_tunables(attr_set);
+	unsigned int value;
+
+	if (kstrtouint(buf, 10, &value))
+		return -EINVAL;
+
+	tunables->hispeed_freq = value;
+	return count;
+}
+
+static ssize_t hispeed_load_store(struct gov_attr_set *attr_set,
+				  const char *buf, size_t count)
+{
+	struct sugov_tunables *tunables = to_sugov_tunables(attr_set);
+	unsigned int value;
+
+	if (kstrtouint(buf, 10, &value))
+		return -EINVAL;
+
+	tunables->hispeed_load = value;
+	return count;
+}
+
+static ssize_t pl_store(struct gov_attr_set *attr_set, const char *buf,
+			size_t count)
+{
+	struct sugov_tunables *tunables = to_sugov_tunables(attr_set);
+	unsigned int value;
+
+	if (kstrtouint(buf, 10, &value))
+		return -EINVAL;
+
+	tunables->pl = value;
+	return count;
+}
+
+static ssize_t rtg_boost_freq_store(struct gov_attr_set *attr_set,
+				    const char *buf, size_t count)
+{
+	struct sugov_tunables *tunables = to_sugov_tunables(attr_set);
+	unsigned int value;
+
+	if (kstrtouint(buf, 10, &value))
+		return -EINVAL;
+
+	tunables->rtg_boost_freq = value;
+	return count;
+}
+
 static struct governor_attr up_rate_limit_us = __ATTR_RW(up_rate_limit_us);
 static struct governor_attr down_rate_limit_us = __ATTR_RW(down_rate_limit_us);
+static struct governor_attr hispeed_freq = __ATTR_RW(hispeed_freq);
+static struct governor_attr hispeed_load = __ATTR_RW(hispeed_load);
+static struct governor_attr pl = __ATTR_RW(pl);
+static struct governor_attr rtg_boost_freq = __ATTR_RW(rtg_boost_freq);
 
 static struct attribute *sugov_attrs[] = {
 	&up_rate_limit_us.attr,
 	&down_rate_limit_us.attr,
+	&hispeed_freq.attr,
+	&hispeed_load.attr,
+	&pl.attr,
+	&rtg_boost_freq.attr,
 	NULL
 };
 ATTRIBUTE_GROUPS(sugov);
