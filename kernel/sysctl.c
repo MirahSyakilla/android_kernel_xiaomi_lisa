@@ -345,6 +345,20 @@ static int max_sched_tunable_scaling = SCHED_TUNABLESCALING_END-1;
 #endif /* CONFIG_SMP */
 #endif /* CONFIG_SCHED_DEBUG */
 
+/*
+ * Qualcomm Perf HAL compatibility knobs.
+ *
+ * Some vendor userspace stacks expect these legacy scheduler sysctls to be
+ * present under /proc/sys/kernel/. Upstream/common kernels don't expose them,
+ * which causes userspace perf requests to fail on file-open/read paths.
+ *
+ * Keep defaults inert (0) to avoid altering scheduler behavior by default.
+ */
+static unsigned int sysctl_sched_busy_hysteresis_enable_cpus;
+static unsigned int sysctl_sched_busy_hyst_ns;
+static unsigned int min_sched_busy_hyst_ns;
+static unsigned int max_sched_busy_hyst_ns = UINT_MAX;
+
 #ifdef CONFIG_COMPACTION
 static int min_extfrag_threshold;
 static int max_extfrag_threshold = 1000;
@@ -555,6 +569,22 @@ static struct ctl_table kern_table[] = {
 		.proc_handler	= sched_pelt_multiplier,
 	},
 #endif
+	{
+		.procname	= "sched_busy_hysteresis_enable_cpus",
+		.data		= &sysctl_sched_busy_hysteresis_enable_cpus,
+		.maxlen		= sizeof(unsigned int),
+		.mode		= 0644,
+		.proc_handler	= proc_douintvec,
+	},
+	{
+		.procname	= "sched_busy_hyst_ns",
+		.data		= &sysctl_sched_busy_hyst_ns,
+		.maxlen		= sizeof(unsigned int),
+		.mode		= 0644,
+		.proc_handler	= proc_douintvec_minmax,
+		.extra1		= &min_sched_busy_hyst_ns,
+		.extra2		= &max_sched_busy_hyst_ns,
+	},
 #ifdef CONFIG_UCLAMP_TASK
 	{
 		.procname	= "sched_util_clamp_min",
