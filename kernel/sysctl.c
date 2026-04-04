@@ -358,6 +358,17 @@ static unsigned int sysctl_sched_busy_hysteresis_enable_cpus;
 static unsigned int sysctl_sched_busy_hyst_ns;
 static unsigned int min_sched_busy_hyst_ns;
 static unsigned int max_sched_busy_hyst_ns = UINT_MAX;
+static int sysctl_sched_boost;
+static int min_sched_boost = -100;
+static int max_sched_boost = 100;
+static unsigned int sysctl_sched_ravg_window_nr_ticks;
+static unsigned int min_sched_ravg_window_nr_ticks = 1;
+static unsigned int max_sched_ravg_window_nr_ticks = UINT_MAX;
+static unsigned int sysctl_sched_prefer_spread;
+static unsigned int sysctl_sched_freq_aggregate;
+static unsigned int sysctl_sched_freq_aggregate_threshold;
+static unsigned int min_sched_freq_aggregate_threshold;
+static unsigned int max_sched_freq_aggregate_threshold = UINT_MAX;
 
 #ifdef CONFIG_COMPACTION
 static int min_extfrag_threshold;
@@ -570,6 +581,15 @@ static struct ctl_table kern_table[] = {
 	},
 #endif
 	{
+		.procname	= "sched_boost",
+		.data		= &sysctl_sched_boost,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec_minmax,
+		.extra1		= &min_sched_boost,
+		.extra2		= &max_sched_boost,
+	},
+	{
 		.procname	= "sched_busy_hysteresis_enable_cpus",
 		.data		= &sysctl_sched_busy_hysteresis_enable_cpus,
 		.maxlen		= sizeof(unsigned int),
@@ -584,6 +604,42 @@ static struct ctl_table kern_table[] = {
 		.proc_handler	= proc_douintvec_minmax,
 		.extra1		= &min_sched_busy_hyst_ns,
 		.extra2		= &max_sched_busy_hyst_ns,
+	},
+	{
+		.procname	= "sched_ravg_window_nr_ticks",
+		.data		= &sysctl_sched_ravg_window_nr_ticks,
+		.maxlen		= sizeof(unsigned int),
+		.mode		= 0644,
+		.proc_handler	= proc_douintvec_minmax,
+		.extra1		= &min_sched_ravg_window_nr_ticks,
+		.extra2		= &max_sched_ravg_window_nr_ticks,
+	},
+	{
+		.procname	= "sched_prefer_spread",
+		.data		= &sysctl_sched_prefer_spread,
+		.maxlen		= sizeof(unsigned int),
+		.mode		= 0644,
+		.proc_handler	= proc_douintvec_minmax,
+		.extra1		= SYSCTL_ZERO,
+		.extra2		= SYSCTL_ONE,
+	},
+	{
+		.procname	= "sched_freq_aggregate",
+		.data		= &sysctl_sched_freq_aggregate,
+		.maxlen		= sizeof(unsigned int),
+		.mode		= 0644,
+		.proc_handler	= proc_douintvec_minmax,
+		.extra1		= SYSCTL_ZERO,
+		.extra2		= SYSCTL_ONE,
+	},
+	{
+		.procname	= "sched_freq_aggregate_threshold",
+		.data		= &sysctl_sched_freq_aggregate_threshold,
+		.maxlen		= sizeof(unsigned int),
+		.mode		= 0644,
+		.proc_handler	= proc_douintvec_minmax,
+		.extra1		= &min_sched_freq_aggregate_threshold,
+		.extra2		= &max_sched_freq_aggregate_threshold,
 	},
 #ifdef CONFIG_UCLAMP_TASK
 	{
