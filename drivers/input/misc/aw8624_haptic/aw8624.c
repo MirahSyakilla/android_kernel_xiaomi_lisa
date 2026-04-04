@@ -693,7 +693,7 @@ aw8624_haptic_play_mode(struct aw8624 *aw8624, unsigned char play_mode)
 
 static int aw8624_haptic_play_go(struct aw8624 *aw8624, bool flag)
 {
-	pr_info("%s: enter\n", __func__);
+	pr_debug("%s: enter\n", __func__);
 
 	if (flag == true) {
 		aw8624_i2c_write_bits(aw8624, AW8624_REG_GO,
@@ -1262,7 +1262,7 @@ static int16_t aw8624_haptic_effect_strength(struct aw8624 *aw8624)
 		aw8624->level = 0x1E;	/*30 */
 #endif
 
-	pr_info("%s: aw8624->level =0x%x\n", __func__, aw8624->level);
+	pr_debug("%s: aw8624->level =0x%x\n", __func__, aw8624->level);
 	return 0;
 }
 
@@ -2401,7 +2401,7 @@ static void aw8624_vibrator_work_routine(struct work_struct *work)
 	}//Daniel 20210526 modify end
 
 	pr_debug("%s: enter\n", __func__);
-	pr_info("%s: state=%d activate_mode = %d duration = %d\n", __func__,
+	pr_debug("%s: state=%d activate_mode = %d duration = %d\n", __func__,
 		aw8624->state, aw8624->activate_mode, aw8624->duration);
 
 	mutex_lock(&aw8624->lock);
@@ -2951,7 +2951,7 @@ static int aw8624_haptics_upload_effect(struct input_dev *dev,
 		usleep_range(time_us, time_us + 100);
 	}
 
-	pr_info("%s: effect->type=0x%x,FF_CONSTANT=0x%x,FF_PERIODIC=0x%x\n",
+	pr_debug("%s: effect->type=0x%x,FF_CONSTANT=0x%x,FF_PERIODIC=0x%x\n",
 		__func__, effect->type, FF_CONSTANT, FF_PERIODIC);
 	aw8624->effect_type = effect->type;
 	mutex_lock(&aw8624->lock);
@@ -3011,10 +3011,10 @@ static int aw8624_haptics_upload_effect(struct input_dev *dev,
 
 		if (aw8624->effect_id < aw8624->info.effect_id_boundary) {
 			aw8624->activate_mode = AW8624_HAPTIC_ACTIVATE_RAM_MODE;
-			pr_info
-			    ("%s: aw8624->effect_id=%d , aw8624->activate_mode = %d\n",
-			     __func__, aw8624->effect_id,
-			     aw8624->activate_mode);
+				pr_debug
+				    ("%s: aw8624->effect_id=%d , aw8624->activate_mode = %d\n",
+				     __func__, aw8624->effect_id,
+				     aw8624->activate_mode);
 			data[1] = aw8624->predefined[aw8624->effect_id].play_rate_us / 1000000;	/*second data */
 			data[2] = aw8624->predefined[aw8624->effect_id].play_rate_us / 1000;	/*millisecond data */
 			pr_debug
@@ -3025,10 +3025,10 @@ static int aw8624_haptics_upload_effect(struct input_dev *dev,
 		}
 		if (aw8624->effect_id >= aw8624->info.effect_id_boundary) {
 			aw8624->activate_mode = AW8624_HAPTIC_ACTIVATE_RTP_MODE;
-			pr_info
-			    ("%s: aw8624->effect_id=%d , aw8624->activate_mode = %d\n",
-			     __func__, aw8624->effect_id,
-			     aw8624->activate_mode);
+				pr_debug
+				    ("%s: aw8624->effect_id=%d , aw8624->activate_mode = %d\n",
+				     __func__, aw8624->effect_id,
+				     aw8624->activate_mode);
 			data[1] = aw8624->info.rtp_time[aw8624->effect_id] / 1000;	/*second data */
 			data[2] = aw8624->info.rtp_time[aw8624->effect_id] % 1000;	/*millisecond data */
 			pr_debug("%s: data[1] = %d data[2] = %d, rtp_time %d\n", __func__,
@@ -3064,7 +3064,7 @@ static int aw8624_haptics_playback(struct input_dev *dev, int effect_id,
 	pr_debug("%s:  %d enter\n", __func__, __LINE__);
 
 	pr_debug("%s: effect_id=%d , val = %d\n", __func__, effect_id, val);
-	pr_info("%s: aw8624->effect_id=%d , aw8624->activate_mode = %d\n",
+	pr_debug("%s: aw8624->effect_id=%d , aw8624->activate_mode = %d\n",
 		__func__, aw8624->effect_id, aw8624->activate_mode);
 
 	/*for osc calibration */
@@ -3079,17 +3079,17 @@ static int aw8624_haptics_playback(struct input_dev *dev, int effect_id,
 
 	if (aw8624->effect_type == FF_CONSTANT &&
 	    aw8624->activate_mode == AW8624_HAPTIC_ACTIVATE_RAM_LOOP_MODE) {
-		pr_info("%s: enter cont_mode \n", __func__);
+		pr_debug("%s: enter cont_mode \n", __func__);
 		//schedule_work(&aw8624->vibrator_work);
 		queue_work(aw8624->work_queue, &aw8624->vibrator_work);
 	} else if (aw8624->effect_type == FF_PERIODIC &&
 		   aw8624->activate_mode == AW8624_HAPTIC_ACTIVATE_RAM_MODE) {
-		pr_info("%s: enter  ram_mode\n", __func__);
+		pr_debug("%s: enter  ram_mode\n", __func__);
 		//schedule_work(&aw8624->vibrator_work)
 		queue_work(aw8624->work_queue, &aw8624->vibrator_work);
 	} else if (aw8624->effect_type == FF_PERIODIC &&
 		   aw8624->activate_mode == AW8624_HAPTIC_ACTIVATE_RTP_MODE) {
-		pr_info("%s: enter  rtp_mode\n", __func__);
+		pr_debug("%s: enter  rtp_mode\n", __func__);
 		//schedule_work(&aw8624->rtp_work);
 		queue_work(aw8624->work_queue, &aw8624->rtp_work);
 		//if we are in the play mode, force to exit
@@ -4622,4 +4622,3 @@ module_exit(aw8624_i2c_exit);
 
 MODULE_DESCRIPTION("AW8624 Haptic Driver");
 MODULE_LICENSE("GPL v2");
-
