@@ -3,7 +3,6 @@
  * Auto-group scheduling implementation:
  */
 #include <linux/nospec.h>
-#include <linux/sysctl.h>
 #include "sched.h"
 
 unsigned int __read_mostly sysctl_sched_autogroup_enabled = 1;
