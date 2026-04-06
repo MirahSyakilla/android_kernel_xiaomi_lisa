@@ -49,15 +49,7 @@ void __update_stats_wait_end(struct rq *rq, struct task_struct *p,
 			     struct sched_statistics *stats);
 void __update_stats_enqueue_sleeper(struct rq *rq, struct task_struct *p,
 				    struct sched_statistics *stats);
-
-static inline void
-check_schedstat_required(void)
-{
-	/*
-	 * Tree-local implementation lives in fair.c where tracepoint helper
-	 * declarations are available in this branch layout.
-	 */
-}
+void check_schedstat_required(void);
 
 #else /* !CONFIG_SCHEDSTATS: */
 
