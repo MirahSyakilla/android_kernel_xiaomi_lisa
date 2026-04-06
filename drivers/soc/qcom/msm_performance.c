@@ -1062,6 +1062,7 @@ static bool msm_perf_update_load_pct(void)
 	bool changed = false;
 	int cpu;
 
+	cpus_read_lock();
 	for_each_online_cpu(cpu) {
 		unsigned long cap = arch_scale_cpu_capacity(cpu);
 		unsigned long util, thermal, cap_pct;
@@ -1083,9 +1084,10 @@ static bool msm_perf_update_load_pct(void)
 		total_pct += util_pct;
 		total_cpus++;
 
-		if (cluster == MAX && util_pct > 0)
-			max_cluster_busy++;
+			if (cluster == MAX && util_pct > 0)
+				max_cluster_busy++;
 	}
+	cpus_read_unlock();
 
 	for (cpu = 0; cpu < CLUSTER_MAX; cpu++) {
 		if (cluster_cpu_cnt[cpu]) {
