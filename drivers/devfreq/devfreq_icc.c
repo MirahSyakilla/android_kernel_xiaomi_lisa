@@ -32,6 +32,7 @@
 #define HZ_TO_MBPS(hz, w)	(mult_frac(w, hz, MBYTE))
 #define MBPS_TO_HZ(mbps, w)	(mult_frac(mbps, MBYTE, w))
 #define MBPS_TO_ICC(mbps)	(mult_frac(mbps, MBYTE, 1000))
+#define DEVFREQ_ICC_POLL_MS	CONFIG_QCOM_DEVFREQ_ICC_POLL_MS
 
 enum dev_type {
 	STD_MBPS_DEV,
@@ -231,7 +232,7 @@ int devfreq_add_icc(struct device *dev)
 	}
 
 	p = &d->dp;
-	p->polling_ms = 50;
+	p->polling_ms = DEVFREQ_ICC_POLL_MS;
 	p->target = icc_target;
 	p->get_dev_status = icc_get_dev_status;
 
