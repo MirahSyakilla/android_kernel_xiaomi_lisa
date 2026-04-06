@@ -1237,13 +1237,6 @@ next:
 	update_group_capacity(sd, cpu);
 }
 
-struct asym_cap_data {
-	struct list_head link;
-	struct rcu_head rcu;
-	unsigned long capacity;
-	unsigned long cpus[];
-};
-
 /*
  * Set of available CPUs grouped by their corresponding capacities
  * Each list entry contains a CPU mask reflecting CPUs that share the same
@@ -1251,8 +1244,6 @@ struct asym_cap_data {
  * The lifespan of data is unlimited.
  */
 LIST_HEAD(asym_cap_list);
-
-#define cpu_capacity_span(asym_data) to_cpumask((asym_data)->cpus)
 
 /*
  * Verify whether there is any CPU capacity asymmetry in a given sched domain.
