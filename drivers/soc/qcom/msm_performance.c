@@ -932,6 +932,10 @@ module_param_cb(core_ctl_register, &param_ops_cc_register,
 		&core_ctl_register, 0644);
 #else
 static DECLARE_WORK(msm_perf_sysfs_notify_work, nr_notify_userspace);
+static bool msm_perf_poll_enable = true;
+static unsigned int msm_perf_poll_ms = 40;
+module_param_named(compat_poll_enable, msm_perf_poll_enable, bool, 0644);
+module_param_named(compat_poll_ms, msm_perf_poll_ms, uint, 0644);
 
 static void msm_perf_update_load_pct(void)
 {
@@ -1002,7 +1006,9 @@ static void msm_perf_poll_notify_userspace(struct work_struct *work)
 
 	if (changed)
 		schedule_work(&msm_perf_sysfs_notify_work);
-	schedule_delayed_work(to_delayed_work(work), msecs_to_jiffies(40));
+	if (msm_perf_poll_enable)
+		schedule_delayed_work(to_delayed_work(work),
+				msecs_to_jiffies(max_t(unsigned int, 10, msm_perf_poll_ms)));
 }
 
 static DECLARE_DELAYED_WORK(msm_perf_poll_work, msm_perf_poll_notify_userspace);
@@ -1305,7 +1311,9 @@ static int __init msm_performance_init(void)
 
 	idle_notifier_register(&msm_perf_event_idle_nb);
 #ifndef CONFIG_SCHED_WALT
-	schedule_delayed_work(&msm_perf_poll_work, msecs_to_jiffies(40));
+	if (msm_perf_poll_enable)
+		schedule_delayed_work(&msm_perf_poll_work,
+				msecs_to_jiffies(max_t(unsigned int, 10, msm_perf_poll_ms)));
 #endif
 #endif
 	return 0;
