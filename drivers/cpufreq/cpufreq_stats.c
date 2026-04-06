@@ -46,7 +46,7 @@ static void cpufreq_stats_clear_table(struct cpufreq_stats *stats)
 
 static ssize_t show_total_trans(struct cpufreq_policy *policy, char *buf)
 {
-	return sprintf(buf, "%u\n", policy->stats->total_trans);
+	return scnprintf(buf, PAGE_SIZE, "%u\n", policy->stats->total_trans);
 }
 cpufreq_freq_attr_ro(total_trans);
 
@@ -62,9 +62,12 @@ static ssize_t show_time_in_state(struct cpufreq_policy *policy, char *buf)
 	spin_unlock_irqrestore(&stats->lock, flags);
 
 	for (i = 0; i < stats->state_num; i++) {
-		len += sprintf(buf + len, "%u %llu\n", stats->freq_table[i],
+		len += scnprintf(buf + len, PAGE_SIZE - len, "%u %llu\n",
+			stats->freq_table[i],
 			(unsigned long long)
 			jiffies_64_to_clock_t(stats->time_in_state[i]));
+		if (len >= PAGE_SIZE - 1)
+			break;
 	}
 	return len;
 }
