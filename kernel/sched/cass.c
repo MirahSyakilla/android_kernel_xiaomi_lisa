@@ -117,8 +117,20 @@ bool cass_cpu_better(const struct cass_cpu_cand *a,
 		     fits_capacity(p_util, b->cap_max)))
 		goto done;
 
-	/* Prefer the CPU that isn't the single fastest one in the system */
-	if (cass_cmp(cass_prime_cpu(b), cass_prime_cpu(a)))
+	/*
+	 * For low-utilization work, avoid piling onto the prime CPU to reduce
+	 * unnecessary boosting. For medium/high-utilization work, allow prime
+	 * CPU preference for peak responsiveness.
+	 */
+	if (p_util < (SCHED_CAPACITY_SCALE / 3) &&
+	    cass_cmp(cass_prime_cpu(b), cass_prime_cpu(a)))
+		goto done;
+
+	/*
+	 * For heavier tasks, prefer higher capacity first before spreading by
+	 * relative utilization.
+	 */
+	if (p_util >= (SCHED_CAPACITY_SCALE / 2) && cass_cmp(a->cap, b->cap))
 		goto done;
 
 	/* Prefer the CPU with lower relative utilization */
