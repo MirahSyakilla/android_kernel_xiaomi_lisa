@@ -174,6 +174,7 @@ extern void partition_sched_domains(int ndoms_new, cpumask_var_t doms_new[],
 cpumask_var_t *alloc_sched_domains(unsigned int ndoms);
 void free_sched_domains(cpumask_var_t doms[], unsigned int ndoms);
 
+bool cpus_equal_capacity(int this_cpu, int that_cpu);
 bool cpus_share_cache(int this_cpu, int that_cpu);
 
 typedef const struct cpumask *(*sched_domain_mask_f)(int cpu);
@@ -228,6 +229,11 @@ static inline bool cpus_share_cache(int this_cpu, int that_cpu)
 	return true;
 }
 
+static inline bool cpus_equal_capacity(int this_cpu, int that_cpu)
+{
+	return true;
+}
+
 #endif	/* !CONFIG_SMP */
 
 #ifndef arch_scale_cpu_capacity
@@ -260,6 +266,13 @@ unsigned long arch_scale_thermal_pressure(int cpu)
 static __always_inline
 void arch_set_thermal_pressure(const struct cpumask *cpus,
 			       unsigned long th_pressure)
+{ }
+#endif
+
+#ifndef arch_update_thermal_pressure
+static __always_inline
+void arch_update_thermal_pressure(const struct cpumask *cpus,
+				  unsigned long capped_frequency)
 { }
 #endif
 
