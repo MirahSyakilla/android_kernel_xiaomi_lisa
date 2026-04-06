@@ -230,12 +230,12 @@ partition_sched_domains(int ndoms_new, cpumask_var_t doms_new[],
 {
 }
 
-static inline bool cpus_share_cache(int this_cpu, int that_cpu)
+static inline bool cpus_equal_capacity(int this_cpu, int that_cpu)
 {
 	return true;
 }
 
-static inline bool cpus_equal_capacity(int this_cpu, int that_cpu)
+static inline bool cpus_share_cache(int this_cpu, int that_cpu)
 {
 	return true;
 }

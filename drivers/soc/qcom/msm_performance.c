@@ -28,6 +28,7 @@
 #include <linux/errno.h>
 #include <linux/topology.h>
 #include <linux/scmi_protocol.h>
+#include <linux/workqueue.h>
 
 #define POLL_INT 25
 #define NODE_NAME_MAX_CHARS 16
@@ -110,6 +111,7 @@ static unsigned int aggr_top_load;
 static unsigned int top_load[CLUSTER_MAX];
 static unsigned int curr_cap[CLUSTER_MAX];
 static bool max_cap_cpus[NR_CPUS];
+static DEFINE_PER_CPU(u8, perf_cluster_id);
 static atomic_t game_status_pid;
 #endif
 static bool ready_for_freq_updates;
@@ -520,6 +522,7 @@ static int init_pmu_counter(void)
 	int cpu;
 	unsigned long cpu_capacity[NR_CPUS] = {0};
 	unsigned long min_cpu_capacity = ULONG_MAX;
+	unsigned long max_cpu_capacity = 0;
 	int ret = 0;
 
 	msm_perf_init_attr();
@@ -543,11 +546,39 @@ static int init_pmu_counter(void)
 		cpu_capacity[cpu] = arch_scale_cpu_capacity(cpu);
 		if (cpu_capacity[cpu] < min_cpu_capacity)
 			min_cpu_capacity = cpu_capacity[cpu];
+		if (cpu_capacity[cpu] > max_cpu_capacity)
+			max_cpu_capacity = cpu_capacity[cpu];
+	}
+
+	if (max_cpu_capacity == min_cpu_capacity) {
+		for_each_possible_cpu(cpu)
+			per_cpu(perf_cluster_id, cpu) = MIN;
+	} else {
+		unsigned long mid_cpu_capacity = max_cpu_capacity;
+
+		for_each_possible_cpu(cpu) {
+			if (cpu_capacity[cpu] > min_cpu_capacity &&
+			    cpu_capacity[cpu] < mid_cpu_capacity)
+				mid_cpu_capacity = cpu_capacity[cpu];
+		}
+
+		if (mid_cpu_capacity == max_cpu_capacity)
+			mid_cpu_capacity = min_cpu_capacity;
+
+		for_each_possible_cpu(cpu) {
+			if (cpu_capacity[cpu] == max_cpu_capacity) {
+				per_cpu(perf_cluster_id, cpu) = MAX;
+			} else if (cpu_capacity[cpu] == min_cpu_capacity) {
+				per_cpu(perf_cluster_id, cpu) = MIN;
+			} else {
+				per_cpu(perf_cluster_id, cpu) = MID;
+			}
+		}
 	}
 
 	/* determine cpu index for maximum capacity cpus */
 	for_each_possible_cpu(cpu) {
-		if (cpu_capacity[cpu] > min_cpu_capacity)
+		if (cpu_capacity[cpu] == max_cpu_capacity)
 			max_cap_cpus[cpu] = true;
 	}
 
@@ -809,7 +840,6 @@ static int init_events_group(void)
 	return 0;
 }
 
-#ifdef CONFIG_SCHED_WALT
 static void nr_notify_userspace(struct work_struct *work)
 {
 	sysfs_notify(notify_kobj, NULL, "aggr_top_load");
@@ -818,9 +848,10 @@ static void nr_notify_userspace(struct work_struct *work)
 	sysfs_notify(notify_kobj, NULL, "curr_cap_cluster");
 }
 
+#ifdef CONFIG_SCHED_WALT
 static int msm_perf_core_ctl_notify(struct notifier_block *nb,
-					unsigned long unused,
-					void *data)
+						unsigned long unused,
+						void *data)
 {
 	static unsigned int tld, nrb, i;
 	static unsigned int top_ld[CLUSTER_MAX] = {0}, curr_cp[CLUSTER_MAX] = {0};
@@ -883,6 +914,66 @@ static const struct kernel_param_ops param_ops_cc_register = {
 };
 module_param_cb(core_ctl_register, &param_ops_cc_register,
 		&core_ctl_register, 0644);
+#else
+static DECLARE_WORK(msm_perf_sysfs_notify_work, nr_notify_userspace);
+
+static void msm_perf_update_load_pct(void)
+{
+	unsigned int cluster_load_sum[CLUSTER_MAX] = {0};
+	unsigned int cluster_cap_sum[CLUSTER_MAX] = {0};
+	unsigned int cluster_cpu_cnt[CLUSTER_MAX] = {0};
+	unsigned int max_cluster_busy = 0;
+	unsigned int total_pct = 0;
+	unsigned int total_cpus = 0;
+	int cpu;
+
+	for_each_online_cpu(cpu) {
+		unsigned long cap = arch_scale_cpu_capacity(cpu);
+		unsigned long util, thermal, cap_pct;
+		unsigned int util_pct;
+		u8 cluster = per_cpu(perf_cluster_id, cpu);
+
+		if (!cap)
+			continue;
+
+		util = min_t(unsigned long, sched_cpu_util(cpu, cap), cap);
+		util_pct = mult_frac(util, 100, cap);
+
+		thermal = min_t(unsigned long, arch_scale_thermal_pressure(cpu), cap);
+		cap_pct = mult_frac(cap - thermal, 100, cap);
+
+		cluster_load_sum[cluster] += util_pct;
+		cluster_cap_sum[cluster] += cap_pct;
+		cluster_cpu_cnt[cluster]++;
+		total_pct += util_pct;
+		total_cpus++;
+
+		if (cluster == MAX && util_pct > 0)
+			max_cluster_busy++;
+	}
+
+	aggr_big_nr = max_cluster_busy;
+	aggr_top_load = total_cpus ? (total_pct / total_cpus) : 0;
+
+	for (cpu = 0; cpu < CLUSTER_MAX; cpu++) {
+		if (cluster_cpu_cnt[cpu]) {
+			top_load[cpu] = cluster_load_sum[cpu] / cluster_cpu_cnt[cpu];
+			curr_cap[cpu] = cluster_cap_sum[cpu] / cluster_cpu_cnt[cpu];
+		} else {
+			top_load[cpu] = 0;
+			curr_cap[cpu] = 0;
+		}
+	}
+}
+
+static void msm_perf_poll_notify_userspace(struct work_struct *work)
+{
+	msm_perf_update_load_pct();
+	schedule_work(&msm_perf_sysfs_notify_work);
+	schedule_delayed_work(to_delayed_work(work), msecs_to_jiffies(40));
+}
+
+static DECLARE_DELAYED_WORK(msm_perf_poll_work, msm_perf_poll_notify_userspace);
 #endif
 
 void  msm_perf_events_update(enum evt_update_t update_typ,
@@ -1181,6 +1272,9 @@ static int __init msm_performance_init(void)
 	init_pmu_counter();
 
 	idle_notifier_register(&msm_perf_event_idle_nb);
+#ifndef CONFIG_SCHED_WALT
+	schedule_delayed_work(&msm_perf_poll_work, msecs_to_jiffies(40));
+#endif
 #endif
 	return 0;
 }
