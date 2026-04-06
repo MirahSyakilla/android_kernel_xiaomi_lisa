@@ -940,6 +940,7 @@ static DECLARE_WORK(msm_perf_sysfs_notify_work, nr_notify_userspace);
 static bool msm_perf_poll_enable = true;
 static unsigned int msm_perf_poll_ms = 40;
 static unsigned int msm_perf_poll_window = 5;
+static unsigned int msm_perf_big_util_min = 1;
 static bool msm_perf_poll_initialized;
 static bool core_ctl_register = true;
 static void msm_perf_poll_notify_userspace(struct work_struct *work);
@@ -1040,6 +1041,24 @@ static const struct kernel_param_ops param_ops_compat_poll_window = {
 module_param_cb(compat_poll_window, &param_ops_compat_poll_window,
 		&msm_perf_poll_window, 0644);
 
+static int set_compat_big_util_min(const char *val, const struct kernel_param *kp)
+{
+	int ret = param_set_uint(val, kp);
+
+	if (ret)
+		return ret;
+
+	msm_perf_big_util_min = clamp_t(unsigned int, msm_perf_big_util_min, 1, 100);
+	return 0;
+}
+
+static const struct kernel_param_ops param_ops_compat_big_util_min = {
+	.set = set_compat_big_util_min,
+	.get = param_get_uint,
+};
+module_param_cb(compat_big_util_min, &param_ops_compat_big_util_min,
+		&msm_perf_big_util_min, 0644);
+
 static int set_core_ctl_register_compat(const char *val,
 					const struct kernel_param *kp)
 {
@@ -1096,7 +1115,7 @@ static bool msm_perf_update_load_pct(void)
 		total_pct += util_pct;
 		total_cpus++;
 
-			if (cluster == MAX && util_pct > 0)
+			if (cluster == MAX && util_pct >= msm_perf_big_util_min)
 				max_cluster_busy++;
 	}
 	cpus_read_unlock();
@@ -1489,6 +1508,7 @@ static int __init msm_performance_init(void)
 #ifndef CONFIG_SCHED_WALT
 	msm_perf_poll_ms = clamp_t(unsigned int, msm_perf_poll_ms, 10, 1000);
 	msm_perf_poll_window = clamp_t(unsigned int, msm_perf_poll_window, 1, 50);
+	msm_perf_big_util_min = clamp_t(unsigned int, msm_perf_big_util_min, 1, 100);
 	msm_perf_poll_initialized = true;
 	register_pm_notifier(&msm_perf_pm_nb);
 	if (msm_perf_poll_enable)
