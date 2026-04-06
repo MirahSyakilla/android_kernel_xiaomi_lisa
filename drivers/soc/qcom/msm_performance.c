@@ -112,6 +112,7 @@ static unsigned int aggr_top_load;
 static unsigned int top_load[CLUSTER_MAX];
 static unsigned int curr_cap[CLUSTER_MAX];
 static bool max_cap_cpus[NR_CPUS];
+static unsigned long perf_cpu_capacity[NR_CPUS];
 static DEFINE_PER_CPU(u8, perf_cluster_id);
 static atomic_t game_status_pid;
 #endif
@@ -545,10 +546,11 @@ static int init_pmu_counter(void)
 			free_pmu_counters(cpu);
 			return ret;
 		}
-		/* find capacity per cpu */
-		cpu_capacity[cpu] = arch_scale_cpu_capacity(cpu);
-		if (cpu_capacity[cpu] < min_cpu_capacity)
-			min_cpu_capacity = cpu_capacity[cpu];
+			/* find capacity per cpu */
+			cpu_capacity[cpu] = arch_scale_cpu_capacity(cpu);
+			perf_cpu_capacity[cpu] = cpu_capacity[cpu];
+			if (cpu_capacity[cpu] < min_cpu_capacity)
+				min_cpu_capacity = cpu_capacity[cpu];
 		if (cpu_capacity[cpu] > max_cpu_capacity)
 			max_cpu_capacity = cpu_capacity[cpu];
 	}
@@ -1073,7 +1075,7 @@ static bool msm_perf_update_load_pct(void)
 
 	cpus_read_lock();
 	for_each_online_cpu(cpu) {
-		unsigned long cap = arch_scale_cpu_capacity(cpu);
+		unsigned long cap = perf_cpu_capacity[cpu];
 		unsigned long util, thermal, cap_pct;
 		unsigned int util_pct;
 		u8 cluster = per_cpu(perf_cluster_id, cpu);
