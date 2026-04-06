@@ -670,8 +670,7 @@ static void hwsched_idle_check(struct work_struct *work)
 	if (test_bit(GMU_DISABLE_SLUMBER, &device->gmu_core.flags))
 		goto done;
 
-	if (!atomic_read(&device->active_cnt) &&
-		time_is_before_eq_jiffies(device->idle_jiffies)) {
+	if (!atomic_read(&device->active_cnt)) {
 		if (!a6xx_hw_isidle(adreno_dev)) {
 			dev_err(device->dev, "GPU isn't idle before SLUMBER\n");
 			gmu_fault_snapshot(device);
