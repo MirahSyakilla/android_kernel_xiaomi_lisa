@@ -1554,7 +1554,12 @@ sd_init(struct sched_domain_topology_level *tl,
 
 		.last_balance		= jiffies,
 		.balance_interval	= sd_weight,
+		.newidle_call		= 512,
+		.newidle_success	= 256,
+		.newidle_ratio		= 512,
+		.newidle_stamp		= sched_clock(),
 		.max_newidle_lb_cost	= 0,
+		.last_decay_max_lb_cost	= jiffies,
 		.next_decay_max_lb_cost	= jiffies,
 		.child			= child,
 #ifdef CONFIG_SCHED_DEBUG
