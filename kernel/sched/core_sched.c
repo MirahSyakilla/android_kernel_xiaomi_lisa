@@ -77,7 +77,12 @@ static unsigned long sched_core_update_cookie(struct task_struct *p, unsigned lo
 	old_cookie = p->core_cookie;
 	p->core_cookie = cookie;
 
-	if (enqueued)
+	/*
+	 * Re-enqueue if a queued task now has a non-zero cookie.
+	 * This also covers tasks that previously had no cookie and therefore
+	 * were not in the core tree.
+	 */
+	if (cookie && task_on_rq_queued(p))
 		sched_core_enqueue(rq, p);
 
 	/*
@@ -133,6 +138,10 @@ int sched_core_share_pid(unsigned int cmd, pid_t pid, enum pid_type type,
 
 	if (!static_branch_likely(&sched_smt_present))
 		return -ENODEV;
+
+	BUILD_BUG_ON(PR_SCHED_CORE_SCOPE_THREAD != PIDTYPE_PID);
+	BUILD_BUG_ON(PR_SCHED_CORE_SCOPE_THREAD_GROUP != PIDTYPE_TGID);
+	BUILD_BUG_ON(PR_SCHED_CORE_SCOPE_PROCESS_GROUP != PIDTYPE_PGID);
 
 	if (type > PIDTYPE_PGID || cmd >= PR_SCHED_CORE_MAX || pid < 0 ||
 	    (cmd != PR_SCHED_CORE_GET && uaddr))
@@ -198,7 +207,7 @@ int sched_core_share_pid(unsigned int cmd, pid_t pid, enum pid_type type,
 	default:
 		err = -EINVAL;
 		goto out;
-	};
+	}
 
 	if (type == PIDTYPE_PID) {
 		__sched_core_set(task, cookie);
