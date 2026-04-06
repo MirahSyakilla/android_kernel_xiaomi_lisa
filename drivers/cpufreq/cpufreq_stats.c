@@ -46,7 +46,7 @@ static void cpufreq_stats_clear_table(struct cpufreq_stats *stats)
 
 static ssize_t show_total_trans(struct cpufreq_policy *policy, char *buf)
 {
-	return sprintf(buf, "%d\n", policy->stats->total_trans);
+	return sprintf(buf, "%u\n", policy->stats->total_trans);
 }
 cpufreq_freq_attr_ro(total_trans);
 
