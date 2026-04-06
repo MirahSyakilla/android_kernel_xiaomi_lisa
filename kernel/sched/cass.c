@@ -122,7 +122,7 @@ bool cass_cpu_better(const struct cass_cpu_cand *a,
 	 * unnecessary boosting. For medium/high-utilization work, allow prime
 	 * CPU preference for peak responsiveness.
 	 */
-	if (p_util < (SCHED_CAPACITY_SCALE / 3) &&
+	if (p_util < (SCHED_CAPACITY_SCALE / 8) &&
 	    cass_cmp(cass_prime_cpu(b), cass_prime_cpu(a)))
 		goto done;
 
@@ -130,7 +130,7 @@ bool cass_cpu_better(const struct cass_cpu_cand *a,
 	 * For heavier tasks, prefer higher capacity first before spreading by
 	 * relative utilization.
 	 */
-	if (p_util >= (SCHED_CAPACITY_SCALE / 2) && cass_cmp(a->cap, b->cap))
+	if (p_util >= (SCHED_CAPACITY_SCALE / 4) && cass_cmp(a->cap, b->cap))
 		goto done;
 
 	/* Prefer the CPU with lower relative utilization */

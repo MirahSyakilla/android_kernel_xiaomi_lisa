@@ -666,7 +666,7 @@ static unsigned int sugov_default_rate_limit_us(struct cpufreq_policy *policy)
 	 * Use a tighter default update pacing while keeping a lower/upper
 	 * bound to avoid excess churn on slow-switch paths.
 	 */
-	rate_limit_us = clamp(rate_limit_us, 500U, 1000U);
+	rate_limit_us = clamp(rate_limit_us, 200U, 500U);
 
 	return rate_limit_us;
 }
