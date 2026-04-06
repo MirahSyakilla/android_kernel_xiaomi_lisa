@@ -8591,12 +8591,14 @@ int sched_cpu_deactivate(unsigned int cpu)
 int sched_cpus_activate(struct cpumask *cpus)
 {
 	unsigned int cpu;
-	int ret = 0;
 
 	for_each_cpu(cpu, cpus) {
-		ret = sched_cpu_activate(cpu);
-		if (ret)
-			return ret;
+		if (sched_cpu_activate(cpu)) {
+			for_each_cpu_and(cpu, cpus, cpu_active_mask)
+				sched_cpu_deactivate(cpu);
+
+			return -EBUSY;
+		}
 	}
 
 	return 0;
@@ -8605,28 +8607,102 @@ int sched_cpus_activate(struct cpumask *cpus)
 int sched_cpus_deactivate_nosync(struct cpumask *cpus)
 {
 	unsigned int cpu;
-	int ret = 0;
 
 	for_each_cpu(cpu, cpus) {
-		ret = sched_cpu_deactivate(cpu);
-		if (ret)
-			return ret;
+		if (sched_cpu_deactivate(cpu)) {
+			for_each_cpu(cpu, cpus) {
+				if (!cpu_active(cpu))
+					sched_cpu_activate(cpu);
+			}
+
+			return -EBUSY;
+		}
 	}
 
 	return 0;
 }
 
-/*
- * Compatibility shims for pause/resume CPU flow when backporting newer CPU
- * hotplug users onto this scheduler base.
- */
+static DEFINE_PER_CPU(struct cpu_stop_work, rq_drain_work);
+static DEFINE_PER_CPU(struct cpu_stop_done, rq_drain_done);
+
+static struct task_struct *drain_pick_task(struct rq *rq)
+{
+	const struct sched_class *class;
+	struct task_struct *p;
+
+	for_each_class(class) {
+		p = class->pick_task(rq);
+		if (p)
+			return p;
+	}
+
+	BUG();
+}
+
+static int drain_rq_cpu_stop(void *unused)
+{
+	struct rq *rq = this_rq();
+	struct task_struct *p;
+	int moved;
+
+	do {
+		struct rq_flags rf;
+		int dst;
+
+		moved = 0;
+		rq_lock_irqsave(rq, &rf);
+		update_rq_clock(rq);
+
+		if (rq->nr_running <= 1) {
+			rq_unlock_irqrestore(rq, &rf);
+			break;
+		}
+
+		p = drain_pick_task(rq);
+		if (!p || p == rq->idle || p == rq->stop ||
+		    is_migration_disabled(p) || is_per_cpu_kthread(p)) {
+			rq_unlock_irqrestore(rq, &rf);
+			break;
+		}
+
+		get_task_struct(p);
+		rq_unlock_irqrestore(rq, &rf);
+
+		raw_spin_lock_irq(&p->pi_lock);
+		rq_lock_irqsave(rq, &rf);
+		if (task_rq(p) == rq && task_on_rq_queued(p)) {
+			dst = select_fallback_rq(rq->cpu, p);
+			rq = __migrate_task(rq, &rf, p, dst);
+			moved = 1;
+		}
+		rq_unlock_irqrestore(rq, &rf);
+		raw_spin_unlock_irq(&p->pi_lock);
+		put_task_struct(p);
+	} while (moved);
+
+	return 0;
+}
+
 int sched_cpu_drain_rq(unsigned int cpu)
 {
-	return 0;
+	struct cpu_stop_work *rq_drain = per_cpu_ptr(&rq_drain_work, cpu);
+	struct cpu_stop_done *rq_done = per_cpu_ptr(&rq_drain_done, cpu);
+
+	if (idle_cpu(cpu)) {
+		rq_drain->done = NULL;
+		return 0;
+	}
+
+	return stop_one_cpu_async(cpu, drain_rq_cpu_stop, NULL, rq_drain,
+				  rq_done);
 }
 
 void sched_cpu_drain_rq_wait(unsigned int cpu)
 {
+	struct cpu_stop_work *rq_drain = per_cpu_ptr(&rq_drain_work, cpu);
+
+	if (rq_drain->done)
+		cpu_stop_work_wait(rq_drain);
 }
 
 int task_call_func(struct task_struct *p, task_call_f func, void *arg)
