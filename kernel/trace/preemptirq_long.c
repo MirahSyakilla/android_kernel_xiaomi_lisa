@@ -96,7 +96,7 @@ static void __attribute__((__unused__))
 }
 
 static void note_context_switch(void *u1, bool u2, struct task_struct *u3,
-				struct task_struct *next)
+				struct task_struct *next, unsigned int u4)
 {
 	/*
 	 * Discard false positives during context switch to idle.
