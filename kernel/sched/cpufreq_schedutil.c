@@ -14,7 +14,7 @@
 #include <trace/events/power.h>
 #include <trace/hooks/sched.h>
 
-#define IOWAIT_BOOST_MIN	(SCHED_CAPACITY_SCALE / 8)
+#define IOWAIT_BOOST_MIN	(SCHED_CAPACITY_SCALE / 6)
 
 struct sugov_tunables {
 	struct gov_attr_set	attr_set;
@@ -263,7 +263,7 @@ static inline unsigned long apply_dvfs_headroom(unsigned long util, int cpu)
 	 * If the calculated headroom is below 0.39% (capacity / 256),
 	 * skip boosting as it is unlikely to trigger a frequency change.
          */
-	max_boost = capacity / 10;
+	max_boost = capacity / 8;
 	min_boost = capacity >> 8;
 
 	if (headroom > max_boost)
@@ -405,9 +405,10 @@ static unsigned long sugov_iowait_apply(struct sugov_cpu *sg_cpu, u64 time,
 
 	if (!sg_cpu->iowait_boost_pending) {
 		/*
-		 * No boost pending; reduce the boost value.
+		 * No boost pending; decay the boost value gradually to avoid
+		 * under-driving short bursty IO-heavy workloads.
 		 */
-		sg_cpu->iowait_boost >>= 1;
+		sg_cpu->iowait_boost = (sg_cpu->iowait_boost * 3) >> 2;
 		if (sg_cpu->iowait_boost < IOWAIT_BOOST_MIN) {
 			sg_cpu->iowait_boost = 0;
 			return 0;
@@ -666,7 +667,7 @@ static unsigned int sugov_default_rate_limit_us(struct cpufreq_policy *policy)
 	 * Use a tighter default update pacing while keeping a lower/upper
 	 * bound to avoid excess churn on slow-switch paths.
 	 */
-	rate_limit_us = clamp(rate_limit_us, 200U, 500U);
+	rate_limit_us = clamp(rate_limit_us, 100U, 400U);
 
 	return rate_limit_us;
 }
