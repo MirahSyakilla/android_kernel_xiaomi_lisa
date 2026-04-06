@@ -29,6 +29,7 @@
 #include <linux/topology.h>
 #include <linux/scmi_protocol.h>
 #include <linux/workqueue.h>
+#include <linux/suspend.h>
 
 #define POLL_INT 25
 #define NODE_NAME_MAX_CHARS 16
@@ -944,6 +945,7 @@ static unsigned int msm_perf_accum_top_load;
 static unsigned int msm_perf_accum_top_load_cluster[CLUSTER_MAX];
 static unsigned int msm_perf_accum_curr_cap_cluster[CLUSTER_MAX];
 static unsigned int msm_perf_accum_samples;
+static bool msm_perf_poll_suspended;
 
 static int set_compat_poll_ms(const char *val, const struct kernel_param *kp)
 {
@@ -1056,9 +1058,6 @@ static bool msm_perf_update_load_pct(void)
 			max_cluster_busy++;
 	}
 
-	aggr_big_nr = max_cluster_busy;
-	aggr_top_load = total_cpus ? (total_pct / total_cpus) : 0;
-
 	for (cpu = 0; cpu < CLUSTER_MAX; cpu++) {
 		if (cluster_cpu_cnt[cpu]) {
 			pub_top_load[cpu] = cluster_load_sum[cpu] / cluster_cpu_cnt[cpu];
@@ -1112,12 +1111,39 @@ static bool msm_perf_update_load_pct(void)
 
 static void msm_perf_poll_notify_userspace(struct work_struct *work)
 {
+	if (msm_perf_poll_suspended)
+		return;
+
 	if (msm_perf_update_load_pct())
 		schedule_work(&msm_perf_sysfs_notify_work);
 	if (msm_perf_poll_enable)
 		schedule_delayed_work(to_delayed_work(work),
 				msecs_to_jiffies(max_t(unsigned int, 10, msm_perf_poll_ms)));
 }
+
+static int msm_perf_pm_notifier(struct notifier_block *nb,
+				unsigned long action, void *unused)
+{
+	switch (action) {
+	case PM_SUSPEND_PREPARE:
+		msm_perf_poll_suspended = true;
+		cancel_delayed_work_sync(&msm_perf_poll_work);
+		break;
+	case PM_POST_SUSPEND:
+		msm_perf_poll_suspended = false;
+		if (msm_perf_poll_enable)
+			schedule_delayed_work(&msm_perf_poll_work, 0);
+		break;
+	default:
+		break;
+	}
+
+	return NOTIFY_DONE;
+}
+
+static struct notifier_block msm_perf_pm_nb = {
+	.notifier_call = msm_perf_pm_notifier,
+};
 
 #endif
 
@@ -1421,6 +1447,7 @@ static int __init msm_performance_init(void)
 	msm_perf_poll_ms = clamp_t(unsigned int, msm_perf_poll_ms, 10, 1000);
 	msm_perf_poll_window = clamp_t(unsigned int, msm_perf_poll_window, 1, 50);
 	msm_perf_poll_initialized = true;
+	register_pm_notifier(&msm_perf_pm_nb);
 	if (msm_perf_poll_enable)
 		schedule_delayed_work(&msm_perf_poll_work,
 				msecs_to_jiffies(msm_perf_poll_ms));
