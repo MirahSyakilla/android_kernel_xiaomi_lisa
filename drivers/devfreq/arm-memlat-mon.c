@@ -205,11 +205,14 @@ static void update_counts(struct memlat_cpu_grp *cpu_grp)
 			cpu_grp->read_event_cpu = -1;
 		}
 
+		if (delta != 0)
+			cpu_data->freq = common_evs[CYC_IDX].last_delta / delta;
+		else
+			cpu_data->freq = common_evs[CYC_IDX].last_delta;
 		if (!common_evs[STALL_IDX].pevent)
 			common_evs[STALL_IDX].last_delta =
 				common_evs[CYC_IDX].last_delta;
 
-		cpu_data->freq = common_evs[CYC_IDX].last_delta / delta;
 		cpu_data->stall_pct = mult_frac(100,
 				common_evs[STALL_IDX].last_delta,
 				common_evs[CYC_IDX].last_delta);
