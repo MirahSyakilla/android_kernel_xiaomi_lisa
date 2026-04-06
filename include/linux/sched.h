@@ -493,7 +493,17 @@ struct sched_entity {
 	struct sched_avg		avg;
 #endif
 
-	ANDROID_KABI_RESERVE(1);
+	/*
+	 * Keep scheduler state additions KABI-safe by consuming reserved space.
+	 * Redwood stats/PSI paths expect these per-entity scheduler flags.
+	 */
+	ANDROID_KABI_USE(1,
+		struct {
+			u8 sched_delayed;
+			u8 rel_deadline;
+			u8 custom_slice;
+			u8 __sched_entity_flags_pad;
+		});
 	ANDROID_KABI_RESERVE(2);
 	ANDROID_KABI_RESERVE(3);
 	ANDROID_KABI_RESERVE(4);
