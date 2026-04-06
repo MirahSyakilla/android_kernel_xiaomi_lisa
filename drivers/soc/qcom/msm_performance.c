@@ -417,7 +417,7 @@ static ssize_t show_big_nr(struct kobject *kobj,
 			   struct kobj_attribute *attr,
 			   char *buf)
 {
-	return scnprintf(buf, PAGE_SIZE, "%u\n", aggr_big_nr);
+	return scnprintf(buf, PAGE_SIZE, "%u\n", READ_ONCE(aggr_big_nr));
 }
 
 static struct kobj_attribute big_nr_attr =
@@ -427,7 +427,7 @@ static ssize_t show_top_load(struct kobject *kobj,
 				 struct kobj_attribute *attr,
 				 char *buf)
 {
-	return scnprintf(buf, PAGE_SIZE, "%u\n", aggr_top_load);
+	return scnprintf(buf, PAGE_SIZE, "%u\n", READ_ONCE(aggr_top_load));
 }
 
 static struct kobj_attribute top_load_attr =
@@ -439,8 +439,9 @@ static ssize_t show_top_load_cluster(struct kobject *kobj,
 				 char *buf)
 {
 	return scnprintf(buf, PAGE_SIZE, "%u %u %u\n",
-					top_load[MIN], top_load[MID],
-					top_load[MAX]);
+					READ_ONCE(top_load[MIN]),
+					READ_ONCE(top_load[MID]),
+					READ_ONCE(top_load[MAX]));
 }
 
 static struct kobj_attribute cluster_top_load_attr =
@@ -451,8 +452,9 @@ static ssize_t show_curr_cap_cluster(struct kobject *kobj,
 				 char *buf)
 {
 	return scnprintf(buf, PAGE_SIZE, "%u %u %u\n",
-					curr_cap[MIN], curr_cap[MID],
-					curr_cap[MAX]);
+					READ_ONCE(curr_cap[MIN]),
+					READ_ONCE(curr_cap[MID]),
+					READ_ONCE(curr_cap[MAX]));
 }
 
 static struct kobj_attribute cluster_curr_cap_attr =
@@ -1122,20 +1124,20 @@ static bool msm_perf_update_load_pct(void)
 
 	pub_big_nr = DIV_ROUND_CLOSEST(msm_perf_accum_big_nr, msm_perf_accum_samples);
 	pub_top = DIV_ROUND_CLOSEST(msm_perf_accum_top_load, msm_perf_accum_samples);
-	changed |= (aggr_big_nr != pub_big_nr);
-	changed |= (aggr_top_load != pub_top);
-	aggr_big_nr = pub_big_nr;
-	aggr_top_load = pub_top;
+	changed |= (READ_ONCE(aggr_big_nr) != pub_big_nr);
+	changed |= (READ_ONCE(aggr_top_load) != pub_top);
+	WRITE_ONCE(aggr_big_nr, pub_big_nr);
+	WRITE_ONCE(aggr_top_load, pub_top);
 
 	for (cpu = 0; cpu < CLUSTER_MAX; cpu++) {
 		pub_top_load[cpu] = DIV_ROUND_CLOSEST(msm_perf_accum_top_load_cluster[cpu],
 						      msm_perf_accum_samples);
 		pub_curr_cap[cpu] = DIV_ROUND_CLOSEST(msm_perf_accum_curr_cap_cluster[cpu],
 						      msm_perf_accum_samples);
-		changed |= (top_load[cpu] != pub_top_load[cpu]);
-		changed |= (curr_cap[cpu] != pub_curr_cap[cpu]);
-		top_load[cpu] = pub_top_load[cpu];
-		curr_cap[cpu] = pub_curr_cap[cpu];
+		changed |= (READ_ONCE(top_load[cpu]) != pub_top_load[cpu]);
+		changed |= (READ_ONCE(curr_cap[cpu]) != pub_curr_cap[cpu]);
+		WRITE_ONCE(top_load[cpu], pub_top_load[cpu]);
+		WRITE_ONCE(curr_cap[cpu], pub_curr_cap[cpu]);
 		msm_perf_accum_top_load_cluster[cpu] = 0;
 		msm_perf_accum_curr_cap_cluster[cpu] = 0;
 	}
