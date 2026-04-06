@@ -68,6 +68,15 @@ config SCSI_UFSHCD_QTI
 	  However, do not compile this as a module if your root file system
 	  (the one containing the directory /) is located on a UFS device.
 
+config UFS_DEVFREQ_DEFAULT_GOV
+	string "Default UFS devfreq governor"
+	depends on (SCSI_UFSHCD || SCSI_UFSHCD_QTI)
+	default "simple_ondemand"
+	help
+	  Select the default devfreq governor used by UFS clock scaling.
+	  Keep this at "simple_ondemand" for existing behavior, or switch to
+	  another available governor in your kernel configuration.
+
 config UFS_DBG
 	bool "Universal Flash Storage Debug Mode"
 	depends on (SCSI_UFSHCD || SCSI_UFSHCD_QTI)
