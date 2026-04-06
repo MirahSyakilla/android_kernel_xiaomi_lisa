@@ -658,6 +658,19 @@ static struct kobj_type sugov_tunables_ktype = {
 
 static struct cpufreq_governor schedutil_gov;
 
+static unsigned int sugov_default_rate_limit_us(struct cpufreq_policy *policy)
+{
+	unsigned int rate_limit_us = cpufreq_policy_transition_delay_us(policy);
+
+	/*
+	 * Use a tighter default update pacing while keeping a lower/upper
+	 * bound to avoid excess churn on slow-switch paths.
+	 */
+	rate_limit_us = clamp(rate_limit_us, 500U, 1000U);
+
+	return rate_limit_us;
+}
+
 static struct sugov_policy *sugov_policy_alloc(struct cpufreq_policy *policy)
 {
 	struct sugov_policy *sg_policy;
@@ -799,7 +812,7 @@ static int sugov_init(struct cpufreq_policy *policy)
 		goto stop_kthread;
 	}
 
-	tunables->rate_limit_us = 2000;
+	tunables->rate_limit_us = sugov_default_rate_limit_us(policy);
 
 	policy->governor_data = sg_policy;
 	sg_policy->tunables = tunables;
