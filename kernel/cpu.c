@@ -42,6 +42,11 @@
 
 #include "smpboot.h"
 
+extern int sched_cpus_activate(struct cpumask *cpus);
+extern int sched_cpus_deactivate_nosync(struct cpumask *cpus);
+extern int sched_cpu_drain_rq(unsigned int cpu);
+extern void sched_cpu_drain_rq_wait(unsigned int cpu);
+
 /**
  * cpuhp_cpu_state - Per cpu hotplug state storage
  * @state:	The current cpu state
