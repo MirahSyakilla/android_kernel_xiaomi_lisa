@@ -115,6 +115,9 @@ static bool max_cap_cpus[NR_CPUS];
 static unsigned long perf_cpu_capacity[NR_CPUS];
 static DEFINE_PER_CPU(u8, perf_cluster_id);
 static atomic_t game_status_pid;
+#ifndef CONFIG_SCHED_WALT
+static void msm_perf_reset_compat_accumulators(void);
+#endif
 #endif
 static bool ready_for_freq_updates;
 
@@ -693,6 +696,9 @@ static int hotplug_notify_down(unsigned int cpu)
 	per_cpu(cpu_is_hp, cpu) = true;
 	restart_events(cpu, false);
 	mutex_unlock(&perfevent_lock);
+#ifndef CONFIG_SCHED_WALT
+	msm_perf_reset_compat_accumulators();
+#endif
 
 	return 0;
 }
@@ -705,6 +711,11 @@ static int hotplug_notify_up(unsigned int cpu)
 	restart_events(cpu, true);
 	per_cpu(cpu_is_hp, cpu) = false;
 	mutex_unlock(&perfevent_lock);
+#ifndef CONFIG_SCHED_WALT
+	perf_cpu_capacity[cpu] = arch_scale_cpu_capacity(cpu);
+	max_cap_cpus[cpu] = (per_cpu(perf_cluster_id, cpu) == MAX);
+	msm_perf_reset_compat_accumulators();
+#endif
 
 	if (events_group.init_success) {
 		spin_lock_irqsave(&(events_group.cpu_hotplug_lock), flags);
