@@ -536,7 +536,8 @@ void trace_event_follow_fork(struct trace_array *tr, bool enable)
 
 static void
 event_filter_pid_sched_switch_probe_pre(void *data, bool preempt,
-		    struct task_struct *prev, struct task_struct *next)
+		    struct task_struct *prev, struct task_struct *next,
+		    unsigned int prev_state)
 {
 	struct trace_array *tr = data;
 	struct trace_pid_list *pid_list;
@@ -550,7 +551,8 @@ event_filter_pid_sched_switch_probe_pre(void *data, bool preempt,
 
 static void
 event_filter_pid_sched_switch_probe_post(void *data, bool preempt,
-		    struct task_struct *prev, struct task_struct *next)
+		    struct task_struct *prev, struct task_struct *next,
+		    unsigned int prev_state)
 {
 	struct trace_array *tr = data;
 	struct trace_pid_list *pid_list;
