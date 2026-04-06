@@ -937,6 +937,7 @@ static bool msm_perf_poll_enable = true;
 static unsigned int msm_perf_poll_ms = 40;
 static unsigned int msm_perf_poll_window = 5;
 static bool msm_perf_poll_initialized;
+static bool core_ctl_register = true;
 static void msm_perf_poll_notify_userspace(struct work_struct *work);
 static DECLARE_DELAYED_WORK(msm_perf_poll_work, msm_perf_poll_notify_userspace);
 
@@ -974,6 +975,8 @@ static int set_compat_poll_enable(const char *val, const struct kernel_param *kp
 
 	if (!msm_perf_poll_initialized || old == msm_perf_poll_enable)
 		return 0;
+
+	core_ctl_register = msm_perf_poll_enable;
 
 	if (msm_perf_poll_enable) {
 		cancel_delayed_work_sync(&msm_perf_poll_work);
@@ -1023,6 +1026,32 @@ static const struct kernel_param_ops param_ops_compat_poll_window = {
 };
 module_param_cb(compat_poll_window, &param_ops_compat_poll_window,
 		&msm_perf_poll_window, 0644);
+
+static int set_core_ctl_register_compat(const char *val,
+					const struct kernel_param *kp)
+{
+	int ret = param_set_bool(val, kp);
+
+	if (ret)
+		return ret;
+
+	msm_perf_poll_enable = core_ctl_register;
+	if (!msm_perf_poll_initialized)
+		return 0;
+
+	cancel_delayed_work_sync(&msm_perf_poll_work);
+	if (msm_perf_poll_enable && !msm_perf_poll_suspended)
+		schedule_delayed_work(&msm_perf_poll_work, 0);
+
+	return 0;
+}
+
+static const struct kernel_param_ops param_ops_cc_register = {
+	.set = set_core_ctl_register_compat,
+	.get = param_get_bool,
+};
+module_param_cb(core_ctl_register, &param_ops_cc_register,
+		&core_ctl_register, 0644);
 
 static bool msm_perf_update_load_pct(void)
 {
