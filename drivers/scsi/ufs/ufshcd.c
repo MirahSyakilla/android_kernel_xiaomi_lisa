@@ -43,6 +43,7 @@
 #include <linux/of.h>
 #include <linux/bitfield.h>
 #include <linux/blk-pm.h>
+#include <linux/string.h>
 #include <asm/unaligned.h>
 #include <linux/blkdev.h>
 #include "ufshcd.h"
@@ -1470,6 +1471,8 @@ static int ufshcd_devfreq_init(struct ufs_hba *hba)
 	struct list_head *clk_list = &hba->clk_list_head;
 	struct ufs_clk_info *clki;
 	struct devfreq *devfreq;
+	const char *governor = CONFIG_UFS_DEVFREQ_DEFAULT_GOV;
+	void *gov_data = NULL;
 	int ret;
 
 	/* Skip devfreq if we don't have any clocks in the list */
@@ -1482,10 +1485,22 @@ static int ufshcd_devfreq_init(struct ufs_hba *hba)
 
 	ufshcd_vops_config_scaling_param(hba, &hba->vps->devfreq_profile,
 					 &hba->vps->ondemand_data);
+	if (!strcmp(governor, DEVFREQ_GOV_SIMPLE_ONDEMAND))
+		gov_data = &hba->vps->ondemand_data;
+
 	devfreq = devfreq_add_device(hba->dev,
 			&hba->vps->devfreq_profile,
-			DEVFREQ_GOV_SIMPLE_ONDEMAND,
-			&hba->vps->ondemand_data);
+			governor, gov_data);
+	if (IS_ERR(devfreq) &&
+	    strcmp(governor, DEVFREQ_GOV_SIMPLE_ONDEMAND) != 0) {
+		dev_warn(hba->dev,
+			 "devfreq governor '%s' unavailable, falling back to %s\n",
+			 governor, DEVFREQ_GOV_SIMPLE_ONDEMAND);
+		devfreq = devfreq_add_device(hba->dev,
+				&hba->vps->devfreq_profile,
+				DEVFREQ_GOV_SIMPLE_ONDEMAND,
+				&hba->vps->ondemand_data);
+	}
 	if (IS_ERR(devfreq)) {
 		ret = PTR_ERR(devfreq);
 		dev_err(hba->dev, "Unable to register with devfreq %d\n", ret);

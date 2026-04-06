@@ -4,6 +4,7 @@
  */
 
 #include <linux/bitfield.h>
+#include <linux/cpu.h>
 #include <linux/cpufreq.h>
 #include <linux/cpu_cooling.h>
 #include <linux/energy_model.h>
@@ -50,6 +51,11 @@ struct cpufreq_qcom {
 	cpumask_t related_cpus;
 };
 
+struct cpufreq_qcom_wake_boost {
+	struct cpufreq_qcom *domain;
+	unsigned int max_index;
+};
+
 static const u16 cpufreq_qcom_std_offsets[REG_ARRAY_SIZE] = {
 	[REG_ENABLE]		= 0x0,
 	[REG_FREQ_LUT]		= 0x110,
@@ -65,6 +71,8 @@ static const u16 cpufreq_qcom_epss_std_offsets[REG_ARRAY_SIZE] = {
 };
 
 static struct cpufreq_qcom *qcom_freq_domain_map[NR_CPUS];
+static DEFINE_PER_CPU(struct cpufreq_qcom_wake_boost, qcom_wake_boost_map);
+static int qcom_cpufreq_hp_state = CPUHP_INVALID;
 
 static int
 qcom_cpufreq_hw_target_index(struct cpufreq_policy *policy,
@@ -231,6 +239,23 @@ static struct cpufreq_driver cpufreq_qcom_hw_driver = {
 	.resume		= qcom_cpufreq_hw_resume,
 };
 
+static int qcom_cpufreq_hw_cpu_online(unsigned int cpu)
+{
+	struct cpufreq_qcom_wake_boost *wb = &per_cpu(qcom_wake_boost_map, cpu);
+
+	if (!wb->domain)
+		return 0;
+
+	/*
+	 * When CPUs come online during resume, hardware defaults to a low perf
+	 * state. Seed the highest LUT index so userspace/governor hand-off
+	 * starts from responsive clocks.
+	 */
+	writel_relaxed(wb->max_index,
+		       wb->domain->base + offsets[REG_PERF_STATE]);
+	return 0;
+}
+
 static int qcom_cpufreq_hw_read_lut(struct platform_device *pdev,
 				    struct cpufreq_qcom *c, u32 max_cores)
 {
@@ -283,6 +308,11 @@ static int qcom_cpufreq_hw_read_lut(struct platform_device *pdev,
 	}
 
 	c->table[i].frequency = CPUFREQ_TABLE_END;
+
+	for_each_cpu(cpu, &c->related_cpus) {
+		per_cpu(qcom_wake_boost_map, cpu).domain = c;
+		per_cpu(qcom_wake_boost_map, cpu).max_index = i ? i - 1 : 0;
+	}
 
 	if (cpu_dev)
 		dev_pm_opp_set_sharing_cpus(cpu_dev, &c->related_cpus);
@@ -482,6 +512,16 @@ static int qcom_cpufreq_hw_driver_probe(struct platform_device *pdev)
 		return rc;
 	}
 
+	qcom_cpufreq_hp_state = cpuhp_setup_state_nocalls(CPUHP_AP_ONLINE_DYN,
+					"qcom/cpufreq_hw:online",
+					qcom_cpufreq_hw_cpu_online, NULL);
+	if (qcom_cpufreq_hp_state < 0) {
+		rc = qcom_cpufreq_hp_state;
+		dev_err(&pdev->dev, "CPUHP callback setup failed, rc=%d\n", rc);
+		cpufreq_unregister_driver(&cpufreq_qcom_hw_driver);
+		return rc;
+	}
+
 	of_platform_populate(pdev->dev.of_node, NULL, NULL, &pdev->dev);
 	dev_dbg(&pdev->dev, "QCOM CPUFreq HW driver initialized\n");
 
@@ -498,7 +538,15 @@ static int qcom_cpufreq_hw_driver_remove(struct platform_device *pdev)
 		if (!cpu_dev)
 			continue;
 
+		per_cpu(qcom_wake_boost_map, cpu).domain = NULL;
+		per_cpu(qcom_wake_boost_map, cpu).max_index = 0;
+
 		dev_pm_opp_remove_all_dynamic(cpu_dev);
+	}
+
+	if (qcom_cpufreq_hp_state >= 0) {
+		cpuhp_remove_state_nocalls(qcom_cpufreq_hp_state);
+		qcom_cpufreq_hp_state = CPUHP_INVALID;
 	}
 
 	return cpufreq_unregister_driver(&cpufreq_qcom_hw_driver);
