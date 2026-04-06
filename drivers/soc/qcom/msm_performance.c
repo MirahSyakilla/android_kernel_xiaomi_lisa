@@ -953,6 +953,7 @@ static unsigned int msm_perf_poll_ms = 40;
 static unsigned int msm_perf_poll_window = 5;
 static unsigned int msm_perf_big_util_min = 1;
 static bool msm_perf_use_thermal_pressure = true;
+static bool msm_perf_cluster_peak;
 static bool msm_perf_poll_initialized;
 static bool core_ctl_register = true;
 static void msm_perf_poll_notify_userspace(struct work_struct *work);
@@ -1071,6 +1072,7 @@ static const struct kernel_param_ops param_ops_compat_big_util_min = {
 module_param_cb(compat_big_util_min, &param_ops_compat_big_util_min,
 		&msm_perf_big_util_min, 0644);
 module_param_named(compat_use_thermal_pressure, msm_perf_use_thermal_pressure, bool, 0644);
+module_param_named(compat_cluster_peak, msm_perf_cluster_peak, bool, 0644);
 
 static int set_core_ctl_register_compat(const char *val,
 					const struct kernel_param *kp)
@@ -1101,6 +1103,8 @@ static bool msm_perf_update_load_pct(void)
 {
 	unsigned int cluster_load_sum[CLUSTER_MAX] = {0}, pub_top_load[CLUSTER_MAX];
 	unsigned int cluster_cap_sum[CLUSTER_MAX] = {0}, pub_curr_cap[CLUSTER_MAX];
+	unsigned int cluster_peak_load[CLUSTER_MAX] = {0};
+	unsigned int cluster_peak_cap[CLUSTER_MAX] = {0};
 	unsigned int cluster_cpu_cnt[CLUSTER_MAX] = {0}, pub_big_nr, pub_top;
 	unsigned int max_cluster_busy = 0, total_pct = 0, total_cpus = 0;
 	bool changed = false;
@@ -1123,9 +1127,11 @@ static bool msm_perf_update_load_pct(void)
 				min_t(unsigned long, arch_scale_thermal_pressure(cpu), cap) : 0;
 		cap_pct = mult_frac(cap - thermal, 100, cap);
 
-		cluster_load_sum[cluster] += util_pct;
-		cluster_cap_sum[cluster] += cap_pct;
-		cluster_cpu_cnt[cluster]++;
+			cluster_load_sum[cluster] += util_pct;
+			cluster_cap_sum[cluster] += cap_pct;
+			cluster_peak_load[cluster] = max(cluster_peak_load[cluster], util_pct);
+			cluster_peak_cap[cluster] = max(cluster_peak_cap[cluster], cap_pct);
+			cluster_cpu_cnt[cluster]++;
 		total_pct += util_pct;
 		total_cpus++;
 
@@ -1136,8 +1142,13 @@ static bool msm_perf_update_load_pct(void)
 
 	for (cpu = 0; cpu < CLUSTER_MAX; cpu++) {
 		if (cluster_cpu_cnt[cpu]) {
-			pub_top_load[cpu] = cluster_load_sum[cpu] / cluster_cpu_cnt[cpu];
-			pub_curr_cap[cpu] = cluster_cap_sum[cpu] / cluster_cpu_cnt[cpu];
+			if (msm_perf_cluster_peak) {
+				pub_top_load[cpu] = cluster_peak_load[cpu];
+				pub_curr_cap[cpu] = cluster_peak_cap[cpu];
+			} else {
+				pub_top_load[cpu] = cluster_load_sum[cpu] / cluster_cpu_cnt[cpu];
+				pub_curr_cap[cpu] = cluster_cap_sum[cpu] / cluster_cpu_cnt[cpu];
+			}
 		} else {
 			pub_top_load[cpu] = 0;
 			pub_curr_cap[cpu] = 0;
