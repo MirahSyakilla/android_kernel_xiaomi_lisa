@@ -952,6 +952,7 @@ static bool msm_perf_poll_enable = true;
 static unsigned int msm_perf_poll_ms = 40;
 static unsigned int msm_perf_poll_window = 5;
 static unsigned int msm_perf_big_util_min = 1;
+static bool msm_perf_use_thermal_pressure = true;
 static bool msm_perf_poll_initialized;
 static bool core_ctl_register = true;
 static void msm_perf_poll_notify_userspace(struct work_struct *work);
@@ -1069,6 +1070,7 @@ static const struct kernel_param_ops param_ops_compat_big_util_min = {
 };
 module_param_cb(compat_big_util_min, &param_ops_compat_big_util_min,
 		&msm_perf_big_util_min, 0644);
+module_param_named(compat_use_thermal_pressure, msm_perf_use_thermal_pressure, bool, 0644);
 
 static int set_core_ctl_register_compat(const char *val,
 					const struct kernel_param *kp)
@@ -1117,7 +1119,8 @@ static bool msm_perf_update_load_pct(void)
 		util = min_t(unsigned long, sched_cpu_util(cpu, cap), cap);
 		util_pct = mult_frac(util, 100, cap);
 
-		thermal = min_t(unsigned long, arch_scale_thermal_pressure(cpu), cap);
+			thermal = msm_perf_use_thermal_pressure ?
+				min_t(unsigned long, arch_scale_thermal_pressure(cpu), cap) : 0;
 		cap_pct = mult_frac(cap - thermal, 100, cap);
 
 		cluster_load_sum[cluster] += util_pct;
