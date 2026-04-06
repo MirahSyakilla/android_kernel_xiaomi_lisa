@@ -938,7 +938,6 @@ static unsigned int msm_perf_poll_window = 5;
 static bool msm_perf_poll_initialized;
 static void msm_perf_poll_notify_userspace(struct work_struct *work);
 static DECLARE_DELAYED_WORK(msm_perf_poll_work, msm_perf_poll_notify_userspace);
-module_param_named(compat_poll_window, msm_perf_poll_window, uint, 0644);
 
 static unsigned int msm_perf_accum_big_nr;
 static unsigned int msm_perf_accum_top_load;
@@ -985,6 +984,23 @@ static int set_compat_poll_enable(const char *val, const struct kernel_param *kp
 	return 0;
 }
 
+static int set_compat_poll_window(const char *val, const struct kernel_param *kp)
+{
+	int ret = param_set_uint(val, kp);
+
+	if (ret)
+		return ret;
+
+	msm_perf_poll_window = clamp_t(unsigned int, msm_perf_poll_window, 1, 50);
+	msm_perf_accum_big_nr = 0;
+	msm_perf_accum_top_load = 0;
+	memset(msm_perf_accum_top_load_cluster, 0, sizeof(msm_perf_accum_top_load_cluster));
+	memset(msm_perf_accum_curr_cap_cluster, 0, sizeof(msm_perf_accum_curr_cap_cluster));
+	msm_perf_accum_samples = 0;
+
+	return 0;
+}
+
 static const struct kernel_param_ops param_ops_compat_poll_enable = {
 	.set = set_compat_poll_enable,
 	.get = param_get_bool,
@@ -998,6 +1014,13 @@ static const struct kernel_param_ops param_ops_compat_poll_ms = {
 };
 module_param_cb(compat_poll_ms, &param_ops_compat_poll_ms,
 		&msm_perf_poll_ms, 0644);
+
+static const struct kernel_param_ops param_ops_compat_poll_window = {
+	.set = set_compat_poll_window,
+	.get = param_get_uint,
+};
+module_param_cb(compat_poll_window, &param_ops_compat_poll_window,
+		&msm_perf_poll_window, 0644);
 
 static bool msm_perf_update_load_pct(void)
 {
@@ -1396,6 +1419,7 @@ static int __init msm_performance_init(void)
 	idle_notifier_register(&msm_perf_event_idle_nb);
 #ifndef CONFIG_SCHED_WALT
 	msm_perf_poll_ms = clamp_t(unsigned int, msm_perf_poll_ms, 10, 1000);
+	msm_perf_poll_window = clamp_t(unsigned int, msm_perf_poll_window, 1, 50);
 	msm_perf_poll_initialized = true;
 	if (msm_perf_poll_enable)
 		schedule_delayed_work(&msm_perf_poll_work,
