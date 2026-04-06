@@ -1113,7 +1113,8 @@ static bool msm_perf_update_load_pct(void)
 	cpus_read_lock();
 	for_each_online_cpu(cpu) {
 		unsigned long cap = perf_cpu_capacity[cpu];
-		unsigned long util, thermal, cap_pct;
+		unsigned long util, thermal;
+		unsigned int cap_pct;
 		unsigned int util_pct;
 		u8 cluster = per_cpu(perf_cluster_id, cpu);
 
