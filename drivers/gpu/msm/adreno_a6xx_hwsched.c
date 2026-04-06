@@ -385,7 +385,7 @@ static int a6xx_hwsched_gmu_power_off(struct adreno_device *adreno_dev)
 
 	a6xx_rdpm_cx_freq_update(gmu, 0);
 
-	kgsl_pwrctrl_set_state(device, KGSL_STATE_NONE);
+	kgsl_pwrctrl_request_state(device, KGSL_STATE_NONE);
 
 	return ret;
 
@@ -654,7 +654,7 @@ no_gx_power:
 
 	kgsl_pwrctrl_clear_l3_vote(device);
 
-	kgsl_pwrctrl_set_state(device, KGSL_STATE_SLUMBER);
+	kgsl_pwrctrl_request_state(device, KGSL_STATE_SLUMBER);
 
 	return ret;
 }
