@@ -61,6 +61,15 @@ static inline bool mmget_still_valid(struct mm_struct *mm)
 	return likely(!mm->core_state);
 }
 
+/*
+ * Invoked from finish_task_switch(). Keep a dedicated helper to mirror
+ * trees that separate scheduler-context mm ref drops from generic mmdrop().
+ */
+static inline void mmdrop_sched(struct mm_struct *mm)
+{
+	mmdrop(mm);
+}
+
 /**
  * mmget() - Pin the address space associated with a &struct mm_struct.
  * @mm: The address space to pin.
