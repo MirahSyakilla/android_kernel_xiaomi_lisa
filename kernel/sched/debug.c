@@ -249,6 +249,7 @@ static int sd_ctl_doflags(struct ctl_table *table, int write,
 	unsigned long flags = *(unsigned long *)table->data;
 	size_t data_size = 0;
 	size_t len = 0;
+	char __user *ubuf = buffer;
 	char *tmp, *buf;
 	int idx;
 
@@ -287,7 +288,10 @@ static int sd_ctl_doflags(struct ctl_table *table, int write,
 		return -EFAULT;
 	}
 	if (len < *lenp) {
-		((char *)buffer)[len] = '\n';
+		if (put_user('\n', ubuf + len)) {
+			kfree(buf);
+			return -EFAULT;
+		}
 		len++;
 	}
 
