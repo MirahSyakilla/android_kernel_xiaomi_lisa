@@ -4,13 +4,13 @@
  * them to run sooner, but does not allow tons of sleepers to
  * rip the spread apart.
  */
-SCHED_FEAT(GENTLE_FAIR_SLEEPERS, true)
+SCHED_FEAT(GENTLE_FAIR_SLEEPERS, false)
 
 /*
  * Place new tasks ahead so that they do not starve already running
  * tasks
  */
-SCHED_FEAT(START_DEBIT, true)
+SCHED_FEAT(START_DEBIT, false)
 
 /*
  * Prefer to schedule the task we woke last (assuming it failed
@@ -24,7 +24,7 @@ SCHED_FEAT(NEXT_BUDDY, false)
  * wake-preempt) as that likely will touch the same data, increases
  * cache locality.
  */
-SCHED_FEAT(LAST_BUDDY, true)
+SCHED_FEAT(LAST_BUDDY, false)
 
 /*
  * Consider buddies to be cache hot, decreases the likeliness of a
