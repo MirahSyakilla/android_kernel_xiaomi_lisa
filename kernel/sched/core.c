@@ -3544,6 +3544,12 @@ bool cpus_share_cache(int this_cpu, int that_cpu)
 	return per_cpu(sd_llc_id, this_cpu) == per_cpu(sd_llc_id, that_cpu);
 }
 
+bool cpus_equal_capacity(int this_cpu, int that_cpu)
+{
+	return arch_scale_cpu_capacity(this_cpu) ==
+	       arch_scale_cpu_capacity(that_cpu);
+}
+
 static inline bool ttwu_queue_cond(struct task_struct *p, int cpu)
 {
 	/*
