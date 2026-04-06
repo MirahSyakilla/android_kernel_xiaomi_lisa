@@ -209,6 +209,14 @@ config QCOM_DEVFREQ_ICC
 	  agnostic interface to so that some of the devfreq governors can be
 	  shared across SoCs.
 
+config QCOM_DEVFREQ_ICC_POLL_MS
+	int "QCOM DEVFREQ-ICC polling interval (ms)"
+	depends on QCOM_DEVFREQ_ICC
+	range 10 1000
+	default 50
+	help
+	  Poll interval used by the qcom devfreq-icc device profile.
+
 config ARM_QCOM_DEVFREQ_QOSLAT
 	bool "Qualcomm Technologies Inc. DEVFREQ QOSLAT device driver"
 	depends on ARCH_QCOM
