@@ -954,6 +954,7 @@ static unsigned int msm_perf_poll_window = 5;
 static unsigned int msm_perf_big_util_min = 1;
 static bool msm_perf_use_thermal_pressure = true;
 static bool msm_perf_cluster_peak;
+static bool msm_perf_notify_on_change = true;
 static bool msm_perf_poll_initialized;
 static bool core_ctl_register = true;
 static void msm_perf_poll_notify_userspace(struct work_struct *work);
@@ -1073,6 +1074,7 @@ module_param_cb(compat_big_util_min, &param_ops_compat_big_util_min,
 		&msm_perf_big_util_min, 0644);
 module_param_named(compat_use_thermal_pressure, msm_perf_use_thermal_pressure, bool, 0644);
 module_param_named(compat_cluster_peak, msm_perf_cluster_peak, bool, 0644);
+module_param_named(compat_notify_on_change, msm_perf_notify_on_change, bool, 0644);
 
 static int set_core_ctl_register_compat(const char *val,
 					const struct kernel_param *kp)
@@ -1202,7 +1204,7 @@ static void msm_perf_poll_notify_userspace(struct work_struct *work)
 	if (msm_perf_poll_suspended)
 		return;
 
-	if (msm_perf_update_load_pct())
+	if (msm_perf_update_load_pct() || !msm_perf_notify_on_change)
 		schedule_work(&msm_perf_sysfs_notify_work);
 	if (msm_perf_poll_enable)
 		schedule_delayed_work(to_delayed_work(work), msm_perf_poll_delay_jiffies());
