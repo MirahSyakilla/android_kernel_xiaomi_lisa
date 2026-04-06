@@ -8125,7 +8125,9 @@ int can_migrate_task(struct task_struct *p, struct lb_env *env)
 			return 0;
 
 		/* Prevent to re-select dst_cpu via env's CPUs: */
-		cpu = cpumask_first_and_and(env->dst_grpmask, env->cpus, p->cpus_ptr);
+		cpu = cpumask_first_and(env->dst_grpmask, env->cpus);
+		while (cpu < nr_cpu_ids && !cpumask_test_cpu(cpu, p->cpus_ptr))
+			cpu = cpumask_next_and(cpu, env->dst_grpmask, env->cpus);
 
 		if (cpu < nr_cpu_ids) {
 			env->flags |= LBF_DST_PINNED;
