@@ -948,6 +948,15 @@ static unsigned int msm_perf_accum_curr_cap_cluster[CLUSTER_MAX];
 static unsigned int msm_perf_accum_samples;
 static bool msm_perf_poll_suspended;
 
+static void msm_perf_reset_compat_accumulators(void)
+{
+	msm_perf_accum_big_nr = 0;
+	msm_perf_accum_top_load = 0;
+	memset(msm_perf_accum_top_load_cluster, 0, sizeof(msm_perf_accum_top_load_cluster));
+	memset(msm_perf_accum_curr_cap_cluster, 0, sizeof(msm_perf_accum_curr_cap_cluster));
+	msm_perf_accum_samples = 0;
+}
+
 static int set_compat_poll_ms(const char *val, const struct kernel_param *kp)
 {
 	int ret = param_set_uint(val, kp);
@@ -977,6 +986,7 @@ static int set_compat_poll_enable(const char *val, const struct kernel_param *kp
 		return 0;
 
 	core_ctl_register = msm_perf_poll_enable;
+	msm_perf_reset_compat_accumulators();
 
 	if (msm_perf_poll_enable) {
 		cancel_delayed_work_sync(&msm_perf_poll_work);
@@ -997,11 +1007,7 @@ static int set_compat_poll_window(const char *val, const struct kernel_param *kp
 		return ret;
 
 	msm_perf_poll_window = clamp_t(unsigned int, msm_perf_poll_window, 1, 50);
-	msm_perf_accum_big_nr = 0;
-	msm_perf_accum_top_load = 0;
-	memset(msm_perf_accum_top_load_cluster, 0, sizeof(msm_perf_accum_top_load_cluster));
-	memset(msm_perf_accum_curr_cap_cluster, 0, sizeof(msm_perf_accum_curr_cap_cluster));
-	msm_perf_accum_samples = 0;
+	msm_perf_reset_compat_accumulators();
 
 	return 0;
 }
@@ -1039,6 +1045,7 @@ static int set_core_ctl_register_compat(const char *val,
 	if (!msm_perf_poll_initialized)
 		return 0;
 
+	msm_perf_reset_compat_accumulators();
 	cancel_delayed_work_sync(&msm_perf_poll_work);
 	if (msm_perf_poll_enable && !msm_perf_poll_suspended)
 		schedule_delayed_work(&msm_perf_poll_work, 0);
@@ -1162,6 +1169,7 @@ static int msm_perf_pm_notifier(struct notifier_block *nb,
 		break;
 	case PM_POST_SUSPEND:
 		msm_perf_poll_suspended = false;
+		msm_perf_reset_compat_accumulators();
 		if (msm_perf_poll_enable)
 			schedule_delayed_work(&msm_perf_poll_work, 0);
 		break;
