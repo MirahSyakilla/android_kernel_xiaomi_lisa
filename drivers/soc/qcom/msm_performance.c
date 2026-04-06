@@ -934,9 +934,17 @@ module_param_cb(core_ctl_register, &param_ops_cc_register,
 static DECLARE_WORK(msm_perf_sysfs_notify_work, nr_notify_userspace);
 static bool msm_perf_poll_enable = true;
 static unsigned int msm_perf_poll_ms = 40;
+static unsigned int msm_perf_poll_window = 5;
 static bool msm_perf_poll_initialized;
 static void msm_perf_poll_notify_userspace(struct work_struct *work);
 static DECLARE_DELAYED_WORK(msm_perf_poll_work, msm_perf_poll_notify_userspace);
+module_param_named(compat_poll_window, msm_perf_poll_window, uint, 0644);
+
+static unsigned int msm_perf_accum_big_nr;
+static unsigned int msm_perf_accum_top_load;
+static unsigned int msm_perf_accum_top_load_cluster[CLUSTER_MAX];
+static unsigned int msm_perf_accum_curr_cap_cluster[CLUSTER_MAX];
+static unsigned int msm_perf_accum_samples;
 
 static int set_compat_poll_ms(const char *val, const struct kernel_param *kp)
 {
@@ -991,14 +999,13 @@ static const struct kernel_param_ops param_ops_compat_poll_ms = {
 module_param_cb(compat_poll_ms, &param_ops_compat_poll_ms,
 		&msm_perf_poll_ms, 0644);
 
-static void msm_perf_update_load_pct(void)
+static bool msm_perf_update_load_pct(void)
 {
-	unsigned int cluster_load_sum[CLUSTER_MAX] = {0};
-	unsigned int cluster_cap_sum[CLUSTER_MAX] = {0};
-	unsigned int cluster_cpu_cnt[CLUSTER_MAX] = {0};
-	unsigned int max_cluster_busy = 0;
-	unsigned int total_pct = 0;
-	unsigned int total_cpus = 0;
+	unsigned int cluster_load_sum[CLUSTER_MAX] = {0}, pub_top_load[CLUSTER_MAX];
+	unsigned int cluster_cap_sum[CLUSTER_MAX] = {0}, pub_curr_cap[CLUSTER_MAX];
+	unsigned int cluster_cpu_cnt[CLUSTER_MAX] = {0}, pub_big_nr, pub_top;
+	unsigned int max_cluster_busy = 0, total_pct = 0, total_cpus = 0;
+	bool changed = false;
 	int cpu;
 
 	for_each_online_cpu(cpu) {
@@ -1031,34 +1038,58 @@ static void msm_perf_update_load_pct(void)
 
 	for (cpu = 0; cpu < CLUSTER_MAX; cpu++) {
 		if (cluster_cpu_cnt[cpu]) {
-			top_load[cpu] = cluster_load_sum[cpu] / cluster_cpu_cnt[cpu];
-			curr_cap[cpu] = cluster_cap_sum[cpu] / cluster_cpu_cnt[cpu];
+			pub_top_load[cpu] = cluster_load_sum[cpu] / cluster_cpu_cnt[cpu];
+			pub_curr_cap[cpu] = cluster_cap_sum[cpu] / cluster_cpu_cnt[cpu];
 		} else {
-			top_load[cpu] = 0;
-			curr_cap[cpu] = 0;
+			pub_top_load[cpu] = 0;
+			pub_curr_cap[cpu] = 0;
 		}
 	}
+
+	pub_big_nr = max_cluster_busy;
+	pub_top = total_cpus ? (total_pct / total_cpus) : 0;
+
+	msm_perf_accum_big_nr += pub_big_nr;
+	msm_perf_accum_top_load += pub_top;
+	for (cpu = 0; cpu < CLUSTER_MAX; cpu++) {
+		msm_perf_accum_top_load_cluster[cpu] += pub_top_load[cpu];
+		msm_perf_accum_curr_cap_cluster[cpu] += pub_curr_cap[cpu];
+	}
+	msm_perf_accum_samples++;
+
+	if (msm_perf_accum_samples < max_t(unsigned int, 1, msm_perf_poll_window))
+		return false;
+
+	pub_big_nr = DIV_ROUND_CLOSEST(msm_perf_accum_big_nr, msm_perf_accum_samples);
+	pub_top = DIV_ROUND_CLOSEST(msm_perf_accum_top_load, msm_perf_accum_samples);
+	changed |= (aggr_big_nr != pub_big_nr);
+	changed |= (aggr_top_load != pub_top);
+	aggr_big_nr = pub_big_nr;
+	aggr_top_load = pub_top;
+
+	for (cpu = 0; cpu < CLUSTER_MAX; cpu++) {
+		pub_top_load[cpu] = DIV_ROUND_CLOSEST(msm_perf_accum_top_load_cluster[cpu],
+						      msm_perf_accum_samples);
+		pub_curr_cap[cpu] = DIV_ROUND_CLOSEST(msm_perf_accum_curr_cap_cluster[cpu],
+						      msm_perf_accum_samples);
+		changed |= (top_load[cpu] != pub_top_load[cpu]);
+		changed |= (curr_cap[cpu] != pub_curr_cap[cpu]);
+		top_load[cpu] = pub_top_load[cpu];
+		curr_cap[cpu] = pub_curr_cap[cpu];
+		msm_perf_accum_top_load_cluster[cpu] = 0;
+		msm_perf_accum_curr_cap_cluster[cpu] = 0;
+	}
+
+	msm_perf_accum_big_nr = 0;
+	msm_perf_accum_top_load = 0;
+	msm_perf_accum_samples = 0;
+
+	return changed;
 }
 
 static void msm_perf_poll_notify_userspace(struct work_struct *work)
 {
-	unsigned int prev_big_nr = aggr_big_nr;
-	unsigned int prev_top_load = aggr_top_load;
-	unsigned int prev_cluster_top[CLUSTER_MAX];
-	unsigned int prev_cluster_cap[CLUSTER_MAX];
-	bool changed;
-
-	memcpy(prev_cluster_top, top_load, sizeof(prev_cluster_top));
-	memcpy(prev_cluster_cap, curr_cap, sizeof(prev_cluster_cap));
-
-	msm_perf_update_load_pct();
-
-	changed = (prev_big_nr != aggr_big_nr) ||
-		  (prev_top_load != aggr_top_load) ||
-		  memcmp(prev_cluster_top, top_load, sizeof(prev_cluster_top)) ||
-		  memcmp(prev_cluster_cap, curr_cap, sizeof(prev_cluster_cap));
-
-	if (changed)
+	if (msm_perf_update_load_pct())
 		schedule_work(&msm_perf_sysfs_notify_work);
 	if (msm_perf_poll_enable)
 		schedule_delayed_work(to_delayed_work(work),
