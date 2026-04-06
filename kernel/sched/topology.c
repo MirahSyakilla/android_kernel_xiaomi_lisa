@@ -2,6 +2,7 @@
 /*
  * Scheduler topology setup/handling methods
  */
+#include <linux/sched/clock.h>
 #include "sched.h"
 
 DEFINE_MUTEX(sched_domains_mutex);
@@ -74,7 +75,7 @@ static int sched_domain_debug_one(struct sched_domain *sd, int cpu, int level,
 			break;
 		}
 
-		if (!cpumask_weight(sched_group_span(group))) {
+		if (cpumask_empty(sched_group_span(group))) {
 			printk(KERN_CONT "\n");
 			printk(KERN_ERR "ERROR: empty group\n");
 			break;
@@ -234,6 +235,7 @@ int sched_energy_aware_handler(struct ctl_table *table, int write,
 
 	return ret;
 }
+
 #endif
 
 static void free_pd(struct perf_domain *pd)
@@ -496,7 +498,7 @@ static int init_rootdomain(struct root_domain *rd)
 #ifdef HAVE_RT_PUSH_IPI
 	rd->rto_cpu = -1;
 	raw_spin_lock_init(&rd->rto_lock);
-	init_irq_work(&rd->rto_push_work, rto_push_irq_work_func);
+	rd->rto_push_work = IRQ_WORK_INIT_HARD(rto_push_irq_work_func);
 #endif
 
 	rd->visit_gen = 0;
