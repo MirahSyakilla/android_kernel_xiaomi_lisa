@@ -934,8 +934,62 @@ module_param_cb(core_ctl_register, &param_ops_cc_register,
 static DECLARE_WORK(msm_perf_sysfs_notify_work, nr_notify_userspace);
 static bool msm_perf_poll_enable = true;
 static unsigned int msm_perf_poll_ms = 40;
-module_param_named(compat_poll_enable, msm_perf_poll_enable, bool, 0644);
-module_param_named(compat_poll_ms, msm_perf_poll_ms, uint, 0644);
+static bool msm_perf_poll_initialized;
+static void msm_perf_poll_notify_userspace(struct work_struct *work);
+static DECLARE_DELAYED_WORK(msm_perf_poll_work, msm_perf_poll_notify_userspace);
+
+static int set_compat_poll_ms(const char *val, const struct kernel_param *kp)
+{
+	int ret = param_set_uint(val, kp);
+
+	if (ret)
+		return ret;
+
+	msm_perf_poll_ms = clamp_t(unsigned int, msm_perf_poll_ms, 10, 1000);
+	if (msm_perf_poll_initialized && msm_perf_poll_enable) {
+		cancel_delayed_work_sync(&msm_perf_poll_work);
+		schedule_delayed_work(&msm_perf_poll_work,
+				msecs_to_jiffies(msm_perf_poll_ms));
+	}
+
+	return 0;
+}
+
+static int set_compat_poll_enable(const char *val, const struct kernel_param *kp)
+{
+	bool old = msm_perf_poll_enable;
+	int ret = param_set_bool(val, kp);
+
+	if (ret)
+		return ret;
+
+	if (!msm_perf_poll_initialized || old == msm_perf_poll_enable)
+		return 0;
+
+	if (msm_perf_poll_enable) {
+		cancel_delayed_work_sync(&msm_perf_poll_work);
+		schedule_delayed_work(&msm_perf_poll_work,
+				msecs_to_jiffies(msm_perf_poll_ms));
+	} else {
+		cancel_delayed_work_sync(&msm_perf_poll_work);
+	}
+
+	return 0;
+}
+
+static const struct kernel_param_ops param_ops_compat_poll_enable = {
+	.set = set_compat_poll_enable,
+	.get = param_get_bool,
+};
+module_param_cb(compat_poll_enable, &param_ops_compat_poll_enable,
+		&msm_perf_poll_enable, 0644);
+
+static const struct kernel_param_ops param_ops_compat_poll_ms = {
+	.set = set_compat_poll_ms,
+	.get = param_get_uint,
+};
+module_param_cb(compat_poll_ms, &param_ops_compat_poll_ms,
+		&msm_perf_poll_ms, 0644);
 
 static void msm_perf_update_load_pct(void)
 {
@@ -1011,7 +1065,6 @@ static void msm_perf_poll_notify_userspace(struct work_struct *work)
 				msecs_to_jiffies(max_t(unsigned int, 10, msm_perf_poll_ms)));
 }
 
-static DECLARE_DELAYED_WORK(msm_perf_poll_work, msm_perf_poll_notify_userspace);
 #endif
 
 void  msm_perf_events_update(enum evt_update_t update_typ,
@@ -1311,9 +1364,11 @@ static int __init msm_performance_init(void)
 
 	idle_notifier_register(&msm_perf_event_idle_nb);
 #ifndef CONFIG_SCHED_WALT
+	msm_perf_poll_ms = clamp_t(unsigned int, msm_perf_poll_ms, 10, 1000);
+	msm_perf_poll_initialized = true;
 	if (msm_perf_poll_enable)
 		schedule_delayed_work(&msm_perf_poll_work,
-				msecs_to_jiffies(max_t(unsigned int, 10, msm_perf_poll_ms)));
+				msecs_to_jiffies(msm_perf_poll_ms));
 #endif
 #endif
 	return 0;
