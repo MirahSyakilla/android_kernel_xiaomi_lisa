@@ -952,6 +952,18 @@ static unsigned int msm_perf_accum_curr_cap_cluster[CLUSTER_MAX];
 static unsigned int msm_perf_accum_samples;
 static bool msm_perf_poll_suspended;
 
+static inline unsigned long msm_perf_poll_delay_jiffies(void)
+{
+	return msecs_to_jiffies(max_t(unsigned int, 10, msm_perf_poll_ms));
+}
+
+static inline void msm_perf_rearm_poll_work(unsigned long delay_jiffies)
+{
+	cancel_delayed_work_sync(&msm_perf_poll_work);
+	if (msm_perf_poll_enable && !msm_perf_poll_suspended)
+		schedule_delayed_work(&msm_perf_poll_work, delay_jiffies);
+}
+
 static void msm_perf_reset_compat_accumulators(void)
 {
 	msm_perf_accum_big_nr = 0;
@@ -969,11 +981,8 @@ static int set_compat_poll_ms(const char *val, const struct kernel_param *kp)
 		return ret;
 
 	msm_perf_poll_ms = clamp_t(unsigned int, msm_perf_poll_ms, 10, 1000);
-	if (msm_perf_poll_initialized && msm_perf_poll_enable) {
-		cancel_delayed_work_sync(&msm_perf_poll_work);
-		schedule_delayed_work(&msm_perf_poll_work,
-				msecs_to_jiffies(msm_perf_poll_ms));
-	}
+	if (msm_perf_poll_initialized)
+		msm_perf_rearm_poll_work(msm_perf_poll_delay_jiffies());
 
 	return 0;
 }
@@ -992,13 +1001,7 @@ static int set_compat_poll_enable(const char *val, const struct kernel_param *kp
 	core_ctl_register = msm_perf_poll_enable;
 	msm_perf_reset_compat_accumulators();
 
-	if (msm_perf_poll_enable) {
-		cancel_delayed_work_sync(&msm_perf_poll_work);
-		schedule_delayed_work(&msm_perf_poll_work,
-				msecs_to_jiffies(msm_perf_poll_ms));
-	} else {
-		cancel_delayed_work_sync(&msm_perf_poll_work);
-	}
+	msm_perf_rearm_poll_work(msm_perf_poll_delay_jiffies());
 
 	return 0;
 }
@@ -1050,9 +1053,7 @@ static int set_core_ctl_register_compat(const char *val,
 		return 0;
 
 	msm_perf_reset_compat_accumulators();
-	cancel_delayed_work_sync(&msm_perf_poll_work);
-	if (msm_perf_poll_enable && !msm_perf_poll_suspended)
-		schedule_delayed_work(&msm_perf_poll_work, 0);
+	msm_perf_rearm_poll_work(0);
 
 	return 0;
 }
@@ -1159,8 +1160,7 @@ static void msm_perf_poll_notify_userspace(struct work_struct *work)
 	if (msm_perf_update_load_pct())
 		schedule_work(&msm_perf_sysfs_notify_work);
 	if (msm_perf_poll_enable)
-		schedule_delayed_work(to_delayed_work(work),
-				msecs_to_jiffies(max_t(unsigned int, 10, msm_perf_poll_ms)));
+		schedule_delayed_work(to_delayed_work(work), msm_perf_poll_delay_jiffies());
 }
 
 static int msm_perf_pm_notifier(struct notifier_block *nb,
@@ -1493,7 +1493,7 @@ static int __init msm_performance_init(void)
 	register_pm_notifier(&msm_perf_pm_nb);
 	if (msm_perf_poll_enable)
 		schedule_delayed_work(&msm_perf_poll_work,
-				msecs_to_jiffies(msm_perf_poll_ms));
+				msm_perf_poll_delay_jiffies());
 #endif
 #endif
 	return 0;
