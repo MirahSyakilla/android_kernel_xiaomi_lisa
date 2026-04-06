@@ -244,7 +244,7 @@ set_table_entry(struct ctl_table *entry,
 }
 
 static int sd_ctl_doflags(struct ctl_table *table, int write,
-			  void *buffer, size_t *lenp, loff_t *ppos)
+			  void __user *buffer, size_t *lenp, loff_t *ppos)
 {
 	unsigned long flags = *(unsigned long *)table->data;
 	size_t data_size = 0;
@@ -282,8 +282,10 @@ static int sd_ctl_doflags(struct ctl_table *table, int write,
 
 	if (len > *lenp)
 		len = *lenp;
-	if (len)
-		memcpy(buffer, tmp, len);
+	if (len && copy_to_user(buffer, tmp, len)) {
+		kfree(buf);
+		return -EFAULT;
+	}
 	if (len < *lenp) {
 		((char *)buffer)[len] = '\n';
 		len++;
