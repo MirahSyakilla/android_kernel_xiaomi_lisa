@@ -248,8 +248,8 @@ static inline unsigned long apply_dvfs_headroom(unsigned long util, int cpu)
 
 	/* Limit the headroom within a valid range to avoid excessive or
 	 * negligible boosts.
-	 * Cap the maximum headroom at ~10% (capacity / 10) to avoid
-	 * excessive over-boosting while keeping stronger ramp-up.
+	 * Cap the maximum headroom at ~10% (capacity / 10) to keep good
+	 * ramp-up while avoiding multicore over-boost churn.
 	 * If the calculated headroom is below 0.39% (capacity / 256),
 	 * skip boosting as it is unlikely to trigger a frequency change.
 	 */
