@@ -91,7 +91,8 @@ static bool sugov_should_update_freq(struct sugov_policy *sg_policy, u64 time)
 
 	if (unlikely(READ_ONCE(sg_policy->limits_changed))) {
 		WRITE_ONCE(sg_policy->limits_changed, false);
-		sg_policy->need_freq_update = true;
+		sg_policy->need_freq_update =
+			cpufreq_driver_test_flags(CPUFREQ_NEED_UPDATE_LIMITS);
 
 		/*
 		 * The above limits_changed update must occur before the reads
@@ -126,16 +127,6 @@ static bool sugov_update_next_freq(struct sugov_policy *sg_policy, u64 time,
 {
 	if (sg_policy->need_freq_update) {
 		sg_policy->need_freq_update = false;
-		/*
-		 * The policy limits have changed, but if the return value of
-		 * cpufreq_driver_resolve_freq() after applying the new limits
-		 * is still equal to the previously selected frequency, the
-		 * driver callback need not be invoked unless the driver
-		 * specifically wants that to happen on every update of the
-		 * policy limits.
-		 */
-		if (cpufreq_driver_test_flags(CPUFREQ_NEED_UPDATE_LIMITS))
-			goto must_update;
 	}
 
 	/*
@@ -154,7 +145,6 @@ static bool sugov_update_next_freq(struct sugov_policy *sg_policy, u64 time,
 	     sugov_should_rate_limit(sg_policy, time)))
 		return false;
 
-must_update:
 	sg_policy->next_freq = next_freq;
 	sg_policy->last_freq_update_time = time;
 
