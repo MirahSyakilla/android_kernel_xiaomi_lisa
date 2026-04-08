@@ -118,20 +118,19 @@ bool cass_cpu_better(const struct cass_cpu_cand *a,
 		goto done;
 
 	/*
-	 * For low/medium-utilization work, avoid piling onto the prime CPU so
-	 * throughput-oriented bursts can spread across the gold cluster first.
-	 * For high-utilization work, allow prime CPU preference for peak
-	 * responsiveness.
+	 * For light work, avoid piling onto the prime CPU so bursts can spread
+	 * across the gold cluster first. For medium/heavy work, allow prime
+	 * CPU preference earlier for better latency and peak throughput.
 	 */
-	if (p_util < (SCHED_CAPACITY_SCALE / 4) &&
+	if (p_util < (SCHED_CAPACITY_SCALE / 8) &&
 	    cass_cmp(cass_prime_cpu(b), cass_prime_cpu(a)))
 		goto done;
 
 	/*
-	 * For very heavy tasks, prefer higher capacity first before spreading
-	 * by relative utilization.
+	 * For heavy tasks, prefer higher capacity first before spreading by
+	 * relative utilization.
 	 */
-	if (p_util >= (SCHED_CAPACITY_SCALE / 2) && cass_cmp(a->cap, b->cap))
+	if (p_util >= (SCHED_CAPACITY_SCALE / 3) && cass_cmp(a->cap, b->cap))
 		goto done;
 
 	/* Prefer the CPU with lower relative utilization */
