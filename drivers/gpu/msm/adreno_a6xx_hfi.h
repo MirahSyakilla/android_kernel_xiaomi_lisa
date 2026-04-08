@@ -480,6 +480,7 @@ struct hfi_ts_notify_cmd {
 #define CMDBATCH_RETIRED    1
 #define CMDBATCH_ERROR      2
 #define CMDBATCH_SKIP       3
+#define CMDBATCH_PROFILING  BIT(4)
 
 /* F2H */
 struct hfi_ts_retire_cmd {
