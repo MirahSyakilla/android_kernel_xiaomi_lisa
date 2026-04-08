@@ -246,14 +246,14 @@ static inline unsigned long apply_dvfs_headroom(unsigned long util, int cpu)
 	delta = capacity - util;
 	headroom = (delta * delta) / (4 * capacity);
 
-        /* Limit the headroom within a valid range to avoid excessive or
+	/* Limit the headroom within a valid range to avoid excessive or
 	 * negligible boosts.
-	 * Cap the maximum headroom at 10% (capacity / 10) to prevent
+	 * Cap the maximum headroom at ~7% (capacity / 14) to prevent
 	 * unnecessary over-boosting.
 	 * If the calculated headroom is below 0.39% (capacity / 256),
 	 * skip boosting as it is unlikely to trigger a frequency change.
-         */
-	max_boost = capacity / 10;
+	 */
+	max_boost = capacity / 14;
 	min_boost = capacity >> 8;
 
 	if (headroom > max_boost)
