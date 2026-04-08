@@ -96,8 +96,7 @@ bool cass_prime_cpu(const struct cass_cpu_cand *c)
 static __always_inline
 bool cass_cpu_better(const struct cass_cpu_cand *a,
 		     const struct cass_cpu_cand *b, unsigned long p_util,
-		     int this_cpu, int prev_cpu, int prev_llc_id, bool sync,
-		     bool p_boosted, bool p_lat_sensitive)
+		     int this_cpu, int prev_cpu, int prev_llc_id, bool sync)
 {
 #define cass_cmp(a, b) ({ res = (a) - (b); })
 #define cass_eq(a, b) ({ res = (a) == (b); })
@@ -123,18 +122,8 @@ bool cass_cpu_better(const struct cass_cpu_cand *a,
 	 * unnecessary boosting. For medium/high-utilization work, allow prime
 	 * CPU preference for peak responsiveness.
 	 */
-	if (!p_boosted && p_util < (SCHED_CAPACITY_SCALE / 8) &&
+	if (p_util < (SCHED_CAPACITY_SCALE / 8) &&
 	    cass_cmp(cass_prime_cpu(b), cass_prime_cpu(a)))
-		goto done;
-
-	/*
-	 * Prefer highest-capacity CPUs for top-app style boosted and latency
-	 * sensitive tasks to reduce tail latency and improve burst throughput.
-	 */
-	if (p_boosted && cass_cmp(a->cap_orig, b->cap_orig))
-		goto done;
-
-	if (p_lat_sensitive && cass_cmp(a->cap_max, b->cap_max))
 		goto done;
 
 	/*
@@ -153,8 +142,7 @@ bool cass_cpu_better(const struct cass_cpu_cand *a,
 		goto done;
 
 	/* Prefer the current CPU for sync wakes */
-	if (!p_boosted && !p_lat_sensitive &&
-	    sync && (cass_eq(a->cpu, this_cpu) || !cass_cmp(b->cpu, this_cpu)))
+	if (sync && (cass_eq(a->cpu, this_cpu) || !cass_cmp(b->cpu, this_cpu)))
 		goto done;
 
 	/* Prefer the CPU with higher capacity */
@@ -193,7 +181,6 @@ static int cass_best_cpu(struct task_struct *p, int prev_cpu, bool sync, bool rt
 	struct cass_cpu_cand cands[2], *best = cands;
 	int this_cpu = raw_smp_processor_id();
 	unsigned long p_util, uc_min;
-	bool p_boosted, p_lat_sensitive;
 	bool has_idle = false;
 	int cidx = 0, cpu, prev_llc_id;
 
@@ -203,8 +190,6 @@ static int cass_best_cpu(struct task_struct *p, int prev_cpu, bool sync, bool rt
 	 */
 	p_util = rt ? 0 : task_util_est(p);
 	uc_min = uclamp_eff_value(p, UCLAMP_MIN);
-	p_boosted = uclamp_boosted(p);
-	p_lat_sensitive = uclamp_latency_sensitive(p);
 
 	/*
 	 * When the LLC spans all CPUs (e.g. DynamIQ), every candidate shares
@@ -335,8 +320,7 @@ static int cass_best_cpu(struct task_struct *p, int prev_cpu, bool sync, bool rt
 		 */
 		if (best == curr ||
 		    cass_cpu_better(curr, best, p_util, this_cpu, prev_cpu,
-				    prev_llc_id, sync,
-				    p_boosted, p_lat_sensitive)) {
+				    prev_llc_id, sync)) {
 			best = curr;
 			cidx ^= 1;
 		}
