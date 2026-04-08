@@ -230,10 +230,10 @@ static inline unsigned long apply_dvfs_headroom(unsigned long util, int cpu)
 	unsigned long delta, headroom, max_boost, min_boost;
 
 	/* There's no need of headroom at high utilization. The same goes
-	 * for very low utilization as well. Consider 6.25% (capacity / 16)
+	 * for very low utilization as well. Consider 3.125% (capacity / 32)
 	 * as the minimum utilization required.
 	 */
-	if (unlikely(util >= capacity) || likely(util < (capacity >> 4)))
+	if (unlikely(util >= capacity) || likely(util < (capacity >> 5)))
 		return util;
 
 	/*
@@ -248,12 +248,12 @@ static inline unsigned long apply_dvfs_headroom(unsigned long util, int cpu)
 
 	/* Limit the headroom within a valid range to avoid excessive or
 	 * negligible boosts.
-	 * Cap the maximum headroom at ~7% (capacity / 14) to prevent
-	 * unnecessary over-boosting.
+	 * Cap the maximum headroom at ~10% (capacity / 10) to avoid
+	 * excessive over-boosting while keeping stronger ramp-up.
 	 * If the calculated headroom is below 0.39% (capacity / 256),
 	 * skip boosting as it is unlikely to trigger a frequency change.
 	 */
-	max_boost = capacity / 14;
+	max_boost = capacity / 10;
 	min_boost = capacity >> 8;
 
 	if (headroom > max_boost)
@@ -656,7 +656,7 @@ static unsigned int sugov_default_rate_limit_us(struct cpufreq_policy *policy)
 	 * Use a tighter default update pacing while keeping a lower/upper
 	 * bound to avoid excess churn on slow-switch paths.
 	 */
-	rate_limit_us = clamp(rate_limit_us, 200U, 500U);
+	rate_limit_us = clamp(rate_limit_us, 100U, 400U);
 
 	return rate_limit_us;
 }
