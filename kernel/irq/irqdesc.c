@@ -16,6 +16,7 @@
 #include <linux/bitmap.h>
 #include <linux/irqdomain.h>
 #include <linux/sysfs.h>
+#include <linux/topology.h>
 
 #include "internals.h"
 
@@ -40,10 +41,34 @@ __setup("irqaffinity=", irq_affinity_setup);
 
 static void __init init_irq_default_affinity(void)
 {
+	unsigned long max_cap = 0, min_cap = ULONG_MAX;
+	int cpu, max_cap_cpu = -1;
+
 	if (!cpumask_available(irq_default_affinity))
 		zalloc_cpumask_var(&irq_default_affinity, GFP_NOWAIT);
 	if (cpumask_empty(irq_default_affinity))
 		cpumask_setall(irq_default_affinity);
+
+	/*
+	 * On asymmetric systems, keep the single highest-capacity CPU out of
+	 * the default IRQ mask so bursty user threads get fewer interrupts.
+	 * This only affects the default mask (i.e. no irqaffinity= override).
+	 */
+	for_each_possible_cpu(cpu) {
+		unsigned long cap = arch_scale_cpu_capacity(cpu);
+
+		if (cap > max_cap || (cap == max_cap && cpu > max_cap_cpu)) {
+			max_cap = cap;
+			max_cap_cpu = cpu;
+		}
+		if (cap < min_cap)
+			min_cap = cap;
+	}
+
+	if (max_cap_cpu >= 0 && max_cap > min_cap && cpumask_weight(irq_default_affinity) > 1) {
+		cpumask_clear_cpu(max_cap_cpu, irq_default_affinity);
+		cpumask_set_cpu(smp_processor_id(), irq_default_affinity);
+	}
 }
 #else
 static void __init init_irq_default_affinity(void)
