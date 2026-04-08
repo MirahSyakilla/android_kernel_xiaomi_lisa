@@ -983,18 +983,18 @@ int register_bw_hwmon(struct device *dev, struct bw_hwmon *hwmon)
 		node->attr_grp = &dev_attr_group;
 	}
 
-	node->guard_band_mbps = 150;
-	node->decay_rate = 80;
+	node->guard_band_mbps = 120;
+	node->decay_rate = 90;
 	node->io_percent = 16;
 	node->bw_step = 190;
-	node->sample_ms = 20;
-	node->up_scale = 25;
-	node->up_thres = 5;
+	node->sample_ms = 30;
+	node->up_scale = 10;
+	node->up_thres = 8;
 	node->down_thres = 0;
-	node->down_count = 5;
-	node->hist_memory = 4;
+	node->down_count = 6;
+	node->hist_memory = 3;
 	node->hyst_trigger_count = 3;
-	node->hyst_length = 4;
+	node->hyst_length = 3;
 	node->idle_mbps = 400;
 	node->use_ab = 1;
 	node->mbps_zones[0] = 0;
