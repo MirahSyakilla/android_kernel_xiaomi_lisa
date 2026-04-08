@@ -80,10 +80,10 @@ struct lpm_cluster *lpm_root_node;
 
 #define MAXSAMPLES 5
 
-static bool lpm_prediction = true;
+static bool lpm_prediction = false;
 module_param_named(lpm_prediction, lpm_prediction, bool, 0664);
 
-static bool lpm_ipi_prediction = true;
+static bool lpm_ipi_prediction = false;
 module_param_named(lpm_ipi_prediction, lpm_ipi_prediction, bool, 0664);
 
 struct lpm_history {
