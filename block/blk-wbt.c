@@ -669,7 +669,7 @@ u64 wbt_default_latency_nsec(struct request_queue *q)
 	 * for rotational storage.
 	 */
 	if (blk_queue_nonrot(q))
-		return 2000000ULL;
+		return 4000000ULL;
 	else
 		return 75000000ULL;
 }

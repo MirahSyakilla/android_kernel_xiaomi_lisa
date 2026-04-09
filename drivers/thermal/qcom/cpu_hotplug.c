@@ -22,6 +22,8 @@ struct cpu_hot_cdev {
 static enum cpuhp_state cpu_hp_online;
 static DEFINE_MUTEX(cpu_hot_lock);
 static LIST_HEAD(cpu_hot_cdev_list);
+static bool cpu_hotplug_thermal_enable;
+module_param_named(enable, cpu_hotplug_thermal_enable, bool, 0644);
 
 static int cpu_hot_hp_online(unsigned int online_cpu)
 {
@@ -70,6 +72,9 @@ static int cpu_hot_set_cur_state(struct thermal_cooling_device *cdev,
 
 	if (cpu_hot_cdev->cpu_id == -1)
 		return -ENODEV;
+
+	if (!READ_ONCE(cpu_hotplug_thermal_enable))
+		return 0;
 
 	/* Request state should be less than max_level */
 	if (state > CPU_HOTPLUG_LEVEL)
@@ -121,6 +126,11 @@ static int cpu_hot_get_cur_state(struct thermal_cooling_device *cdev,
 				 unsigned long *state)
 {
 	struct cpu_hot_cdev *cpu_hot_cdev = cdev->devdata;
+
+	if (!READ_ONCE(cpu_hotplug_thermal_enable)) {
+		*state = 0;
+		return 0;
+	}
 
 	mutex_lock(&cpu_hot_lock);
 	*state = (cpu_hot_cdev->cpu_hot_state) ?

@@ -1225,6 +1225,14 @@ config QCOM_GUESTVM
 	   Resource Manager driver to start the boot of VMs once it has
 	   successfully loaded the VM images in the designated memory.
 
+config QCOM_HYP_CORE_CTL
+	bool "Qualcomm Hypervisor Core Control"
+	depends on QCOM_GUESTVM && HOTPLUG_CPU && CPU_FREQ
+	help
+	  Enable hypervisor core reservation control. This driver can reserve
+	  selected CPUs for hypervisor-managed guests and exposes control/status
+	  through sysfs and debugfs.
+
 config QTI_CRYPTO_COMMON
 	tristate "Enable common crypto functionality used for FBE"
 	depends on SCSI_UFS_CRYPTO_QTI

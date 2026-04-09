@@ -17,9 +17,6 @@
 #include <linux/module.h>
 #include <linux/input.h>
 #include <linux/kthread.h>
-#ifdef CONFIG_SCHED_WALT
-#include <linux/sched/core_ctl.h>
-#endif
 #include <soc/qcom/msm_performance.h>
 #include <linux/spinlock.h>
 #include <linux/circ_buf.h>
@@ -115,9 +112,7 @@ static bool max_cap_cpus[NR_CPUS];
 static unsigned long perf_cpu_capacity[NR_CPUS];
 static DEFINE_PER_CPU(u8, perf_cluster_id);
 static atomic_t game_status_pid;
-#ifndef CONFIG_SCHED_WALT
 static void msm_perf_reset_compat_accumulators(void);
-#endif
 #endif
 static bool ready_for_freq_updates;
 
@@ -696,9 +691,7 @@ static int hotplug_notify_down(unsigned int cpu)
 	per_cpu(cpu_is_hp, cpu) = true;
 	restart_events(cpu, false);
 	mutex_unlock(&perfevent_lock);
-#ifndef CONFIG_SCHED_WALT
 	msm_perf_reset_compat_accumulators();
-#endif
 
 	return 0;
 }
@@ -711,11 +704,9 @@ static int hotplug_notify_up(unsigned int cpu)
 	restart_events(cpu, true);
 	per_cpu(cpu_is_hp, cpu) = false;
 	mutex_unlock(&perfevent_lock);
-#ifndef CONFIG_SCHED_WALT
 	perf_cpu_capacity[cpu] = arch_scale_cpu_capacity(cpu);
 	max_cap_cpus[cpu] = (per_cpu(perf_cluster_id, cpu) == MAX);
 	msm_perf_reset_compat_accumulators();
-#endif
 
 	if (events_group.init_success) {
 		spin_lock_irqsave(&(events_group.cpu_hotplug_lock), flags);
@@ -864,95 +855,12 @@ static void nr_notify_userspace(struct work_struct *work)
 	sysfs_notify(notify_kobj, NULL, "curr_cap_cluster");
 }
 
-#ifdef CONFIG_SCHED_WALT
-static int msm_perf_core_ctl_notify(struct notifier_block *nb,
-						unsigned long unused,
-						void *data)
-{
-	static unsigned int tld, nrb, i;
-	static unsigned int top_ld[CLUSTER_MAX] = {0}, curr_cp[CLUSTER_MAX] = {0};
-	static DECLARE_WORK(sysfs_notify_work, nr_notify_userspace);
-	unsigned int new_big_nr, new_top_load;
-	unsigned int new_cluster_top[CLUSTER_MAX];
-	unsigned int new_cluster_cap[CLUSTER_MAX];
-	struct core_ctl_notif_data *d = data;
-	bool changed = false;
-	int cluster = 0;
-
-	nrb += d->nr_big;
-	tld += d->coloc_load_pct;
-	for (cluster = 0; cluster < CLUSTER_MAX; cluster++) {
-		top_ld[cluster] += d->ta_util_pct[cluster];
-		curr_cp[cluster] += d->cur_cap_pct[cluster];
-	}
-	i++;
-	if (i == POLL_INT) {
-		new_big_nr = ((nrb % POLL_INT) ? 1 : 0) + nrb / POLL_INT;
-		new_top_load = tld / POLL_INT;
-
-		changed = (new_big_nr != aggr_big_nr) ||
-			  (new_top_load != aggr_top_load);
-		for (cluster = 0; cluster < CLUSTER_MAX; cluster++) {
-			new_cluster_top[cluster] = top_ld[cluster] / POLL_INT;
-			new_cluster_cap[cluster] = curr_cp[cluster] / POLL_INT;
-			changed |= (new_cluster_top[cluster] != top_load[cluster]);
-			changed |= (new_cluster_cap[cluster] != curr_cap[cluster]);
-
-			top_load[cluster] = new_cluster_top[cluster];
-			curr_cap[cluster] = new_cluster_cap[cluster];
-			top_ld[cluster] = 0;
-			curr_cp[cluster] = 0;
-		}
-		aggr_big_nr = new_big_nr;
-		aggr_top_load = new_top_load;
-
-		tld = 0;
-		nrb = 0;
-		i = 0;
-		if (changed)
-			schedule_work(&sysfs_notify_work);
-	}
-	return NOTIFY_OK;
-}
-
-static struct notifier_block msm_perf_nb = {
-	.notifier_call = msm_perf_core_ctl_notify
-};
-
-static bool core_ctl_register;
-static int set_core_ctl_register(const char *buf, const struct kernel_param *kp)
-{
-	int ret;
-	bool old_val = core_ctl_register;
-
-	ret = param_set_bool(buf, kp);
-	if (ret < 0)
-		return ret;
-
-	if (core_ctl_register == old_val)
-		return 0;
-
-	if (core_ctl_register)
-		core_ctl_notifier_register(&msm_perf_nb);
-	else
-		core_ctl_notifier_unregister(&msm_perf_nb);
-
-	return 0;
-}
-
-static const struct kernel_param_ops param_ops_cc_register = {
-	.set = set_core_ctl_register,
-	.get = param_get_bool,
-};
-module_param_cb(core_ctl_register, &param_ops_cc_register,
-		&core_ctl_register, 0644);
-#else
 static DECLARE_WORK(msm_perf_sysfs_notify_work, nr_notify_userspace);
 static bool msm_perf_poll_enable = true;
-static unsigned int msm_perf_poll_ms = 40;
-static unsigned int msm_perf_poll_window = 5;
+static unsigned int msm_perf_poll_ms = 25;
+static unsigned int msm_perf_poll_window = 3;
 static unsigned int msm_perf_big_util_min = 1;
-static bool msm_perf_use_thermal_pressure = true;
+static bool msm_perf_use_thermal_pressure;
 static bool msm_perf_cluster_peak;
 static bool msm_perf_notify_on_change = true;
 static bool msm_perf_poll_initialized;
@@ -1234,8 +1142,6 @@ static int msm_perf_pm_notifier(struct notifier_block *nb,
 static struct notifier_block msm_perf_pm_nb = {
 	.notifier_call = msm_perf_pm_notifier,
 };
-
-#endif
 
 void  msm_perf_events_update(enum evt_update_t update_typ,
 			enum gfx_evt_t evt_typ, pid_t pid,
@@ -1533,7 +1439,6 @@ static int __init msm_performance_init(void)
 	init_pmu_counter();
 
 	idle_notifier_register(&msm_perf_event_idle_nb);
-#ifndef CONFIG_SCHED_WALT
 	msm_perf_poll_ms = clamp_t(unsigned int, msm_perf_poll_ms, 10, 1000);
 	msm_perf_poll_window = clamp_t(unsigned int, msm_perf_poll_window, 1, 50);
 	msm_perf_big_util_min = clamp_t(unsigned int, msm_perf_big_util_min, 1, 100);
@@ -1542,7 +1447,6 @@ static int __init msm_performance_init(void)
 	if (msm_perf_poll_enable)
 		schedule_delayed_work(&msm_perf_poll_work,
 				msm_perf_poll_delay_jiffies());
-#endif
 #endif
 	return 0;
 }
