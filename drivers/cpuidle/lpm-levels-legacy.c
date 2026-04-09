@@ -123,6 +123,15 @@ static bool sleep_disabled;
 module_param_named(sleep_disabled,
 	sleep_disabled, bool, 0664);
 
+/*
+ * Performance bias for idle-level selection:
+ * Higher than 100 requires a longer predicted idle window before entering
+ * deeper idle states, trading some idle depth for lower wake latency.
+ */
+static unsigned int lpm_perf_residency_bias_pct = 112;
+module_param_named(perf_residency_bias_pct,
+	lpm_perf_residency_bias_pct, uint, 0664);
+
 s32 msm_cpuidle_get_deep_idle_latency(void)
 {
 	return 10;
@@ -415,6 +424,7 @@ static int cpu_power_select(struct cpuidle_device *dev,
 		struct lpm_cpu *cpu)
 {
 	int best_level = 0;
+	unsigned int bias_pct;
 	uint32_t latency_us = get_cpus_qos(cpumask_of(dev->cpu));
 	ktime_t delta_next;
 	s64 sleep_us = ktime_to_us(tick_nohz_get_sleep_length(&delta_next));
@@ -428,6 +438,9 @@ static int cpu_power_select(struct cpuidle_device *dev,
 
 	if ((sleep_disabled && !cpu_isolated(dev->cpu)) || sleep_us  < 0)
 		return 0;
+
+	bias_pct = clamp_t(unsigned int, READ_ONCE(lpm_perf_residency_bias_pct),
+			   100, 300);
 
 	for (i = 0; i < cpu->nlevels; i++) {
 		struct lpm_cpu_level *level = &cpu->levels[i];
@@ -447,7 +460,8 @@ static int cpu_power_select(struct cpuidle_device *dev,
 
 		best_level = i;
 
-		if (next_wakeup_us <= residency[i])
+		if ((u64)next_wakeup_us * 100ULL <=
+		    (u64)residency[i] * bias_pct)
 			break;
 	}
 
@@ -497,6 +511,7 @@ static int cluster_select(struct lpm_cluster *cluster, bool from_idle)
 {
 	int best_level = -1;
 	int i;
+	unsigned int bias_pct;
 	struct cpumask mask;
 	uint32_t latency_us = ~0U;
 	uint32_t sleep_us;
@@ -519,6 +534,9 @@ static int cluster_select(struct lpm_cluster *cluster, bool from_idle)
 	if (!from_idle && num_online_cpus() > 1 &&
 		cpumask_intersects(&cluster->child_cpus, cpu_online_mask))
 		from_idle = true;
+
+	bias_pct = clamp_t(unsigned int, READ_ONCE(lpm_perf_residency_bias_pct),
+			   100, 300);
 
 	for (i = 0; i < cluster->nlevels; i++) {
 		struct lpm_cluster_level *level = &cluster->levels[i];
@@ -553,7 +571,9 @@ static int cluster_select(struct lpm_cluster *cluster, bool from_idle)
 
 		best_level = i;
 
-		if (from_idle && sleep_us <= pwr_params->max_residency)
+		if (from_idle &&
+		    (u64)sleep_us * 100ULL <=
+		    (u64)pwr_params->max_residency * bias_pct)
 			break;
 	}
 
