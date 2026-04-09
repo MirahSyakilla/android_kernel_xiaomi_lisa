@@ -3500,9 +3500,9 @@ static void ufs_qcom_config_scaling_param(struct ufs_hba *hba,
 		return;
 
 	d = (struct devfreq_simple_ondemand_data *)data;
-	p->polling_ms = 60;
-	d->upthreshold = 70;
-	d->downdifferential = 5;
+	p->polling_ms = 20;
+	d->upthreshold = 45;
+	d->downdifferential = 20;
 }
 #else
 static void ufs_qcom_config_scaling_param(struct ufs_hba *hba,
