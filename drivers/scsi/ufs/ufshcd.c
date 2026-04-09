@@ -8032,11 +8032,11 @@ static const struct attribute_group *ufshcd_driver_groups[] = {
 static struct ufs_hba_variant_params ufs_hba_vps = {
 	.hba_enable_delay_us		= 1000,
 	.wb_flush_threshold		= UFS_WB_BUF_REMAIN_PERCENT(40),
-	.devfreq_profile.polling_ms	= 100,
+	.devfreq_profile.polling_ms	= 30,
 	.devfreq_profile.target		= ufshcd_devfreq_target,
 	.devfreq_profile.get_dev_status	= ufshcd_devfreq_get_dev_status,
-	.ondemand_data.upthreshold	= 70,
-	.ondemand_data.downdifferential	= 5,
+	.ondemand_data.upthreshold	= 55,
+	.ondemand_data.downdifferential	= 15,
 };
 
 static struct scsi_host_template ufshcd_driver_template = {
