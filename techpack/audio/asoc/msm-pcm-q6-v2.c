@@ -28,6 +28,7 @@
 #include <audio/linux/msm_audio.h>
 
 #include <linux/of_device.h>
+#include <linux/pm_qos.h>
 #include <sound/tlv.h>
 #include <sound/pcm_params.h>
 #include <audio/sound/devdep_params.h>
@@ -45,6 +46,9 @@
 
 #define DRV_NAME "msm-pcm-q6-v2"
 #define TIMEOUT_MS	1000
+#define MSM_PCM_LL_QOS_VALUE	0
+#define MSM_PCM_MM3_ULL_PERIOD_BYTES_MIN	6144
+#define MSM_PCM_MM3_ULL_PERIODS_MIN		8
 
 enum stream_state {
 	IDLE = 0,
@@ -605,6 +609,19 @@ static int msm_pcm_playback_prepare(struct snd_pcm_substream *substream)
 	prtd->audio_client->perf_mode = pdata->perf_mode;
 	pr_debug("%s: perf: %x\n", __func__, pdata->perf_mode);
 
+	/*
+	 * MultiMedia3 ULL speaker playback is prone to underruns on some
+	 * vendor userspace stacks when CPU availability jitters briefly.
+	 * Keep routing on MM3 but downgrade ASM perf mode to LLNP to reduce
+	 * XRUN sensitivity.
+	 */
+	if (soc_prtd->dai_link->id == MSM_FRONTEND_DAI_MULTIMEDIA3 &&
+	    prtd->audio_client->perf_mode == ULTRA_LOW_LATENCY_PCM_MODE) {
+		pr_info("%s: remap MM3 playback perf mode ULL -> LLNP\n",
+			__func__);
+		prtd->audio_client->perf_mode = LOW_LATENCY_PCM_NOPROC_MODE;
+	}
+
 	prtd->audio_client->stream_type = SNDRV_PCM_STREAM_PLAYBACK;
 	prtd->audio_client->fedai_id = soc_prtd->dai_link->id;
 
@@ -750,6 +767,16 @@ static int msm_pcm_playback_prepare(struct snd_pcm_substream *substream)
 	}
 	if (ret < 0)
 		pr_err("%s: CMD Format block failed\n", __func__);
+
+	if ((prtd->audio_client->perf_mode == LOW_LATENCY_PCM_MODE) ||
+	    (prtd->audio_client->perf_mode == LOW_LATENCY_PCM_NOPROC_MODE) ||
+	    (prtd->audio_client->perf_mode == ULTRA_LOW_LATENCY_PCM_MODE) ||
+	    (prtd->audio_client->perf_mode == ULL_POST_PROCESSING_PCM_MODE)) {
+		if (!pm_qos_request_active(&prtd->latency_pm_qos_req))
+			pm_qos_add_request(&prtd->latency_pm_qos_req,
+					   PM_QOS_CPU_DMA_LATENCY,
+					   MSM_PCM_LL_QOS_VALUE);
+	}
 
 	atomic_set(&prtd->out_count, runtime->periods);
 
@@ -1030,6 +1057,26 @@ static int msm_pcm_open(struct snd_pcm_substream *substream)
 		return -EINVAL;
 	}
 
+	/*
+	 * Keep a larger minimum period/buffer floor for MM3 ULL playback.
+	 * This increases tolerance to short producer stalls and avoids
+	 * immediate underrun crackle bursts.
+	 */
+	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK &&
+	    pdata->perf_mode == ULTRA_LOW_LATENCY_PCM_MODE &&
+	    soc_prtd->dai_link->id == MSM_FRONTEND_DAI_MULTIMEDIA3) {
+		if (runtime->hw.period_bytes_min < MSM_PCM_MM3_ULL_PERIOD_BYTES_MIN)
+			runtime->hw.period_bytes_min = MSM_PCM_MM3_ULL_PERIOD_BYTES_MIN;
+		if (runtime->hw.periods_min < MSM_PCM_MM3_ULL_PERIODS_MIN)
+			runtime->hw.periods_min = MSM_PCM_MM3_ULL_PERIODS_MIN;
+	} else if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK &&
+		   pdata->perf_mode == ULTRA_LOW_LATENCY_PCM_MODE) {
+		if (runtime->hw.period_bytes_min < 960)
+			runtime->hw.period_bytes_min = 960;
+		if (runtime->hw.periods_min < 4)
+			runtime->hw.periods_min = 4;
+	}
+
 	ret = snd_pcm_hw_constraint_list(runtime, 0,
 				SNDRV_PCM_HW_PARAM_RATE,
 				&constraints_sample_rates);
@@ -1042,9 +1089,12 @@ static int msm_pcm_open(struct snd_pcm_substream *substream)
 		pr_info("snd_pcm_hw_constraint_integer failed\n");
 
 	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
+		unsigned int min_buffer_bytes =
+			runtime->hw.period_bytes_min * runtime->hw.periods_min;
+
 		ret = snd_pcm_hw_constraint_minmax(runtime,
 			SNDRV_PCM_HW_PARAM_BUFFER_BYTES,
-			PLAYBACK_MIN_NUM_PERIODS * PLAYBACK_MIN_PERIOD_SIZE,
+			min_buffer_bytes,
 			PLAYBACK_MAX_NUM_PERIODS * PLAYBACK_MAX_PERIOD_SIZE);
 		if (ret < 0) {
 			pr_err("constraint for buffer bytes min max ret = %d\n",
@@ -1088,7 +1138,10 @@ static int msm_pcm_open(struct snd_pcm_substream *substream)
 
 	/* Vote to update the Rx thread priority to RT Thread for playback */
 	if ((substream->stream == SNDRV_PCM_STREAM_PLAYBACK) &&
-	    (pdata->perf_mode == LOW_LATENCY_PCM_MODE))
+	    ((pdata->perf_mode == LOW_LATENCY_PCM_MODE) ||
+	     (pdata->perf_mode == LOW_LATENCY_PCM_NOPROC_MODE) ||
+	     (pdata->perf_mode == ULTRA_LOW_LATENCY_PCM_MODE) ||
+	     (pdata->perf_mode == ULL_POST_PROCESSING_PCM_MODE)))
 		apr_start_rx_rt(prtd->audio_client->apr);
 
 	return 0;
@@ -1219,6 +1272,9 @@ static int msm_pcm_playback_close(struct snd_pcm_substream *substream)
 	}
 
 	mutex_lock(&pdata->lock);
+	if (pm_qos_request_active(&prtd->latency_pm_qos_req))
+		pm_qos_remove_request(&prtd->latency_pm_qos_req);
+
 	if (prtd->audio_client) {
 		dir = IN;
 
@@ -1226,10 +1282,12 @@ static int msm_pcm_playback_close(struct snd_pcm_substream *substream)
 		 * Unvote to downgrade the Rx thread priority from
 		 * RT Thread for Low-Latency use case.
 		 */
-		if (pdata) {
-			if (pdata->perf_mode == LOW_LATENCY_PCM_MODE)
-				apr_end_rx_rt(prtd->audio_client->apr);
-		}
+		if (pdata &&
+		    ((pdata->perf_mode == LOW_LATENCY_PCM_MODE) ||
+		     (pdata->perf_mode == LOW_LATENCY_PCM_NOPROC_MODE) ||
+		     (pdata->perf_mode == ULTRA_LOW_LATENCY_PCM_MODE) ||
+		     (pdata->perf_mode == ULL_POST_PROCESSING_PCM_MODE)))
+			apr_end_rx_rt(prtd->audio_client->apr);
 		/* determine timeout length */
 		if (runtime->frame_bits == 0 || runtime->rate == 0) {
 			timeout = CMD_EOS_MIN_TIMEOUT_LENGTH;

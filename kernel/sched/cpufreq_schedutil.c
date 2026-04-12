@@ -229,11 +229,8 @@ static inline unsigned long apply_dvfs_headroom(unsigned long util, int cpu)
 	unsigned long capacity = capacity_orig_of(cpu);
 	unsigned long delta, headroom, max_boost, min_boost;
 
-	/* There's no need of headroom at high utilization. The same goes
-	 * for very low utilization as well. Consider 3.125% (capacity / 32)
-	 * as the minimum utilization required.
-	 */
-	if (unlikely(util >= capacity) || likely(util < (capacity >> 5)))
+	/* There's no need of headroom once utilization saturates capacity. */
+	if (unlikely(util >= capacity))
 		return util;
 
 	/*
@@ -261,7 +258,7 @@ static inline unsigned long apply_dvfs_headroom(unsigned long util, int cpu)
 	else if (headroom < min_boost)
 		return util;
 
-	return util + headroom;
+	return min(capacity, util + headroom);
 }
 unsigned long sugov_effective_cpu_perf(int cpu, unsigned long actual,
 				 unsigned long min,
@@ -648,15 +645,37 @@ static struct kobj_type sugov_tunables_ktype = {
 
 static struct cpufreq_governor schedutil_gov;
 
+static bool sugov_is_little_policy(struct cpufreq_policy *policy)
+{
+	unsigned long policy_cap = 0, max_cap = 0;
+	int cpu;
+
+	for_each_cpu(cpu, policy->related_cpus)
+		policy_cap = max(policy_cap, arch_scale_cpu_capacity(cpu));
+
+	for_each_possible_cpu(cpu)
+		max_cap = max(max_cap, arch_scale_cpu_capacity(cpu));
+
+	if (!max_cap)
+		return false;
+
+	/* Treat clusters <= ~75% of max capacity as little-class policies. */
+	return policy_cap * 4 <= max_cap * 3;
+}
+
 static unsigned int sugov_default_rate_limit_us(struct cpufreq_policy *policy)
 {
 	unsigned int rate_limit_us = cpufreq_policy_transition_delay_us(policy);
 
 	/*
-	 * Use a tighter default update pacing while keeping a lower/upper
-	 * bound to avoid excess churn on slow-switch paths.
+	 * Keep big/prime policies responsive, but damp little-policy DVFS
+	 * oscillation so they don't drop clocks too aggressively between short
+	 * runnable gaps.
 	 */
-	rate_limit_us = clamp(rate_limit_us, 100U, 400U);
+	if (sugov_is_little_policy(policy))
+		rate_limit_us = clamp(rate_limit_us, 250U, 700U);
+	else
+		rate_limit_us = clamp(rate_limit_us, 100U, 400U);
 
 	return rate_limit_us;
 }
