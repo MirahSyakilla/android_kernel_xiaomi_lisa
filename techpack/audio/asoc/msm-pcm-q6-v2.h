@@ -7,6 +7,7 @@
 
 #ifndef _MSM_PCM_H
 #define _MSM_PCM_H
+#include <linux/pm_qos.h>
 #include <dsp/apr_audio-v2.h>
 #include <dsp/q6asm-v2.h>
 #include "msm-pcm-routing-v2.h"
@@ -99,6 +100,7 @@ struct msm_audio {
 	bool meta_data_mode;
 	uint32_t volume;
 	bool compress_enable;
+	struct pm_qos_request latency_pm_qos_req;
 	/* array of frame info */
 	struct msm_audio_in_frame_info in_frame_info[CAPTURE_MAX_NUM_PERIODS];
 };

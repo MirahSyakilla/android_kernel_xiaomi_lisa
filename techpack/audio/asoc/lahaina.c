@@ -80,7 +80,7 @@
 
 #define MI2S_NUM_CHANNELS	2
 
-#define MSM_LL_QOS_VALUE	300 /* time in us to ensure LPM doesn't go in C3/C4 */
+#define MSM_LL_QOS_VALUE	0 /* keep audio path out of deep idle while active */
 
 #define ADSP_STATE_READY_TIMEOUT_MS 3000
 
@@ -5742,6 +5742,10 @@ static int msm_fe_qos_prepare(struct snd_pcm_substream *substream)
 	if (pm_qos_request_active(&substream->latency_pm_qos_req))
 		pm_qos_remove_request(&substream->latency_pm_qos_req);
 
+	pm_qos_add_request(&substream->latency_pm_qos_req,
+			   PM_QOS_CPU_DMA_LATENCY,
+			   MSM_LL_QOS_VALUE);
+
 	qos_client_active_cnt++;
 	if (qos_client_active_cnt == 1)
 		msm_audio_update_qos_request(MSM_LL_QOS_VALUE);
@@ -5751,7 +5755,8 @@ static int msm_fe_qos_prepare(struct snd_pcm_substream *substream)
 
 static void msm_fe_qos_shutdown(struct snd_pcm_substream *substream)
 {
-	(void)substream;
+	if (pm_qos_request_active(&substream->latency_pm_qos_req))
+		pm_qos_remove_request(&substream->latency_pm_qos_req);
 
 	if (qos_client_active_cnt > 0)
 		qos_client_active_cnt--;
