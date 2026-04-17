@@ -673,9 +673,9 @@ static unsigned int sugov_default_rate_limit_us(struct cpufreq_policy *policy)
 	 * runnable gaps.
 	 */
 	if (sugov_is_little_policy(policy))
-		rate_limit_us = clamp(rate_limit_us, 250U, 700U);
+		rate_limit_us = clamp(rate_limit_us, 180U, 450U);
 	else
-		rate_limit_us = clamp(rate_limit_us, 100U, 400U);
+		rate_limit_us = clamp(rate_limit_us, 80U, 250U);
 
 	return rate_limit_us;
 }
