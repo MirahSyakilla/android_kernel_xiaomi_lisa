@@ -25,7 +25,7 @@
  * gRuntimePMDelay - Set runtime pm's inactivity timer
  * @Min: 100
  * @Max: 10000
- * @Default: 500
+ * @Default: 900
  *
  * This ini is used to set runtime pm's inactivity timer value.
  * the wlan driver will wait for this number of milliseconds of
@@ -43,7 +43,7 @@
 	"gRuntimePMDelay", \
 	100, \
 	10000, \
-	500, \
+	900, \
 	CFG_VALUE_OR_DEFAULT, \
 	"Set runtime pm's inactivity timer")
 
