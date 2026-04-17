@@ -128,7 +128,7 @@ module_param_named(sleep_disabled,
  * Higher than 100 requires a longer predicted idle window before entering
  * deeper idle states, trading some idle depth for lower wake latency.
  */
-static unsigned int lpm_perf_residency_bias_pct = 112;
+static unsigned int lpm_perf_residency_bias_pct = 125;
 module_param_named(perf_residency_bias_pct,
 	lpm_perf_residency_bias_pct, uint, 0664);
 
