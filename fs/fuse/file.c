@@ -3580,7 +3580,7 @@ static ssize_t __fuse_copy_file_range(struct file *file_in, loff_t pos_in,
 		.nodeid_out = ff_out->nodeid,
 		.fh_out = ff_out->fh,
 		.off_out = pos_out,
-		.len = min_t(size_t, len, UINT_MAX & PAGE_MASK),
+		.len = len,
 		.flags = flags
 	};
 	struct fuse_write_out outarg;
@@ -3658,9 +3658,6 @@ static ssize_t __fuse_copy_file_range(struct file *file_in, loff_t pos_in,
 		fc->no_copy_file_range = 1;
 		err = -EOPNOTSUPP;
 	}
-	if (!err && outarg.size > len)
-		err = -EIO;
-
 	if (err)
 		goto out;
 
