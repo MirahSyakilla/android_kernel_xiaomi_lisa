@@ -91,8 +91,7 @@ static bool sugov_should_update_freq(struct sugov_policy *sg_policy, u64 time)
 
 	if (unlikely(READ_ONCE(sg_policy->limits_changed))) {
 		WRITE_ONCE(sg_policy->limits_changed, false);
-		sg_policy->need_freq_update =
-			cpufreq_driver_test_flags(CPUFREQ_NEED_UPDATE_LIMITS);
+		sg_policy->need_freq_update = true;
 
 		/*
 		 * The above limits_changed update must occur before the reads
@@ -127,6 +126,16 @@ static bool sugov_update_next_freq(struct sugov_policy *sg_policy, u64 time,
 {
 	if (sg_policy->need_freq_update) {
 		sg_policy->need_freq_update = false;
+		/*
+		 * The policy limits have changed, but if the return value of
+		 * cpufreq_driver_resolve_freq() after applying the new limits
+		 * is still equal to the previously selected frequency, the
+		 * driver callback need not be invoked unless the driver
+		 * specifically wants that to happen on every update of the
+		 * policy limits.
+		 */
+		if (cpufreq_driver_test_flags(CPUFREQ_NEED_UPDATE_LIMITS))
+			goto must_update;
 	}
 
 	/*
@@ -145,6 +154,7 @@ static bool sugov_update_next_freq(struct sugov_policy *sg_policy, u64 time,
 	     sugov_should_rate_limit(sg_policy, time)))
 		return false;
 
+must_update:
 	sg_policy->next_freq = next_freq;
 	sg_policy->last_freq_update_time = time;
 
@@ -227,39 +237,32 @@ static unsigned int get_next_freq(struct sugov_policy *sg_policy,
 static inline unsigned long apply_dvfs_headroom(unsigned long util, int cpu)
 {
 	unsigned long capacity = capacity_orig_of(cpu);
-	unsigned long delta, headroom, max_boost, min_boost;
+	unsigned long headroom;
 
-	/* There's no need of headroom once utilization saturates capacity. */
-	if (unlikely(util >= capacity))
+	/*
+	 * Skip boosting for very low utilization (< 6.25%)
+	 */
+	if (likely(util < (capacity >> 4)))
 		return util;
 
 	/*
-	 * Quadratically taper the boosting at the top end based on capacity
-	 * as these are expensive and we don't need that much of a big
-	 * headroom as we approach max capacity.
-	 *
-	 * Formula: (delta²) / (4 * capacity)
+	 * Perform 12.5% boost in < 50% load and 25% boost in >= 50% load
 	 */
-	delta = capacity - util;
-	headroom = (delta * delta) / (4 * capacity);
+	if (util < (capacity >> 1))
+		headroom = util >> 3;
+	else
+		headroom = util >> 2;
 
-	/* Limit the headroom within a valid range to avoid excessive or
-	 * negligible boosts.
-	 * Cap the maximum headroom at ~10% (capacity / 10) to keep good
-	 * ramp-up while avoiding multicore over-boost churn.
-	 * If the calculated headroom is below 0.39% (capacity / 256),
-	 * skip boosting as it is unlikely to trigger a frequency change.
+	/*
+	 * Ensure the total boosted utilization does not exceed the CPU's
+	 * maximum capacity
 	 */
-	max_boost = capacity / 10;
-	min_boost = capacity >> 8;
+	if (util + headroom > capacity)
+		return capacity;
 
-	if (headroom > max_boost)
-		headroom = max_boost;
-	else if (headroom < min_boost)
-		return util;
-
-	return min(capacity, util + headroom);
+	return util + headroom;
 }
+
 unsigned long sugov_effective_cpu_perf(int cpu, unsigned long actual,
 				 unsigned long min,
 				 unsigned long max)
@@ -279,16 +282,12 @@ unsigned long sugov_effective_cpu_perf(int cpu, unsigned long actual,
 
 static void sugov_get_util(struct sugov_cpu *sg_cpu, unsigned long boost)
 {
-	struct rq *rq = cpu_rq(sg_cpu->cpu);
-	unsigned long max = arch_scale_cpu_capacity(sg_cpu->cpu);
-	unsigned long util;
+	unsigned long min, max, util = cpu_util_cfs(sg_cpu->cpu);
 
-	util = effective_cpu_util(sg_cpu->cpu, cpu_util_cfs(rq), max,
-				  FREQUENCY_UTIL, NULL);
+	util = effective_cpu_util(sg_cpu->cpu, util, &min, &max);
 	util = max(util, boost);
-	sg_cpu->bw_min = cpu_bw_dl(rq);
-	sg_cpu->util = sugov_effective_cpu_perf(sg_cpu->cpu, util,
-						sg_cpu->bw_min, max);
+	sg_cpu->bw_min = min;
+	sg_cpu->util = sugov_effective_cpu_perf(sg_cpu->cpu, util, min, max);
 }
 
 /**
@@ -645,41 +644,6 @@ static struct kobj_type sugov_tunables_ktype = {
 
 static struct cpufreq_governor schedutil_gov;
 
-static bool sugov_is_little_policy(struct cpufreq_policy *policy)
-{
-	unsigned long policy_cap = 0, max_cap = 0;
-	int cpu;
-
-	for_each_cpu(cpu, policy->related_cpus)
-		policy_cap = max(policy_cap, arch_scale_cpu_capacity(cpu));
-
-	for_each_possible_cpu(cpu)
-		max_cap = max(max_cap, arch_scale_cpu_capacity(cpu));
-
-	if (!max_cap)
-		return false;
-
-	/* Treat clusters <= ~75% of max capacity as little-class policies. */
-	return policy_cap * 4 <= max_cap * 3;
-}
-
-static unsigned int sugov_default_rate_limit_us(struct cpufreq_policy *policy)
-{
-	unsigned int rate_limit_us = cpufreq_policy_transition_delay_us(policy);
-
-	/*
-	 * Keep big/prime policies responsive, but damp little-policy DVFS
-	 * oscillation so they don't drop clocks too aggressively between short
-	 * runnable gaps.
-	 */
-	if (sugov_is_little_policy(policy))
-		rate_limit_us = clamp(rate_limit_us, 180U, 450U);
-	else
-		rate_limit_us = clamp(rate_limit_us, 80U, 250U);
-
-	return rate_limit_us;
-}
-
 static struct sugov_policy *sugov_policy_alloc(struct cpufreq_policy *policy)
 {
 	struct sugov_policy *sg_policy;
@@ -821,7 +785,7 @@ static int sugov_init(struct cpufreq_policy *policy)
 		goto stop_kthread;
 	}
 
-	tunables->rate_limit_us = sugov_default_rate_limit_us(policy);
+	tunables->rate_limit_us = 2000;
 
 	policy->governor_data = sg_policy;
 	sg_policy->tunables = tunables;
