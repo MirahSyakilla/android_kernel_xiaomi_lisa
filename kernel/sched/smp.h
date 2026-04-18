@@ -4,7 +4,7 @@
  * and other internal parts of the core kernel:
  */
 
-#if SCHED_FEAT_TTWU_QUEUE
+#if defined(SCHED_FEAT_TTWU_QUEUE) && SCHED_FEAT_TTWU_QUEUE
 extern void sched_ttwu_pending(void *arg);
 #else
 static inline void sched_ttwu_pending(void *arg) { }
