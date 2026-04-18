@@ -106,6 +106,20 @@ void topology_set_thermal_pressure(const struct cpumask *cpus,
 		WRITE_ONCE(per_cpu(thermal_pressure, cpu), th_pressure);
 }
 
+/**
+ * topology_update_thermal_pressure() - Update thermal pressure for CPUs
+ * @cpus        : The related CPUs for which capacity has been reduced
+ * @capped_freq : The maximum allowed frequency that CPUs can run at
+ *
+ * Update the value of thermal pressure for all @cpus in the mask. The
+ * cpumask should include all (online+offline) affected CPUs, to avoid
+ * operating on stale data when hot-plug is used for some CPUs. The
+ * @capped_freq reflects the currently allowed max CPUs frequency due to
+ * thermal capping. It might be also a boost frequency value, which is bigger
+ * than the internal 'freq_factor' max frequency. In such case the pressure
+ * value should simply be removed, since this is an indication that there is
+ * no thermal throttling. The @capped_freq must be provided in kHz.
+ */
 void topology_update_thermal_pressure(const struct cpumask *cpus,
 				      unsigned long capped_freq)
 {
@@ -120,6 +134,10 @@ void topology_update_thermal_pressure(const struct cpumask *cpus,
 	/* Convert to MHz scale which is used in 'freq_factor' */
 	capped_freq /= 1000;
 
+	/*
+	 * Handle properly the boost frequencies, which should simply clean
+	 * the thermal pressure value.
+	 */
 	if (max_freq <= capped_freq)
 		capacity = max_capacity;
 	else

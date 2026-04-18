@@ -294,44 +294,54 @@ void __init cgroup_rstat_boot(void)
  * Functions for cgroup basic resource statistics implemented on top of
  * rstat.
  */
-static void cgroup_base_stat_accumulate(struct cgroup_base_stat *dst_bstat,
-					struct cgroup_base_stat *src_bstat)
+static void cgroup_base_stat_add(struct cgroup_base_stat *dst_bstat,
+				 struct cgroup_base_stat *src_bstat)
 {
 	dst_bstat->cputime.utime += src_bstat->cputime.utime;
 	dst_bstat->cputime.stime += src_bstat->cputime.stime;
 	dst_bstat->cputime.sum_exec_runtime += src_bstat->cputime.sum_exec_runtime;
+#ifdef CONFIG_SCHED_CORE
+	dst_bstat->forceidle_sum += src_bstat->forceidle_sum;
+#endif
+}
+
+static void cgroup_base_stat_sub(struct cgroup_base_stat *dst_bstat,
+				 struct cgroup_base_stat *src_bstat)
+{
+	dst_bstat->cputime.utime -= src_bstat->cputime.utime;
+	dst_bstat->cputime.stime -= src_bstat->cputime.stime;
+	dst_bstat->cputime.sum_exec_runtime -= src_bstat->cputime.sum_exec_runtime;
+#ifdef CONFIG_SCHED_CORE
+	dst_bstat->forceidle_sum -= src_bstat->forceidle_sum;
+#endif
 }
 
 static void cgroup_base_stat_flush(struct cgroup *cgrp, int cpu)
 {
 	struct cgroup *parent = cgroup_parent(cgrp);
 	struct cgroup_rstat_cpu *rstatc = cgroup_rstat_cpu(cgrp, cpu);
-	struct task_cputime *last_cputime = &rstatc->last_bstat.cputime;
-	struct task_cputime cputime;
-	struct cgroup_base_stat delta;
+	struct cgroup_base_stat cur, delta;
 	unsigned seq;
 
 	/* fetch the current per-cpu values */
 	do {
 		seq = __u64_stats_fetch_begin(&rstatc->bsync);
-		cputime = rstatc->bstat.cputime;
+		cur.cputime = rstatc->bstat.cputime;
 	} while (__u64_stats_fetch_retry(&rstatc->bsync, seq));
 
-	/* calculate the delta to propgate */
-	delta.cputime.utime = cputime.utime - last_cputime->utime;
-	delta.cputime.stime = cputime.stime - last_cputime->stime;
-	delta.cputime.sum_exec_runtime = cputime.sum_exec_runtime -
-					 last_cputime->sum_exec_runtime;
-	*last_cputime = cputime;
+	/* propagate percpu delta to global */
+	delta = cur;
+	cgroup_base_stat_sub(&delta, &rstatc->last_bstat);
+	cgroup_base_stat_add(&cgrp->bstat, &delta);
+	cgroup_base_stat_add(&rstatc->last_bstat, &delta);
 
-	/* transfer the pending stat into delta */
-	cgroup_base_stat_accumulate(&delta, &cgrp->pending_bstat);
-	memset(&cgrp->pending_bstat, 0, sizeof(cgrp->pending_bstat));
-
-	/* propagate delta into the global stat and the parent's pending */
-	cgroup_base_stat_accumulate(&cgrp->bstat, &delta);
-	if (parent)
-		cgroup_base_stat_accumulate(&parent->pending_bstat, &delta);
+	/* propagate global delta to parent */
+	if (parent) {
+		delta = cgrp->bstat;
+		cgroup_base_stat_sub(&delta, &cgrp->last_bstat);
+		cgroup_base_stat_add(&parent->bstat, &delta);
+		cgroup_base_stat_add(&cgrp->last_bstat, &delta);
+	}
 }
 
 static struct cgroup_rstat_cpu *
@@ -378,6 +388,11 @@ void __cgroup_account_cputime_field(struct cgroup *cgrp,
 	case CPUTIME_SOFTIRQ:
 		rstatc->bstat.cputime.stime += delta_exec;
 		break;
+#ifdef CONFIG_SCHED_CORE
+	case CPUTIME_FORCEIDLE:
+		rstatc->bstat.forceidle_sum += delta_exec;
+		break;
+#endif
 	default:
 		break;
 	}
@@ -408,9 +423,16 @@ void cgroup_base_stat_cputime_show(struct seq_file *seq)
 	do_div(usage, NSEC_PER_USEC);
 	do_div(utime, NSEC_PER_USEC);
 	do_div(stime, NSEC_PER_USEC);
+#ifdef CONFIG_SCHED_CORE
+	do_div(forceidle_time, NSEC_PER_USEC);
+#endif
 
 	seq_printf(seq, "usage_usec %llu\n"
 		   "user_usec %llu\n"
 		   "system_usec %llu\n",
 		   usage, utime, stime);
+
+#ifdef CONFIG_SCHED_CORE
+	seq_printf(seq, "core_sched.force_idle_usec %llu\n", forceidle_time);
+#endif
 }
