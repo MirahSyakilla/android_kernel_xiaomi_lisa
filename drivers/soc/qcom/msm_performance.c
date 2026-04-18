@@ -1031,7 +1031,7 @@ static bool msm_perf_update_load_pct(void)
 		if (!cap)
 			continue;
 
-		util = min_t(unsigned long, sched_cpu_util(cpu, cap), cap);
+		util = min_t(unsigned long, sched_cpu_util(cpu), cap);
 		util_pct = mult_frac(util, 100, cap);
 
 			thermal = msm_perf_use_thermal_pressure ?
