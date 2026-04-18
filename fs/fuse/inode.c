@@ -1182,7 +1182,7 @@ static void process_init_limits(struct fuse_conn *fc, struct fuse_init_out *arg)
 
 static void set_request_timeout(struct fuse_conn *fc, unsigned int timeout)
 {
-	fc->timeout.req_timeout = secs_to_jiffies(timeout);
+	fc->timeout.req_timeout = timeout * HZ;
 	INIT_DELAYED_WORK(&fc->timeout.work, fuse_check_timeout);
 	queue_delayed_work(system_wq, &fc->timeout.work,
 			   fuse_timeout_timer_freq);

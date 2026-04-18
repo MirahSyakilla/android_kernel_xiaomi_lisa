@@ -1907,7 +1907,11 @@ struct file_operations {
 	ssize_t (*read_iter) (struct kiocb *, struct iov_iter *);
 	ssize_t (*write_iter) (struct kiocb *, struct iov_iter *);
 	int (*iopoll)(struct kiocb *kiocb, bool spin);
-	int (*iterate_shared) (struct file *, struct dir_context *);
+	union {
+		/* Compat alias for legacy users still calling ->iterate */
+		int (*iterate) (struct file *, struct dir_context *);
+		int (*iterate_shared) (struct file *, struct dir_context *);
+	};
 	__poll_t (*poll) (struct file *, struct poll_table_struct *);
 	long (*unlocked_ioctl) (struct file *, unsigned int, unsigned long);
 	long (*compat_ioctl) (struct file *, unsigned int, unsigned long);

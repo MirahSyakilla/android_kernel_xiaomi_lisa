@@ -115,5 +115,9 @@ extern dev_t name_to_dev_t(const char *name);
 extern unsigned int sysctl_mount_max;
 
 extern bool path_is_mountpoint(const struct path *path);
+extern struct vfsmount *collect_mounts(const struct path *path);
+extern void drop_collected_mounts(struct vfsmount *mnt);
+extern int iterate_mounts(int (*f)(struct vfsmount *, void *), void *arg,
+			  struct vfsmount *root);
 
 #endif /* _LINUX_MOUNT_H */
