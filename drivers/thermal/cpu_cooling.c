@@ -149,7 +149,7 @@ static u32 get_load(struct cpufreq_cooling_device *cpufreq_cdev, int cpu,
 	unsigned long max = arch_scale_cpu_capacity(cpu);
 	unsigned long util;
 
-	util = sched_cpu_util(cpu, max);
+	util = sched_cpu_util(cpu);
 	return (util * 100) / max;
 }
 #else /* !CONFIG_SMP */

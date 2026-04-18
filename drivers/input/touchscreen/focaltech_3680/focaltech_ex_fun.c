@@ -326,18 +326,10 @@ proc_read_err:
     return ret;
 }
 
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 6, 0))
 static const struct proc_ops fts_proc_fops = {
     .proc_read   = fts_debug_read,
     .proc_write  = fts_debug_write,
 };
-#else
-static const struct file_operations fts_proc_fops = {
-    .owner  = THIS_MODULE,
-    .read   = fts_debug_read,
-    .write  = fts_debug_write,
-};
-#endif
 #else
 static int fts_debug_write(
     struct file *filp, const char __user *buff, unsigned long count, void *data)
@@ -632,19 +624,11 @@ static ssize_t fts_ta_read(
     return read_num;
 }
 
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 6, 0))
 static const struct proc_ops fts_procta_fops = {
     .proc_open = fts_ta_open,
     .proc_release = fts_ta_release,
     .proc_read = fts_ta_read,
 };
-#else
-static const struct file_operations fts_procta_fops = {
-    .open = fts_ta_open,
-    .release = fts_ta_release,
-    .read = fts_ta_read,
-};
-#endif
 #endif
 
 int fts_create_apk_debug_channel(struct fts_ts_data *ts_data)
