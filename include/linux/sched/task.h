@@ -42,6 +42,11 @@ extern struct task_struct init_task;
 
 #ifdef CONFIG_PROVE_RCU
 extern int lockdep_tasklist_lock_is_held(void);
+#else
+static inline int lockdep_tasklist_lock_is_held(void)
+{
+	return 1;
+}
 #endif /* #ifdef CONFIG_PROVE_RCU */
 
 extern asmlinkage void schedule_tail(struct task_struct *prev);

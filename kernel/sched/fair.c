@@ -698,9 +698,13 @@ overflow:
 	cfs_rq->sum_w_vruntime = 0;
 	cfs_rq->sum_weight = 0;
 
-	for (struct rb_node *node = cfs_rq->tasks_timeline.rb_leftmost;
-	     node; node = rb_next(node))
+	{
+		struct rb_node *node;
+
+		for (node = cfs_rq->tasks_timeline.rb_leftmost;
+		     node; node = rb_next(node))
 		__sum_w_vruntime_add(cfs_rq, __node_2_se(node));
+	}
 
 	goto again;
 }
@@ -1318,7 +1322,6 @@ static void update_curr(struct cfs_rq *cfs_rq)
 	}
 
 	curr->sum_exec_runtime += delta_exec;
-	schedstat_add(cfs_rq->exec_clock, delta_exec);
 
 	curr->vruntime += calc_delta_fair(delta_exec, curr);
 	resched = update_deadline(cfs_rq, curr);
