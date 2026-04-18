@@ -12,6 +12,28 @@ struct proc_dir_entry;
 struct seq_file;
 struct seq_operations;
 
+/*
+ * Compat layer for trees that still use file_operations for procfs entries.
+ * This lets newer proc_ops callsites (eg. scheduler PSI) build unchanged.
+ */
+#ifndef proc_ops
+#define proc_ops			file_operations
+#define proc_open			open
+#define proc_read			read
+#define proc_write			write
+#define proc_lseek			llseek
+#define proc_release			release
+#define proc_poll			poll
+#define proc_ioctl			unlocked_ioctl
+#ifdef CONFIG_COMPAT
+#define proc_compat_ioctl		compat_ioctl
+#endif
+#define proc_mmap			mmap
+#define proc_get_unmapped_area		get_unmapped_area
+#define proc_flags			owner
+#define PROC_ENTRY_PERMANENT		NULL
+#endif
+
 #ifdef CONFIG_PROC_FS
 
 typedef int (*proc_write_t)(struct file *, char *, size_t);
