@@ -38,7 +38,7 @@ static inline void mmgrab(struct mm_struct *mm)
 
 extern void __mmdrop(struct mm_struct *mm);
 
-static __always_inline void mmdrop(struct mm_struct *mm)
+static inline void mmdrop(struct mm_struct *mm)
 {
 	/*
 	 * The implicit full barrier implied by atomic_dec_and_test() is
@@ -55,6 +55,21 @@ void mmdrop(struct mm_struct *mm);
  * This has to be called after a get_task_mm()/mmget_not_zero()
  * followed by taking the mmap_sem for writing before modifying the
  * vmas or anything the coredump pretends not to change from under it.
+ *
+ * It also has to be called when mmgrab() is used in the context of
+ * the process, but then the mm_count refcount is transferred outside
+ * the context of the process to run down_write() on that pinned mm.
+ *
+ * NOTE: find_extend_vma() called from GUP context is the only place
+ * that can modify the "mm" (notably the vm_start/end) under mmap_sem
+ * for reading and outside the context of the process, so it is also
+ * the only case that holds the mmap_sem for reading that must call
+ * this function. Generally if the mmap_sem is hold for reading
+ * there's no need of this check after get_task_mm()/mmget_not_zero().
+ *
+ * This function can be obsoleted and the check can be removed, after
+ * the coredump code will hold the mmap_sem for writing before
+ * invoking the ->core_dump methods.
  */
 static inline bool mmget_still_valid(struct mm_struct *mm)
 {
@@ -62,12 +77,25 @@ static inline bool mmget_still_valid(struct mm_struct *mm)
 }
 
 /*
- * Invoked from finish_task_switch(). Keep a dedicated helper to mirror
- * trees that separate scheduler-context mm ref drops from generic mmdrop().
+ * RCU callback for delayed mm drop. Not strictly RCU, but call_rcu() is
+ * by far the least expensive way to do that.
  */
-static __always_inline void mmdrop_sched(struct mm_struct *mm)
+static inline void __mmdrop_delayed(struct rcu_head *rhp)
 {
-	mmdrop(mm);
+	struct mm_struct *mm = container_of(rhp, struct mm_struct, delayed_drop);
+
+	__mmdrop(mm);
+}
+
+/*
+ * Invoked from finish_task_switch(). Delegates the heavy lifting on RT
+ * kernels via RCU.
+ */
+static inline void mmdrop_sched(struct mm_struct *mm)
+{
+	/* Provides a full memory barrier. See mmdrop() */
+	if (atomic_dec_and_test(&mm->mm_count))
+		call_rcu(&mm->delayed_drop, __mmdrop_delayed);
 }
 
 /**
@@ -367,7 +395,7 @@ enum {
 #include <asm/membarrier.h>
 #endif
 
-static __always_inline void membarrier_mm_sync_core_before_usermode(struct mm_struct *mm)
+static inline void membarrier_mm_sync_core_before_usermode(struct mm_struct *mm)
 {
 	if (current->mm != mm)
 		return;

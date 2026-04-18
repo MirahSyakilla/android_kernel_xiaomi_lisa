@@ -30,6 +30,7 @@ bool topology_scale_freq_invariant(void)
 DEFINE_PER_CPU(unsigned long, freq_scale) = SCHED_CAPACITY_SCALE;
 DEFINE_PER_CPU(unsigned long, max_cpu_freq);
 DEFINE_PER_CPU(unsigned long, max_freq_scale) = SCHED_CAPACITY_SCALE;
+static DEFINE_PER_CPU(u32, freq_factor) = 1;
 
 void arch_set_freq_scale(const struct cpumask *cpus, unsigned long cur_freq,
 			 unsigned long max_freq)
@@ -72,6 +73,22 @@ void arch_set_max_freq_scale(const struct cpumask *cpus,
 }
 
 DEFINE_PER_CPU(unsigned long, cpu_scale) = SCHED_CAPACITY_SCALE;
+DEFINE_PER_CPU(unsigned long, arch_min_freq_scale);
+
+void arch_set_min_freq_scale(const struct cpumask *cpus,
+			     unsigned long min_freq, unsigned long max_freq)
+{
+	unsigned long scale;
+	int i;
+
+	if (WARN_ON_ONCE(!max_freq))
+		return;
+
+	scale = (min_freq * per_cpu(cpu_scale, cpumask_any(cpus))) / max_freq;
+
+	for_each_cpu(i, cpus)
+		per_cpu(arch_min_freq_scale, i) = scale;
+}
 
 void topology_set_cpu_scale(unsigned int cpu, unsigned long capacity)
 {
@@ -88,6 +105,29 @@ void topology_set_thermal_pressure(const struct cpumask *cpus,
 	for_each_cpu(cpu, cpus)
 		WRITE_ONCE(per_cpu(thermal_pressure, cpu), th_pressure);
 }
+
+void topology_update_thermal_pressure(const struct cpumask *cpus,
+				      unsigned long capped_freq)
+{
+	unsigned long max_capacity, capacity;
+	u32 max_freq;
+	int cpu;
+
+	cpu = cpumask_first(cpus);
+	max_capacity = arch_scale_cpu_capacity(cpu);
+	max_freq = per_cpu(freq_factor, cpu);
+
+	/* Convert to MHz scale which is used in 'freq_factor' */
+	capped_freq /= 1000;
+
+	if (max_freq <= capped_freq)
+		capacity = max_capacity;
+	else
+		capacity = mult_frac(max_capacity, capped_freq, max_freq);
+
+	arch_set_thermal_pressure(cpus, max_capacity - capacity);
+}
+EXPORT_SYMBOL_GPL(topology_update_thermal_pressure);
 
 static ssize_t cpu_capacity_show(struct device *dev,
 				 struct device_attribute *attr,
@@ -141,7 +181,6 @@ static void update_topology_flags_workfn(struct work_struct *work)
 	update_topology = 0;
 }
 
-static DEFINE_PER_CPU(u32, freq_factor) = 1;
 static u32 *raw_capacity;
 
 static int free_raw_capacity(void)

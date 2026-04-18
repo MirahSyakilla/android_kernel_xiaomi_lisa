@@ -8,6 +8,7 @@
  */
 #include "sched.h"
 #include "pelt.h"
+
 #include <trace/events/power.h>
 
 /* Linker adds these: start and end of __cpuidle functions */
@@ -242,8 +243,6 @@ static void do_idle(void)
 	tick_nohz_idle_enter();
 
 	while (!need_resched()) {
-		rmb();
-
 		local_irq_disable();
 
 		if (cpu_is_offline(cpu)) {
@@ -359,6 +358,7 @@ EXPORT_SYMBOL_GPL(play_idle);
 
 void cpu_startup_entry(enum cpuhp_state state)
 {
+	current->flags |= PF_IDLE;
 	arch_cpu_idle_prepare();
 	cpuhp_online_idle(state);
 	while (1)
@@ -391,15 +391,15 @@ static void check_preempt_curr_idle(struct rq *rq, struct task_struct *p, int fl
 	resched_curr(rq);
 }
 
-static void put_prev_task_idle(struct rq *rq, struct task_struct *prev)
+static void put_prev_task_idle(struct rq *rq, struct task_struct *prev, struct task_struct *next)
 {
+	update_rq_avg_idle(rq);
 }
 
 static void set_next_task_idle(struct rq *rq, struct task_struct *next, bool first)
 {
 	update_idle_core(rq);
 	schedstat_inc(rq->sched_goidle);
-	queue_core_balance(rq);
 
 	/*
 	 * rq is about to be idle, check if we need to update the
@@ -408,33 +408,23 @@ static void set_next_task_idle(struct rq *rq, struct task_struct *next, bool fir
 	update_idle_rq_clock_pelt(rq);
 }
 
-#ifdef CONFIG_SMP
-static struct task_struct *pick_task_idle(struct rq *rq)
+struct task_struct *pick_task_idle(struct rq *rq)
 {
 	return rq->idle;
-}
-#endif
-
-struct task_struct *pick_next_task_idle(struct rq *rq)
-{
-	struct task_struct *next = rq->idle;
-
-	set_next_task_idle(rq, next, true);
-
-	return next;
 }
 
 /*
  * It is not legal to sleep in the idle task - print a warning
  * message if some code attempts to do it:
  */
-static void
+static bool
 dequeue_task_idle(struct rq *rq, struct task_struct *p, int flags)
 {
 	raw_spin_rq_unlock_irq(rq);
 	printk(KERN_ERR "bad: scheduling from the idle thread!\n");
 	dump_stack();
 	raw_spin_rq_lock_irq(rq);
+	return true;
 }
 
 /*
@@ -476,13 +466,12 @@ DEFINE_SCHED_CLASS(idle) = {
 
 	.check_preempt_curr	= check_preempt_curr_idle,
 
-	.pick_next_task		= pick_next_task_idle,
+	.pick_task		= pick_task_idle,
 	.put_prev_task		= put_prev_task_idle,
 	.set_next_task          = set_next_task_idle,
 
 #ifdef CONFIG_SMP
 	.balance		= balance_idle,
-	.pick_task		= pick_task_idle,
 	.select_task_rq		= select_task_rq_idle,
 	.set_cpus_allowed	= set_cpus_allowed_common,
 #endif
