@@ -232,3 +232,4 @@ update_idle_rq_clock_pelt(struct rq *rq) { }
 static inline void update_idle_cfs_rq_clock_pelt(struct cfs_rq *cfs_rq) { }
 #endif
 
+

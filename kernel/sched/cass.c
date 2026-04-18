@@ -117,19 +117,8 @@ bool cass_cpu_better(const struct cass_cpu_cand *a,
 		     fits_capacity(p_util, b->cap_max)))
 		goto done;
 
-	/*
-	 * For light and medium work, avoid piling onto the prime CPU so bursts
-	 * spread across the performance cluster first.
-	 */
-	if (p_util < (SCHED_CAPACITY_SCALE / 4) &&
-	    cass_cmp(cass_prime_cpu(b), cass_prime_cpu(a)))
-		goto done;
-
-	/*
-	 * For very heavy tasks, prefer higher capacity first before spreading by
-	 * relative utilization.
-	 */
-	if (p_util >= (SCHED_CAPACITY_SCALE / 2) && cass_cmp(a->cap, b->cap))
+	/* Prefer the CPU that isn't the single fastest one in the system */
+	if (cass_cmp(cass_prime_cpu(b), cass_prime_cpu(a)))
 		goto done;
 
 	/* Prefer the CPU with lower relative utilization */
@@ -240,7 +229,7 @@ static int cass_best_cpu(struct task_struct *p, int prev_cpu, bool sync, bool rt
 		 */
 		curr->cpu = cpu;
 		if ((sync && cpu == this_cpu && rq->nr_running == 1) ||
-		    available_idle_cpu(cpu) || sched_idle_cpu(cpu)) {
+		    choose_idle_cpu(cpu, p)) {
 			/*
 			 * A non-idle candidate may be better for energy
 			 * efficiency when @p is uclamp boosted above @curr's
@@ -249,8 +238,7 @@ static int cass_best_cpu(struct task_struct *p, int prev_cpu, bool sync, bool rt
 			 * candidates.
 			 */
 			if (!has_idle &&
-			    uc_min <= cap_scale(curr->cap_orig,
-						arch_scale_freq_capacity(cpu)) &&
+			    uc_min <= arch_scale_min_freq_capacity(cpu) &&
 			    !cass_prime_cpu(curr)) {
 				/* Discard any previous non-idle candidate */
 				best = curr;
@@ -333,7 +321,6 @@ static int cass_select_task_rq(struct task_struct *p, int prev_cpu,
 			       int wake_flags, bool rt)
 {
 	bool sync;
-	unsigned long p_util;
 
 	/* Don't balance on exec since we don't know what @p will look like */
 	if (wake_flags & SD_BALANCE_EXEC)
@@ -352,23 +339,6 @@ static int cass_select_task_rq(struct task_struct *p, int prev_cpu,
 		sync_entity_load_avg(&p->se);
 
 	sync = (wake_flags & WF_SYNC) && !(current->flags & PF_EXITING);
-
-	/*
-	 * For light, non-boosted wakeups, keep EAS as the first choice to
-	 * reduce short-burst latency regressions. CASS remains the primary
-	 * picker for heavier work.
-	 */
-	if (!rt && (wake_flags & WF_TTWU) && sched_energy_enabled() &&
-	    !uclamp_boosted(p)) {
-		p_util = task_util_est(p);
-		if (p_util < (SCHED_CAPACITY_SCALE / 3)) {
-			int ee_cpu = find_energy_efficient_cpu(p, prev_cpu, sync);
-
-			if (ee_cpu >= 0)
-				return ee_cpu;
-		}
-	}
-
 	return cass_best_cpu(p, prev_cpu, sync, rt);
 }
 
