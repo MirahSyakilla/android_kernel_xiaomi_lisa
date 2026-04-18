@@ -46,7 +46,7 @@ static struct fuse_dev *fuse_get_dev(struct file *file)
 #define FUSE_TIMEOUT_TIMER_FREQ 15
 
 const unsigned long fuse_timeout_timer_freq =
-	secs_to_jiffies(FUSE_TIMEOUT_TIMER_FREQ);
+	FUSE_TIMEOUT_TIMER_FREQ * HZ;
 
 bool fuse_request_expired(struct fuse_conn *fc, struct list_head *list)
 {
