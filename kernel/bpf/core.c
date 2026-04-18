@@ -1793,6 +1793,8 @@ static unsigned int __bpf_prog_ret0_warn(const void *ctx,
 bool bpf_prog_array_compatible(struct bpf_array *array,
 			       const struct bpf_prog *fp)
 {
+	enum bpf_prog_type prog_type = fp->aux->dst_prog ?
+		fp->aux->dst_prog->type : fp->type;
 	bool ret;
 
 	if (fp->kprobe_override)
@@ -1804,11 +1806,11 @@ bool bpf_prog_array_compatible(struct bpf_array *array,
 		/* There's no owner yet where we could check for
 		 * compatibility.
 		 */
-		array->aux->owner.type  = fp->type;
+		array->aux->owner.type  = prog_type;
 		array->aux->owner.jited = fp->jited;
 		ret = true;
 	} else {
-		ret = array->aux->owner.type  == fp->type &&
+		ret = array->aux->owner.type  == prog_type &&
 		      array->aux->owner.jited == fp->jited;
 	}
 	spin_unlock(&array->aux->owner.lock);
