@@ -966,13 +966,6 @@ static inline u64 get_node_id(struct inode *inode)
 	return get_fuse_inode(inode)->nodeid;
 }
 
-#ifndef inode_wrong_type
-static inline bool inode_wrong_type(const struct inode *inode, umode_t mode)
-{
-	return (inode->i_mode ^ mode) & S_IFMT;
-}
-#endif
-
 static inline bool fuse_stale_inode(const struct inode *inode, int generation,
 				    struct fuse_attr *attr)
 {
@@ -1806,31 +1799,6 @@ static inline void iattr_to_fattr(struct fuse_conn *fc, struct iattr *iattr,
 		arg->ctime = iattr->ia_ctime.tv_sec;
 		arg->ctimensec = iattr->ia_ctime.tv_nsec;
 	}
-}
-
-/*
- * Compatibility wrappers for older kernels that do not provide these VFS
- * helpers yet.
- */
-static inline void fuse_kiocb_clone(struct kiocb *dst, const struct kiocb *src,
-				    struct file *filp)
-{
-	*dst = *src;
-	dst->ki_filp = filp;
-}
-
-static inline ssize_t fuse_vfs_iocb_iter_read(struct file *file,
-					      struct kiocb *iocb,
-					      struct iov_iter *iter)
-{
-	return vfs_iter_read(file, iter, &iocb->ki_pos, iocb->ki_flags);
-}
-
-static inline ssize_t fuse_vfs_iocb_iter_write(struct file *file,
-					       struct kiocb *iocb,
-					       struct iov_iter *iter)
-{
-	return vfs_iter_write(file, iter, &iocb->ki_pos, iocb->ki_flags);
 }
 
 static inline int finalize_attr(struct inode *inode, struct fuse_attr_out *outarg,

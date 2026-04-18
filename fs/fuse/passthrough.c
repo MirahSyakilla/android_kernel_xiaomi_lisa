@@ -98,7 +98,7 @@ ssize_t fuse_passthrough_read_iter(struct kiocb *iocb_fuse,
 		}
 
 		aio_req->iocb_fuse = iocb_fuse;
-		fuse_kiocb_clone(&aio_req->iocb, iocb_fuse, passthrough_filp);
+		kiocb_clone(&aio_req->iocb, iocb_fuse, passthrough_filp);
 		aio_req->iocb.ki_complete = fuse_aio_rw_complete;
 		ret = call_read_iter(passthrough_filp, &aio_req->iocb, iter);
 		if (ret != -EIOCBQUEUED)
@@ -152,7 +152,7 @@ ssize_t fuse_passthrough_write_iter(struct kiocb *iocb_fuse,
 		__sb_writers_release(passthrough_inode->i_sb, SB_FREEZE_WRITE);
 
 		aio_req->iocb_fuse = iocb_fuse;
-		fuse_kiocb_clone(&aio_req->iocb, iocb_fuse, passthrough_filp);
+		kiocb_clone(&aio_req->iocb, iocb_fuse, passthrough_filp);
 		aio_req->iocb.ki_complete = fuse_aio_rw_complete;
 		ret = call_write_iter(passthrough_filp, &aio_req->iocb, iter);
 		if (ret != -EIOCBQUEUED)
