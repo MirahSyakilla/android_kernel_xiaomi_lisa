@@ -525,11 +525,14 @@ void notrace __bpf_prog_exit(struct bpf_prog *prog, u64 start)
 	     * And vice versa.
 	     * Hence check that 'start' is not zero.
 	     */
-	    start) {
+	    start &&
+	    likely(prog->aux->stats)) {
+		u64 duration = sched_clock() - start;
+
 		stats = this_cpu_ptr(prog->aux->stats);
 		u64_stats_update_begin(&stats->syncp);
 		stats->cnt++;
-		stats->nsecs += sched_clock() - start;
+		stats->nsecs += duration;
 		u64_stats_update_end(&stats->syncp);
 	}
 	migrate_enable();
