@@ -904,10 +904,10 @@ int fuse_file_read_iter_backing(struct fuse_bpf_args *fa,
 			goto out;
 
 		aio_req->iocb_orig = iocb;
-		fuse_kiocb_clone(&aio_req->iocb, iocb, ff->backing_file);
+		kiocb_clone(&aio_req->iocb, iocb, ff->backing_file);
 		aio_req->iocb.ki_complete = fuse_bpf_aio_rw_complete;
 		refcount_set(&aio_req->ref, 2);
-		ret = fuse_vfs_iocb_iter_read(ff->backing_file, &aio_req->iocb, to);
+		ret = vfs_iocb_iter_read(ff->backing_file, &aio_req->iocb, to);
 		fuse_bpf_aio_put(aio_req);
 		if (ret != -EIOCBQUEUED)
 			fuse_bpf_aio_cleanup_handler(aio_req);
@@ -998,10 +998,10 @@ int fuse_file_write_iter_backing(struct fuse_bpf_args *fa,
 		file_start_write(ff->backing_file);
 		__sb_writers_release(file_inode(ff->backing_file)->i_sb, SB_FREEZE_WRITE);
 		aio_req->iocb_orig = iocb;
-		fuse_kiocb_clone(&aio_req->iocb, iocb, ff->backing_file);
+		kiocb_clone(&aio_req->iocb, iocb, ff->backing_file);
 		aio_req->iocb.ki_complete = fuse_bpf_aio_rw_complete;
 		refcount_set(&aio_req->ref, 2);
-		ret = fuse_vfs_iocb_iter_write(ff->backing_file, &aio_req->iocb, from);
+		ret = vfs_iocb_iter_write(ff->backing_file, &aio_req->iocb, from);
 		fuse_bpf_aio_put(aio_req);
 		if (ret != -EIOCBQUEUED)
 			fuse_bpf_aio_cleanup_handler(aio_req);
