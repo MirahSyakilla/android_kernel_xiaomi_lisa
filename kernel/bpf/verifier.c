@@ -10631,10 +10631,11 @@ static int resolve_pseudo_ldimm64(struct bpf_verifier_env *env)
 
 			f = fdget(insn[0].imm);
 			map = __bpf_map_get(f);
-			if (IS_ERR(map)) {
-				verbose(env, "fd %d is not pointing to valid bpf_map\n", fd);
-				return PTR_ERR(map);
-			}
+				if (IS_ERR(map)) {
+					verbose(env, "fd %d is not pointing to valid bpf_map\n",
+						insn[0].imm);
+					return PTR_ERR(map);
+				}
 
 			err = check_map_prog_compatibility(env, map, env->prog);
 			if (err) {
