@@ -20,6 +20,8 @@ static bool fuse_use_readdirplus(struct inode *dir, struct dir_context *ctx)
 
 	if (!fc->do_readdirplus)
 		return false;
+	if (fi->nodeid == 0)
+		return false;
 	if (!fc->readdirplus_auto)
 		return true;
 	if (test_and_clear_bit(FUSE_I_ADVISE_RDPLUS, &fi->state))
@@ -76,11 +78,13 @@ static void fuse_add_dirent_to_cache(struct file *file,
 	    WARN_ON(fi->rdc.pos != pos))
 		goto unlock;
 
-	addr = kmap_atomic(page);
-	if (!offset)
+	addr = kmap_local_page(page);
+	if (!offset) {
 		clear_page(addr);
+		SetPageUptodate(page);
+	}
 	memcpy(addr + offset, dirent, reclen);
-	kunmap_atomic(addr);
+	kunmap_local(addr);
 	fi->rdc.size = (index << PAGE_SHIFT) + offset + reclen;
 	fi->rdc.pos = dirent->off;
 unlock:
@@ -121,7 +125,7 @@ static bool fuse_emit(struct file *file, struct dir_context *ctx,
 			dirent->type);
 }
 
-int fuse_parse_dirfile(char *buf, size_t nbytes, struct file *file,
+static int parse_dirfile(char *buf, size_t nbytes, struct file *file,
 			 struct dir_context *ctx)
 {
 	while (nbytes >= FUSE_NAME_OFFSET) {
@@ -200,9 +204,12 @@ retry:
 	if (!d_in_lookup(dentry)) {
 		struct fuse_inode *fi;
 		inode = d_inode(dentry);
+		if (inode && get_node_id(inode) != o->nodeid)
+			inode = NULL;
 		if (!inode ||
-		    get_node_id(inode) != o->nodeid ||
-		    ((o->attr.mode ^ inode->i_mode) & S_IFMT)) {
+		    fuse_stale_inode(inode, o->generation, &o->attr)) {
+			if (inode)
+				fuse_make_bad(inode);
 			d_invalidate(dentry);
 			dput(dentry);
 			goto retry;
@@ -260,7 +267,7 @@ retry:
 static void fuse_force_forget(struct file *file, u64 nodeid)
 {
 	struct inode *inode = file_inode(file);
-	struct fuse_conn *fc = get_fuse_conn(inode);
+	struct fuse_mount *fm = get_fuse_mount(inode);
 	struct fuse_forget_in inarg;
 	FUSE_ARGS(args);
 
@@ -274,7 +281,7 @@ static void fuse_force_forget(struct file *file, u64 nodeid)
 	args.force = true;
 	args.noreply = true;
 
-	fuse_simple_request(fc, &args);
+	fuse_simple_request(fm, &args);
 	/* ignore errors */
 }
 
@@ -328,7 +335,7 @@ static int fuse_readdir_uncached(struct file *file, struct dir_context *ctx)
 	ssize_t res;
 	struct page *page;
 	struct inode *inode = file_inode(file);
-	struct fuse_conn *fc = get_fuse_conn(inode);
+	struct fuse_mount *fm = get_fuse_mount(inode);
 	struct fuse_io_args ia = {};
 	struct fuse_args_pages *ap = &ia.ap;
 	struct fuse_page_desc desc = { .length = PAGE_SIZE };
@@ -340,12 +347,12 @@ static int fuse_readdir_uncached(struct file *file, struct dir_context *ctx)
 		return -ENOMEM;
 
 	plus = fuse_use_readdirplus(inode, ctx);
-	ap->args.out_pages = 1;
+	ap->args.out_pages = true;
 	ap->num_pages = 1;
 	ap->pages = &page;
 	ap->descs = &desc;
 	if (plus) {
-		attr_version = fuse_get_attr_version(fc);
+		attr_version = fuse_get_attr_version(fm->fc);
 		fuse_read_args_fill(&ia, file, ctx->pos, PAGE_SIZE,
 				    FUSE_READDIRPLUS);
 	} else {
@@ -353,7 +360,7 @@ static int fuse_readdir_uncached(struct file *file, struct dir_context *ctx)
 				    FUSE_READDIR);
 	}
 	locked = fuse_lock_inode(inode);
-	res = fuse_simple_request(fc, &ap->args);
+	res = fuse_simple_request(fm, &ap->args);
 	fuse_unlock_inode(inode, locked);
 	if (res >= 0) {
 		if (!res) {
@@ -365,7 +372,7 @@ static int fuse_readdir_uncached(struct file *file, struct dir_context *ctx)
 			res = parse_dirplusfile(page_address(page), res,
 						file, ctx, attr_version);
 		} else {
-			res = fuse_parse_dirfile(page_address(page), res, file,
+			res = parse_dirfile(page_address(page), res, file,
 					    ctx);
 		}
 	}
@@ -521,6 +528,12 @@ retry_locked:
 
 	page = find_get_page_flags(file->f_mapping, index,
 				   FGP_ACCESSED | FGP_LOCK);
+	/* Page gone missing, then re-added to cache, but not initialized? */
+	if (page && !PageUptodate(page)) {
+		unlock_page(page);
+		put_page(page);
+		page = NULL;
+	}
 	spin_lock(&fi->rdc.lock);
 	if (!page) {
 		/*
@@ -544,9 +557,9 @@ retry_locked:
 	 * Contents of the page are now protected against changing by holding
 	 * the page lock.
 	 */
-	addr = kmap(page);
+	addr = kmap_local_page(page);
 	res = fuse_parse_cache(ff, addr, size, ctx);
-	kunmap(page);
+	kunmap_local(addr);
 	unlock_page(page);
 	put_page(page);
 
@@ -578,14 +591,19 @@ int fuse_readdir(struct file *file, struct dir_context *ctx)
 
 #ifdef CONFIG_FUSE_BPF
 	struct fuse_err_ret fer;
-	bool force_again, allow_force;
+	bool allow_force;
+	bool force_again = false;
+	bool is_continued = false;
+
 again:
 	fer = fuse_bpf_backing(inode, struct fuse_read_io,
 			       fuse_readdir_initialize, fuse_readdir_backing,
 			       fuse_readdir_finalize,
-			       file, ctx, &force_again, &allow_force);
-	if (force_again && !IS_ERR(fer.result))
+			       file, ctx, &force_again, &allow_force, is_continued);
+	if (force_again && !IS_ERR(fer.result)) {
+		is_continued = true;
 		goto again;
+	}
 
 	if (fer.ret)
 		return PTR_ERR(fer.result);
