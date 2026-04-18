@@ -642,13 +642,14 @@ static inline void bpf_jit_set_header_magic(struct bpf_binary_header *hdr)
 	cant_sleep();							\
 	if (static_branch_unlikely(&bpf_stats_enabled_key)) {		\
 		struct bpf_prog_stats *stats;				\
-		u64 start = sched_clock();				\
+		u64 duration, start = sched_clock();			\
 		ret = dfunc(ctx, (prog)->insnsi, (prog)->bpf_func);	\
+		duration = sched_clock() - start;			\
 		if (likely((prog)->aux->stats)) {			\
 			stats = this_cpu_ptr((prog)->aux->stats);	\
 			u64_stats_update_begin(&stats->syncp);		\
 			stats->cnt++;					\
-			stats->nsecs += sched_clock() - start;		\
+			stats->nsecs += duration;			\
 			u64_stats_update_end(&stats->syncp);		\
 		}							\
 	} else {							\
