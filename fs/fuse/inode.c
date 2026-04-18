@@ -670,9 +670,12 @@ static int fuse_parse_param(struct fs_context *fsc, struct fs_parameter *param)
 
 	if (fsc->purpose == FS_CONTEXT_FOR_RECONFIGURE) {
 		/*
-		 * This tree's fs_context does not expose oldapi remount mode.
-		 * Keep reconfigure strict and reject option changes.
+		 * Ignore options coming from mount(MS_REMOUNT) for backward
+		 * compatibility.
 		 */
+		if (fsc->oldapi)
+			return 0;
+
 		return invalf(fsc, "No changes allowed in reconfigure");
 	}
 
@@ -1179,7 +1182,7 @@ static void process_init_limits(struct fuse_conn *fc, struct fuse_init_out *arg)
 
 static void set_request_timeout(struct fuse_conn *fc, unsigned int timeout)
 {
-	fc->timeout.req_timeout = timeout * HZ;
+	fc->timeout.req_timeout = secs_to_jiffies(timeout);
 	INIT_DELAYED_WORK(&fc->timeout.work, fuse_check_timeout);
 	queue_delayed_work(system_wq, &fc->timeout.work,
 			   fuse_timeout_timer_freq);

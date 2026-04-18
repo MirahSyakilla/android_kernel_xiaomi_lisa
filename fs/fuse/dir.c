@@ -377,8 +377,7 @@ static int fuse_dentry_delete(const struct dentry *dentry)
  * look up paths on its own. Instead, we handle the lookup as a special case
  * inside of the write request.
  */
-static void fuse_dentry_canonical_path(const struct path *path, struct path *canonical_path)
-{
+static void fuse_dentry_canonical_path(const struct path *path, struct path *canonical_path) {
 	struct inode *inode = d_inode(path->dentry);
 	//struct fuse_conn *fc = get_fuse_conn(inode);
 	struct fuse_mount *fm = get_fuse_mount_super(path->mnt->mnt_sb);
@@ -389,18 +388,23 @@ static void fuse_dentry_canonical_path(const struct path *path, struct path *can
 #ifdef CONFIG_FUSE_BPF
 	struct fuse_err_ret fer;
 
-		fer = fuse_bpf_backing(inode, struct fuse_dummy_io,
-				       fuse_canonical_path_initialize,
-				       fuse_canonical_path_backing,
-				       fuse_canonical_path_finalize, path,
-				       canonical_path);
-		if (fer.ret)
-			goto default_path;
+	fer = fuse_bpf_backing(inode, struct fuse_dummy_io,
+			       fuse_canonical_path_initialize,
+			       fuse_canonical_path_backing,
+			       fuse_canonical_path_finalize, path,
+			       canonical_path);
+	if (fer.ret) {
+		if (IS_ERR(fer.result))
+			canonical_path->dentry = fer.result;
+		return;
+	}
 #endif
 
 	path_name = (char *)get_zeroed_page(GFP_KERNEL);
-	if (!path_name)
-		goto default_path;
+	if (!path_name) {
+		canonical_path->dentry = ERR_PTR(-ENOMEM);
+		return;
+	}
 
 	args.opcode = FUSE_CANONICAL_PATH;
 	args.nodeid = get_node_id(inode);
@@ -415,18 +419,15 @@ static void fuse_dentry_canonical_path(const struct path *path, struct path *can
 	free_page((unsigned long)path_name);
 	if (err > 0)
 		return;
-	if (err < 0)
-		goto default_path;
+	if (err < 0) {
+		canonical_path->dentry = ERR_PTR(err);
+		return;
+	}
 
 	canonical_path->dentry = path->dentry;
 	canonical_path->mnt = path->mnt;
 	path_get(canonical_path);
 	return;
-
-default_path:
-	canonical_path->dentry = path->dentry;
-	canonical_path->mnt = path->mnt;
-	path_get(canonical_path);
 }
 
 /*
