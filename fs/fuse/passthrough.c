@@ -14,18 +14,6 @@ struct fuse_aio_req {
 	struct kiocb *iocb_fuse;
 };
 
-static inline void kiocb_clone(struct kiocb *kiocb, struct kiocb *kiocb_src,
-			       struct file *filp)
-{
-	*kiocb = (struct kiocb){
-		.ki_filp = filp,
-		.ki_flags = kiocb_src->ki_flags,
-		.ki_hint = kiocb_src->ki_hint,
-		.ki_ioprio = kiocb_src->ki_ioprio,
-		.ki_pos = kiocb_src->ki_pos,
-	};
-}
-
 static void fuse_file_accessed(struct file *dst_file, struct file *src_file)
 {
 	struct inode *dst_inode;
@@ -46,7 +34,7 @@ static void fuse_file_accessed(struct file *dst_file, struct file *src_file)
 	touch_atime(&dst_file->f_path);
 }
 
-static void fuse_copyattr(struct file *dst_file, struct file *src_file)
+void fuse_copyattr(struct file *dst_file, struct file *src_file)
 {
 	struct inode *dst = file_inode(dst_file);
 	struct inode *src = file_inode(src_file);
@@ -110,7 +98,7 @@ ssize_t fuse_passthrough_read_iter(struct kiocb *iocb_fuse,
 		}
 
 		aio_req->iocb_fuse = iocb_fuse;
-		kiocb_clone(&aio_req->iocb, iocb_fuse, passthrough_filp);
+		fuse_kiocb_clone(&aio_req->iocb, iocb_fuse, passthrough_filp);
 		aio_req->iocb.ki_complete = fuse_aio_rw_complete;
 		ret = call_read_iter(passthrough_filp, &aio_req->iocb, iter);
 		if (ret != -EIOCBQUEUED)
@@ -164,7 +152,7 @@ ssize_t fuse_passthrough_write_iter(struct kiocb *iocb_fuse,
 		__sb_writers_release(passthrough_inode->i_sb, SB_FREEZE_WRITE);
 
 		aio_req->iocb_fuse = iocb_fuse;
-		kiocb_clone(&aio_req->iocb, iocb_fuse, passthrough_filp);
+		fuse_kiocb_clone(&aio_req->iocb, iocb_fuse, passthrough_filp);
 		aio_req->iocb.ki_complete = fuse_aio_rw_complete;
 		ret = call_write_iter(passthrough_filp, &aio_req->iocb, iter);
 		if (ret != -EIOCBQUEUED)
@@ -225,7 +213,8 @@ int fuse_passthrough_open(struct fuse_dev *fud, u32 lower_fd)
 	}
 
 	if (!passthrough_filp->f_op->read_iter ||
-	    !passthrough_filp->f_op->write_iter) {
+	    !((passthrough_filp->f_path.mnt->mnt_flags | MNT_READONLY) ||
+	       passthrough_filp->f_op->write_iter)) {
 		pr_err("FUSE: passthrough file misses file operations.\n");
 		res = -EBADF;
 		goto err_free_file;
