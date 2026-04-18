@@ -449,9 +449,18 @@ void ext4_unregister_sysfs(struct super_block *sb)
 {
 	struct ext4_sb_info *sbi = EXT4_SB(sb);
 
-	if (sbi->s_proc)
+	if (sbi->s_proc) {
 		remove_proc_subtree(sb->s_id, ext4_proc_root);
-	kobject_del(&sbi->s_kobj);
+		sbi->s_proc = NULL;
+	}
+
+	/*
+	 * KernelSU can explicitly unregister ext4 sysfs on a mounted fs.
+	 * Later, normal unmount will call ext4_unregister_sysfs() again.
+	 * Make this path idempotent to avoid duplicate kobject_del() warnings.
+	 */
+	if (READ_ONCE(sbi->s_kobj.sd))
+		kobject_del(&sbi->s_kobj);
 }
 
 int __init ext4_init_sysfs(void)
@@ -494,4 +503,3 @@ void ext4_exit_sysfs(void)
 	remove_proc_entry(proc_dirname, NULL);
 	ext4_proc_root = NULL;
 }
-
