@@ -942,11 +942,11 @@ static int rawdata_proc_open(struct inode *inode, struct file *file)
 	return single_open(file, rawdata_proc_show, NULL);
 }
 
-static const struct file_operations rawdata_proc_fops = {
-	.open = rawdata_proc_open,
-	.read = seq_read,
-	.llseek = seq_lseek,
-	.release = single_release,
+static const struct proc_ops rawdata_proc_fops = {
+	.proc_open = rawdata_proc_open,
+	.proc_read = seq_read,
+	.proc_lseek = seq_lseek,
+	.proc_release = single_release,
 };
 
 static void goodix_ts_procfs_init(void)
@@ -2758,8 +2758,8 @@ static ssize_t goodix_lockdown_info_read(struct file *file, char __user *buf,
 		return cnt;
 }
 
-static const struct file_operations goodix_lockdown_info_ops = {
-	.read = goodix_lockdown_info_read,
+static const struct proc_ops goodix_lockdown_info_ops = {
+	.proc_read = goodix_lockdown_info_read,
 };
 
 static ssize_t goodix_fw_version_info_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
@@ -2810,8 +2810,8 @@ static ssize_t goodix_fw_version_info_read(struct file *file, char __user *buf, 
     return cnt;
 }
 
-static const struct file_operations goodix_fw_version_info_ops = {
-	.read = goodix_fw_version_info_read,
+static const struct proc_ops goodix_fw_version_info_ops = {
+	.proc_read = goodix_fw_version_info_read,
 };
 
 static ssize_t goodix_selftest_read(struct file *file, char __user *buf,
@@ -2898,9 +2898,9 @@ out:
 
 	return retval;
 }
-static const struct file_operations goodix_selftest_ops = {
-	.read = goodix_selftest_read,
-	.write = goodix_selftest_write,
+static const struct proc_ops goodix_selftest_ops = {
+	.proc_read = goodix_selftest_read,
+	.proc_write = goodix_selftest_write,
 };
 
 #ifdef GOODIX_DEBUGFS_ENABLE

@@ -73,22 +73,14 @@ static int pktlog_attach(struct hif_opaque_softc *scn);
 static void pktlog_detach(struct hif_opaque_softc *scn);
 static int pktlog_open(struct inode *i, struct file *f);
 static int pktlog_release(struct inode *i, struct file *f);
-static ssize_t pktlog_read(struct file *file, char *buf, size_t nbytes,
+static ssize_t pktlog_read(struct file *file, char __user *buf, size_t nbytes,
 			   loff_t *ppos);
 
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 6, 0))
 static const struct proc_ops pktlog_fops = {
 	.proc_open = pktlog_open,
 	.proc_release = pktlog_release,
 	.proc_read = pktlog_read,
 };
-#else
-static struct file_operations pktlog_fops = {
-	open:  pktlog_open,
-	release:pktlog_release,
-	read : pktlog_read,
-};
-#endif
 
 void pktlog_disable_adapter_logging(struct hif_opaque_softc *scn)
 {
@@ -864,7 +856,7 @@ rd_done:
 }
 
 static ssize_t
-__pktlog_read(struct file *file, char *buf, size_t nbytes, loff_t *ppos)
+__pktlog_read(struct file *file, char __user *buf, size_t nbytes, loff_t *ppos)
 {
 	size_t bufhdr_size;
 	size_t count = 0, ret_val = 0;
@@ -1015,7 +1007,7 @@ rd_done:
 }
 
 static ssize_t
-pktlog_read(struct file *file, char *buf, size_t nbytes, loff_t *ppos)
+pktlog_read(struct file *file, char __user *buf, size_t nbytes, loff_t *ppos)
 {
 	struct ath_pktlog_info *info = PDE_DATA(file->f_path.dentry->d_inode);
 	struct qdf_op_sync *op_sync;
