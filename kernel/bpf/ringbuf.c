@@ -203,13 +203,16 @@ err_free_map:
 
 static void bpf_ringbuf_free(struct bpf_ringbuf *rb)
 {
+	struct page **pages;
+	int i, nr_pages;
+
 	irq_work_sync(&rb->work);
 
 	/* copy pages pointer and nr_pages to local variable, as we are going
 	 * to unmap rb itself with vunmap() below
 	 */
-	struct page **pages = rb->pages;
-	int i, nr_pages = rb->nr_pages;
+	pages = rb->pages;
+	nr_pages = rb->nr_pages;
 
 	vunmap(rb);
 	for (i = 0; i < nr_pages; i++)
