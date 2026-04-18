@@ -4854,7 +4854,7 @@ static void lru_gen_change_state(bool enabled)
 
 	struct mem_cgroup *memcg;
 
-	cgroup_lock();
+	mutex_lock(&cgroup_mutex);
 	cpus_read_lock();
 	get_online_mems();
 	mutex_lock(&state_mutex);
@@ -4900,7 +4900,7 @@ unlock:
 	mutex_unlock(&state_mutex);
 	put_online_mems();
 	cpus_read_unlock();
-	cgroup_unlock();
+	mutex_unlock(&cgroup_mutex);
 }
 
 /******************************************************************************
