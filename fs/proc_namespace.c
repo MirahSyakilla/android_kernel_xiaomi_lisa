@@ -12,18 +12,12 @@
 #include <linux/security.h>
 #include <linux/fs_struct.h>
 #include <linux/sched/task.h>
-#ifdef CONFIG_SUSFS_REMOVED_SUS_MOUNT
-#include <linux/susfs_def.h>
-#endif
 
 #include "proc/internal.h" /* only for get_proc_task() in ->open() */
 
 #include "pnode.h"
 #include "internal.h"
 
-#ifdef CONFIG_SUSFS_REMOVED_SUS_MOUNT
-extern bool susfs_hide_sus_mnts_for_all_procs;
-#endif
 
 static __poll_t mounts_poll(struct file *file, poll_table *wait)
 {
@@ -109,11 +103,6 @@ static int show_vfsmnt(struct seq_file *m, struct vfsmount *mnt)
 	struct super_block *sb = mnt_path.dentry->d_sb;
 	int err;
 
-#ifdef CONFIG_SUSFS_REMOVED_SUS_MOUNT
-	if (susfs_hide_sus_mnts_for_all_procs &&
-	    r->mnt_id >= DEFAULT_KSU_MNT_ID)
-		return 0;
-#endif
 
 	if (sb->s_op->show_devname) {
 		err = sb->s_op->show_devname(m, mnt_path.dentry);
@@ -151,11 +140,6 @@ static int show_mountinfo(struct seq_file *m, struct vfsmount *mnt)
 	struct path mnt_path = { .dentry = mnt->mnt_root, .mnt = mnt };
 	int err;
 
-#ifdef CONFIG_SUSFS_REMOVED_SUS_MOUNT
-	if (susfs_hide_sus_mnts_for_all_procs &&
-	    r->mnt_id >= DEFAULT_KSU_MNT_ID)
-		return 0;
-#endif
 
 	seq_printf(m, "%i %i %u:%u ", r->mnt_id, r->mnt_parent->mnt_id,
 		   MAJOR(sb->s_dev), MINOR(sb->s_dev));
@@ -220,11 +204,6 @@ static int show_vfsstat(struct seq_file *m, struct vfsmount *mnt)
 	struct super_block *sb = mnt_path.dentry->d_sb;
 	int err;
 
-#ifdef CONFIG_SUSFS_REMOVED_SUS_MOUNT
-	if (susfs_hide_sus_mnts_for_all_procs &&
-	    r->mnt_id >= DEFAULT_KSU_MNT_ID)
-		return 0;
-#endif
 
 	if (sb->s_op->show_devname) {
 		seq_puts(m, "device ");
