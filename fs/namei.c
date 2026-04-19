@@ -39,9 +39,6 @@
 #include <linux/bitops.h>
 #include <linux/init_task.h>
 #include <linux/uaccess.h>
-#if defined(CONFIG_SUSFS_REMOVED_SUS_PATH) || defined(CONFIG_SUSFS_REMOVED_OPEN_REDIRECT)
-#include <linux/susfs_def.h>
-#endif
 
 #include "internal.h"
 #include "mount.h"
@@ -49,14 +46,6 @@
 #define CREATE_TRACE_POINTS
 #include <trace/events/namei.h>
 
-#ifdef CONFIG_SUSFS_REMOVED_SUS_PATH
-extern bool susfs_is_sus_android_data_d_name_found(const char *d_name);
-extern bool susfs_is_sus_sdcard_d_name_found(const char *d_name);
-extern bool susfs_is_inode_sus_path(struct inode *inode);
-extern bool susfs_is_base_dentry_android_data_dir(struct dentry* base);
-extern bool susfs_is_base_dentry_sdcard_dir(struct dentry* base);
-extern const struct qstr susfs_fake_qstr_name;
-#endif
 
 /* [Feb-1997 T. Schoebel-Theuer]
  * Fundamental changes in the pathname lookup mechanisms (namei)
@@ -506,9 +495,6 @@ struct nameidata {
 	struct path	root;
 	struct inode	*inode; /* path.dentry.d_inode */
 	unsigned int	flags;
-#ifdef CONFIG_SUSFS_REMOVED_SUS_PATH
-	unsigned int	state;
-#endif
 	unsigned	seq, m_seq;
 	int		last_type;
 	unsigned	depth;
@@ -535,9 +521,6 @@ static void set_nameidata(struct nameidata *p, int dfd, struct filename *name)
 	p->total_link_count = old ? old->total_link_count : 0;
 	p->saved = old;
 	current->nameidata = p;
-#ifdef CONFIG_SUSFS_REMOVED_SUS_PATH
-	p->state = 0;
-#endif
 }
 
 static void restore_nameidata(void)
@@ -1627,39 +1610,12 @@ static struct dentry *__lookup_hash(const struct qstr *name,
 	struct dentry *dentry;
 	struct dentry *old;
 	struct inode *dir = base->d_inode;
-#ifdef CONFIG_SUSFS_REMOVED_SUS_PATH
-	const struct qstr *q = name;
-#endif
 
-#ifdef CONFIG_SUSFS_REMOVED_SUS_PATH
-	if (base && base->d_inode) {
-		if (susfs_is_base_dentry_android_data_dir(base) &&
-		    susfs_is_sus_android_data_d_name_found(name->name)) {
-			q = &susfs_fake_qstr_name;
-		} else if (susfs_is_base_dentry_sdcard_dir(base) &&
-			   susfs_is_sus_sdcard_d_name_found(name->name)) {
-			q = &susfs_fake_qstr_name;
-		}
-	}
-#endif
 
 	dentry = lookup_dcache(
-#ifdef CONFIG_SUSFS_REMOVED_SUS_PATH
-			q,
-#else
 			name,
-#endif
 			base, flags);
 
-#ifdef CONFIG_SUSFS_REMOVED_SUS_PATH
-	if (dentry && !IS_ERR(dentry) && q == name &&
-	    dentry->d_inode &&
-	    susfs_is_inode_sus_path(dentry->d_inode)) {
-		dput(dentry);
-		q = &susfs_fake_qstr_name;
-		dentry = lookup_dcache(q, base, flags);
-	}
-#endif
 
 	if (dentry && !IS_ERR(dentry))
 		return dentry;
@@ -1668,11 +1624,7 @@ static struct dentry *__lookup_hash(const struct qstr *name,
 		return ERR_PTR(-ENOENT);
 
 	dentry = d_alloc(base,
-#ifdef CONFIG_SUSFS_REMOVED_SUS_PATH
-			 q
-#else
 			 name
-#endif
 			);
 	if (unlikely(!dentry))
 		return ERR_PTR(-ENOMEM);
@@ -1695,32 +1647,11 @@ static int (lookup_fast)(struct nameidata *nd,
 	int status = 1;
 	int err;
 
-#ifdef CONFIG_SUSFS_REMOVED_SUS_PATH
-	/* Only run checks if we are at the last component */
-	bool is_nd_state_lookup_last_and_open_last = (nd->state & (ND_STATE_LOOKUP_LAST | ND_STATE_OPEN_LAST));
-#endif
 
 	if (nd->flags & LOOKUP_RCU) {
 		unsigned seq;
-#ifdef CONFIG_SUSFS_REMOVED_SUS_PATH
-		unsigned fake_seq;
-		bool use_fake = false;
-
-		// Added is_nd_state_lookup_last_and_open_last check
-		if (is_nd_state_lookup_last_and_open_last && parent->d_inode) {
-			if (susfs_is_base_dentry_android_data_dir(parent) &&
-			    susfs_is_sus_android_data_d_name_found(nd->last.name))
-				use_fake = true;
-			else if (susfs_is_base_dentry_sdcard_dir(parent) &&
-				 susfs_is_sus_sdcard_d_name_found(nd->last.name))
-				use_fake = true;
-		}
-#endif
 
 		dentry = __d_lookup_rcu(parent,
-#ifdef CONFIG_SUSFS_REMOVED_SUS_PATH
-			use_fake ? &susfs_fake_qstr_name :
-#endif
 			&nd->last, &seq);
 
 		if (unlikely(!dentry)) {
@@ -1729,18 +1660,6 @@ static int (lookup_fast)(struct nameidata *nd,
 			return 0;
 		}
 
-#ifdef CONFIG_SUSFS_REMOVED_SUS_PATH
-		/* Added is_nd_state_lookup_last_and_open_last check */
-		if (!use_fake && is_nd_state_lookup_last_and_open_last && 
-		    dentry && !IS_ERR(dentry) && dentry->d_inode &&
-		    susfs_is_inode_sus_path(dentry->d_inode)) {
-			dput(dentry);
-			dentry = __d_lookup_rcu(parent, &susfs_fake_qstr_name, &fake_seq);
-			if (!dentry)
-				return 0;
-			seq = fake_seq;
-		}
-#endif
 
 		*inode = d_backing_inode(dentry);
 
@@ -1767,35 +1686,11 @@ static int (lookup_fast)(struct nameidata *nd,
 		if (unlikely(status == -ECHILD))
 			status = d_revalidate(dentry, nd->flags);
 	} else {
-#ifdef CONFIG_SUSFS_REMOVED_SUS_PATH
-		/* Added is_nd_state_lookup_last_and_open_last check */
-		if (is_nd_state_lookup_last_and_open_last && parent->d_inode) {
-			if (susfs_is_base_dentry_android_data_dir(parent) &&
-			    susfs_is_sus_android_data_d_name_found(nd->last.name))
-				dentry = __d_lookup(parent, &susfs_fake_qstr_name);
-			else if (susfs_is_base_dentry_sdcard_dir(parent) &&
-				 susfs_is_sus_sdcard_d_name_found(nd->last.name))
-				dentry = __d_lookup(parent, &susfs_fake_qstr_name);
-			else
-				dentry = __d_lookup(parent, &nd->last);
-		} else
-#endif
 			dentry = __d_lookup(parent, &nd->last);
 
 		if (unlikely(!dentry))
 			return 0;
 
-#ifdef CONFIG_SUSFS_REMOVED_SUS_PATH
-		/* Added is_nd_state_lookup_last_and_open_last check */
-		if (is_nd_state_lookup_last_and_open_last && 
-		    dentry && !IS_ERR(dentry) && dentry->d_inode && 
-		    susfs_is_inode_sus_path(dentry->d_inode)) {
-			dput(dentry);
-			dentry = __d_lookup(parent, &susfs_fake_qstr_name);
-			if (!dentry)
-				return 0;
-		}
-#endif
 
 		status = d_revalidate(dentry, nd->flags);
 	}
@@ -1829,45 +1724,15 @@ static struct dentry *__lookup_slow(const struct qstr *name,
 	struct dentry *dentry, *old;
 	struct inode *inode = dir->d_inode;
 	DECLARE_WAIT_QUEUE_HEAD_ONSTACK(wq);
-#ifdef CONFIG_SUSFS_REMOVED_SUS_PATH
-	DECLARE_WAIT_QUEUE_HEAD_ONSTACK(sus_wq);
-	bool found_sus_path = false;
-	/* Capture the flag passed down from walk_component -> lookup_slow */
-	bool is_nd_flags_lookup_last = (flags & ND_FLAGS_LOOKUP_LAST);
-#endif
 
 	/* Don't go there if it's already dead */
 	if (unlikely(IS_DEADDIR(inode)))
 		return ERR_PTR(-ENOENT);
 
 again:
-#ifdef CONFIG_SUSFS_REMOVED_SUS_PATH
-	if (found_sus_path) {
-		dentry = d_alloc_parallel(dir, &susfs_fake_qstr_name, &sus_wq);
-		goto after_alloc;
-	}
-
-	/* Only perform these checks if we are looking up the LAST component */
-	if (is_nd_flags_lookup_last && dir->d_inode) {
-		if (susfs_is_base_dentry_android_data_dir(dir) &&
-		    susfs_is_sus_android_data_d_name_found(name->name)) {
-			dentry = d_alloc_parallel(dir, &susfs_fake_qstr_name, &sus_wq);
-			found_sus_path = true;
-			goto after_alloc;
-		} else if (susfs_is_base_dentry_sdcard_dir(dir) &&
-			   susfs_is_sus_sdcard_d_name_found(name->name)) {
-			dentry = d_alloc_parallel(dir, &susfs_fake_qstr_name, &sus_wq);
-			found_sus_path = true;
-			goto after_alloc;
-		}
-	}
-#endif
 
 	dentry = d_alloc_parallel(dir, name, &wq);
 
-#ifdef CONFIG_SUSFS_REMOVED_SUS_PATH
-after_alloc:
-#endif
 	if (IS_ERR(dentry))
 		return dentry;
 
@@ -1893,16 +1758,6 @@ after_alloc:
 		}
 	}
 
-#ifdef CONFIG_SUSFS_REMOVED_SUS_PATH
-	/* Only check for sus path hiding if we are at the LAST component */
-	if (is_nd_flags_lookup_last && !found_sus_path && dentry && !IS_ERR(dentry) && dentry->d_inode) {
-		if (susfs_is_inode_sus_path(dentry->d_inode)) {
-			dput(dentry);
-			found_sus_path = true;
-			goto again;
-		}
-	}
-#endif
 
 	return dentry;
 }
@@ -2033,11 +1888,6 @@ static int walk_component(struct nameidata *nd, int flags)
 	if (unlikely(err <= 0)) {
 		if (err < 0)
 			return err;
-#ifdef CONFIG_SUSFS_REMOVED_SUS_PATH
-		if (nd->state & ND_STATE_LOOKUP_LAST) {
-			nd->flags |= ND_FLAGS_LOOKUP_LAST;
-		}
-#endif
 		path.dentry = lookup_slow(&nd->last, nd->path.dentry,
 					  nd->flags);
 		if (IS_ERR(path.dentry))
@@ -2299,9 +2149,6 @@ static inline u64 hash_name(const void *salt, const char *name)
 static int link_path_walk(const char *name, struct nameidata *nd)
 {
 	int err;
-#ifdef CONFIG_SUSFS_REMOVED_SUS_PATH
-	bool last_sus_sdcard_path = false;
-#endif
 
 	if (IS_ERR(name))
 		return PTR_ERR(name);
@@ -2318,17 +2165,6 @@ static int link_path_walk(const char *name, struct nameidata *nd)
 		if (err)
 			return err;
 
-#ifdef CONFIG_SUSFS_REMOVED_SUS_PATH
-		/* Walking inside an already-detected SUS path */
-		if (last_sus_sdcard_path) {
-			struct dentry *dentry = nd->path.dentry;
-			if (dentry->d_inode &&
-			    susfs_is_inode_sus_path(dentry->d_inode)) {
-				/* walking subpath of SUS path */
-				return -ENOENT;
-			}
-		}
-#endif
 
 		hash_len = hash_name(nd->path.dentry, name);
 
@@ -2360,17 +2196,6 @@ static int link_path_walk(const char *name, struct nameidata *nd)
 				name = this.name;
 			}
 
-#ifdef CONFIG_SUSFS_REMOVED_SUS_PATH
-			if (parent->d_inode) {
-				if (susfs_is_base_dentry_android_data_dir(parent) &&
-				    susfs_is_sus_android_data_d_name_found(name)) {
-					last_sus_sdcard_path = true;
-				} else if (susfs_is_base_dentry_sdcard_dir(parent) &&
-					   susfs_is_sus_sdcard_d_name_found(name)) {
-					last_sus_sdcard_path = true;
-				}
-			}
-#endif
 		}
 
 		nd->last.hash_len = hash_len;
@@ -2528,9 +2353,6 @@ static inline int lookup_last(struct nameidata *nd)
 	if (nd->last_type == LAST_NORM && nd->last.name[nd->last.len])
 		nd->flags |= LOOKUP_FOLLOW | LOOKUP_DIRECTORY;
 
-#ifdef CONFIG_SUSFS_REMOVED_SUS_PATH
-	nd->state |= ND_STATE_LOOKUP_LAST;
-#endif
 
 	nd->flags &= ~LOOKUP_PARENT;
 	return walk_component(nd, 0);
@@ -3472,46 +3294,17 @@ static int lookup_open(struct nameidata *nd, struct path *path,
 	int error, create_error = 0;
 	umode_t mode = op->mode;
 	DECLARE_WAIT_QUEUE_HEAD_ONSTACK(wq);
-#ifdef CONFIG_SUSFS_REMOVED_SUS_PATH
-	bool found_sus_path = false;
-#endif
 
 	if (unlikely(IS_DEADDIR(dir_inode)))
 		return -ENOENT;
 
 	file->f_mode &= ~FMODE_CREATED;
 
-#ifdef CONFIG_SUSFS_REMOVED_SUS_PATH
-	/* lookup_open() is always for last component in 5.4 */
-	if (susfs_is_base_dentry_android_data_dir(dir) &&
-	    susfs_is_sus_android_data_d_name_found(nd->last.name)) {
-		dentry = d_lookup(dir, &susfs_fake_qstr_name);
-		found_sus_path = true;
-	} else if (susfs_is_base_dentry_sdcard_dir(dir) &&
-		   susfs_is_sus_sdcard_d_name_found(nd->last.name)) {
-		dentry = d_lookup(dir, &susfs_fake_qstr_name);
-		found_sus_path = true;
-	} else
-#endif
 		dentry = d_lookup(dir, &nd->last);
 
-#ifdef CONFIG_SUSFS_REMOVED_SUS_PATH
-	if (!found_sus_path && dentry && !IS_ERR(dentry) && dentry->d_inode) {
-		if (susfs_is_inode_sus_path(dentry->d_inode)) {
-			dput(dentry);
-			dentry = d_lookup(dir, &susfs_fake_qstr_name);
-			found_sus_path = true;
-		}
-	}
-#endif
 
 	for (;;) {
 		if (!dentry) {
-#ifdef CONFIG_SUSFS_REMOVED_SUS_PATH
-			if (found_sus_path)
-				dentry = d_alloc_parallel(dir, &susfs_fake_qstr_name, &wq);
-			else
-#endif
 				dentry = d_alloc_parallel(dir, &nd->last, &wq);
 
 			if (IS_ERR(dentry))
@@ -3637,9 +3430,6 @@ static int do_last(struct nameidata *nd,
 
 	nd->flags &= ~LOOKUP_PARENT;
 	nd->flags |= op->intent;
-#ifdef CONFIG_SUSFS_REMOVED_SUS_PATH
-	nd->state |= ND_STATE_OPEN_LAST;
-#endif
 
 	if (nd->last_type != LAST_NORM) {
 		error = handle_dots(nd, nd->last_type);
@@ -3926,9 +3716,6 @@ static struct file *path_openat(struct nameidata *nd,
 	return ERR_PTR(error);
 }
 
-#ifdef CONFIG_SUSFS_REMOVED_OPEN_REDIRECT
-extern struct filename *susfs_get_redirected_path(unsigned long ino);
-#endif
 
 struct file *do_filp_open(int dfd, struct filename *pathname,
 			  const struct open_flags *op)
@@ -3936,9 +3723,6 @@ struct file *do_filp_open(int dfd, struct filename *pathname,
 	struct nameidata nd;
 	int flags = op->lookup_flags;
 	struct file *filp;
-#ifdef CONFIG_SUSFS_REMOVED_OPEN_REDIRECT
-	struct filename *fake_pathname;
-#endif
 
 	set_nameidata(&nd, dfd, pathname);
 	filp = path_openat(&nd, op, flags | LOOKUP_RCU);
@@ -3947,32 +3731,6 @@ struct file *do_filp_open(int dfd, struct filename *pathname,
 	if (unlikely(filp == ERR_PTR(-ESTALE)))
 		filp = path_openat(&nd, op, flags | LOOKUP_REVAL);
 
-#ifdef CONFIG_SUSFS_REMOVED_OPEN_REDIRECT
-	if (!IS_ERR(filp) &&
-	    unlikely(filp->f_inode->i_mapping->flags & BIT_OPEN_REDIRECT) &&
-	    current_uid().val < 2000) {
-
-		fake_pathname = susfs_get_redirected_path(filp->f_inode->i_ino);
-		if (!IS_ERR(fake_pathname)) {
-			restore_nameidata();
-			filp_close(filp, NULL);
-			/*
-			 * No need to putname(pathname) here; caller will do it
-			 */
-			set_nameidata(&nd, dfd, fake_pathname);
-
-			filp = path_openat(&nd, op, flags | LOOKUP_RCU);
-			if (unlikely(filp == ERR_PTR(-ECHILD)))
-				filp = path_openat(&nd, op, flags);
-			if (unlikely(filp == ERR_PTR(-ESTALE)))
-				filp = path_openat(&nd, op, flags | LOOKUP_REVAL);
-
-			restore_nameidata();
-			putname(fake_pathname);
-			return filp;
-		}
-	}
-#endif
 
 	restore_nameidata();
 	return filp;
