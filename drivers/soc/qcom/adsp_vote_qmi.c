@@ -21,10 +21,6 @@
 static struct sockaddr_qrtr sq;
 static struct dentry *dent_adsp_vote, *adsp_vote;
 struct platform_device *pgdata;
-static bool runtime_vote = true;
-module_param(runtime_vote, bool, 0644);
-MODULE_PARM_DESC(runtime_vote,
-		 "Keep ADSP voted out of LPM while QMI service is connected");
 
 static int pgs_vote_send_sync_msg(struct qmi_handle *dev, int vote)
 {
@@ -93,16 +89,6 @@ out:
 
 static struct qmi_handle *adsp_qmi_client;
 
-static void adsp_runtime_vote_sync(struct qmi_handle *qmi_dev, bool vote)
-{
-	int ret;
-
-	ret = pgs_vote_send_sync_msg(qmi_dev, vote ? 1 : 0);
-	if (ret < 0)
-		pr_err("ADSP runtime %s failed ret=%d\n",
-		       vote ? "vote" : "unvote", ret);
-}
-
 static int send_adsp_manual_unvote(struct device *dev)
 {
 	int ret = 0;
@@ -152,10 +138,6 @@ static int qmi_adsp_manual_vote_new_server(struct qmi_handle *qmi,
 		goto err_put_device;
 
 	service->priv = pdev;
-
-	if (runtime_vote)
-		adsp_runtime_vote_sync(qmi, true);
-
 	return 0;
 
 err_put_device:
@@ -167,9 +149,6 @@ static void qmi_adsp_manual_vote_del_server(struct qmi_handle *qmi,
 		struct qmi_service *service)
 {
 	struct platform_device *pdev = service->priv;
-
-	if (runtime_vote)
-		adsp_runtime_vote_sync(qmi, false);
 
 	platform_device_unregister(pdev);
 }
