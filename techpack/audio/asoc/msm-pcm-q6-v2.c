@@ -609,19 +609,6 @@ static int msm_pcm_playback_prepare(struct snd_pcm_substream *substream)
 	prtd->audio_client->perf_mode = pdata->perf_mode;
 	pr_debug("%s: perf: %x\n", __func__, pdata->perf_mode);
 
-	/*
-	 * MultiMedia3 ULL speaker playback is prone to underruns on some
-	 * vendor userspace stacks when CPU availability jitters briefly.
-	 * Keep routing on MM3 but downgrade ASM perf mode to LLNP to reduce
-	 * XRUN sensitivity.
-	 */
-	if (soc_prtd->dai_link->id == MSM_FRONTEND_DAI_MULTIMEDIA3 &&
-	    prtd->audio_client->perf_mode == ULTRA_LOW_LATENCY_PCM_MODE) {
-		pr_info("%s: remap MM3 playback perf mode ULL -> LLNP\n",
-			__func__);
-		prtd->audio_client->perf_mode = LOW_LATENCY_PCM_NOPROC_MODE;
-	}
-
 	prtd->audio_client->stream_type = SNDRV_PCM_STREAM_PLAYBACK;
 	prtd->audio_client->fedai_id = soc_prtd->dai_link->id;
 
@@ -1058,9 +1045,9 @@ static int msm_pcm_open(struct snd_pcm_substream *substream)
 	}
 
 	/*
-	 * Keep a larger minimum period/buffer floor for MM3 ULL playback.
-	 * This increases tolerance to short producer stalls and avoids
-	 * immediate underrun crackle bursts.
+	 * Keep a larger minimum period/buffer floor for ULL playback. This
+	 * avoids short producer stalls turning into immediate underrun bursts
+	 * without changing the ADSP ASM perf mode/topology selected by userspace.
 	 */
 	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK &&
 	    pdata->perf_mode == ULTRA_LOW_LATENCY_PCM_MODE &&
