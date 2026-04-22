@@ -158,8 +158,9 @@ EXPORT_SYMBOL_GPL(ufshcd_dump_regs);
 enum {
 	UFSHCD_MAX_CHANNEL	= 0,
 	UFSHCD_MAX_ID		= 1,
-	UFSHCD_CMD_PER_LUN	= 32,
-	UFSHCD_CAN_QUEUE	= 32,
+	UFSHCD_NUM_RESERVED	= 1,
+	UFSHCD_CMD_PER_LUN	= 32 - UFSHCD_NUM_RESERVED,
+	UFSHCD_CAN_QUEUE	= 32 - UFSHCD_NUM_RESERVED,
 };
 
 /* UFSHCD states */
@@ -1241,19 +1242,25 @@ static int ufshcd_clock_scaling_prepare(struct ufs_hba *hba)
 	 * clock scaling is in progress
 	 */
 	ufshcd_scsi_block_requests(hba);
+	mutex_lock(hba->wb_mutex);
 	down_write(&hba->clk_scaling_lock);
 	if (ufshcd_wait_for_doorbell_clr(hba, DOORBELL_CLR_TOUT_US)) {
 		ret = -EBUSY;
 		up_write(&hba->clk_scaling_lock);
+		mutex_unlock(hba->wb_mutex);
 		ufshcd_scsi_unblock_requests(hba);
 	}
 
 	return ret;
 }
 
-static void ufshcd_clock_scaling_unprepare(struct ufs_hba *hba)
+static void ufshcd_clock_scaling_unprepare(struct ufs_hba *hba, int err,
+					   bool scale_up)
 {
 	up_write(&hba->clk_scaling_lock);
+	if (!err)
+		ufshcd_wb_ctrl(hba, scale_up);
+	mutex_unlock(hba->wb_mutex);
 	ufshcd_scsi_unblock_requests(hba);
 }
 
@@ -1297,18 +1304,13 @@ static int ufshcd_devfreq_scale(struct ufs_hba *hba, bool scale_up)
 		}
 	}
 
-	/* Enable Write Booster if we have scaled up else disable it */
-	up_write(&hba->clk_scaling_lock);
-	ufshcd_wb_ctrl(hba, scale_up);
-	down_write(&hba->clk_scaling_lock);
-
 	goto clk_scaling_unprepare;
 
 scale_up_gear:
 	if (!scale_up)
 		ufshcd_scale_gear(hba, true);
 clk_scaling_unprepare:
-	ufshcd_clock_scaling_unprepare(hba);
+	ufshcd_clock_scaling_unprepare(hba, ret, scale_up);
 out:
 	ufshcd_release(hba);
 	return ret;
@@ -1607,9 +1609,12 @@ static ssize_t ufshcd_clkscale_enable_store(struct device *dev,
 	cancel_work_sync(&hba->clk_scaling.suspend_work);
 	cancel_work_sync(&hba->clk_scaling.resume_work);
 
-	hba->clk_scaling.is_allowed = value;
-
 	if (value) {
+		mutex_lock(hba->wb_mutex);
+		down_write(&hba->clk_scaling_lock);
+		hba->clk_scaling.is_allowed = true;
+		up_write(&hba->clk_scaling_lock);
+		mutex_unlock(hba->wb_mutex);
 		ufshcd_resume_clkscaling(hba);
 	} else {
 		ufshcd_suspend_clkscaling(hba);
@@ -1617,6 +1622,11 @@ static ssize_t ufshcd_clkscale_enable_store(struct device *dev,
 		if (err)
 			dev_err(hba->dev, "%s: failed to scale clocks up %d\n",
 					__func__, err);
+		mutex_lock(hba->wb_mutex);
+		down_write(&hba->clk_scaling_lock);
+		hba->clk_scaling.is_allowed = false;
+		up_write(&hba->clk_scaling_lock);
+		mutex_unlock(hba->wb_mutex);
 	}
 
 	ufshcd_release(hba);
@@ -1689,7 +1699,8 @@ int ufshcd_hold(struct ufs_hba *hba, bool async)
 	bool flush_result;
 	unsigned long flags;
 
-	if (!ufshcd_is_clkgating_allowed(hba))
+	if (!ufshcd_is_clkgating_allowed(hba) ||
+	    !hba->clk_gating.clk_gating_workq)
 		goto out;
 	spin_lock_irqsave(hba->host->host_lock, flags);
 	hba->clk_gating.active_reqs++;
@@ -1855,7 +1866,7 @@ static void __ufshcd_release(struct ufs_hba *hba)
 
 	if (hba->clk_gating.active_reqs || hba->clk_gating.is_suspended ||
 	    hba->ufshcd_state != UFSHCD_STATE_OPERATIONAL ||
-	    hba->lrb_in_use || hba->outstanding_tasks ||
+	    hba->outstanding_tasks || !hba->clk_gating.clk_gating_workq ||
 	    hba->active_uic_cmd || hba->uic_async_done ||
 	    hba->clk_gating.state == CLKS_OFF)
 		return;
@@ -1919,20 +1930,18 @@ static ssize_t ufshcd_clkgate_enable_store(struct device *dev,
 		return -EINVAL;
 
 	value = !!value;
+	spin_lock_irqsave(hba->host->host_lock, flags);
 	if (value == hba->clk_gating.is_enabled)
 		goto out;
 
 	if (value)
 		__ufshcd_release(hba);
 	else
-		spin_lock_irqsave(hba->host->host_lock, flags);
-	if (!value) {
 		hba->clk_gating.active_reqs++;
-		spin_unlock_irqrestore(hba->host->host_lock, flags);
-	}
 
 	hba->clk_gating.is_enabled = value;
 out:
+	spin_unlock_irqrestore(hba->host->host_lock, flags);
 	return count;
 }
 
@@ -1980,7 +1989,7 @@ static void ufshcd_init_clk_gating(struct ufs_hba *hba)
 	snprintf(wq_name, ARRAY_SIZE(wq_name), "ufs_clk_gating_%d",
 		 hba->host->host_no);
 	hba->clk_gating.clk_gating_workq = alloc_ordered_workqueue(wq_name,
-							   WQ_MEM_RECLAIM);
+					WQ_MEM_RECLAIM | WQ_HIGHPRI);
 
 	hba->clk_gating.is_enabled = true;
 
@@ -2003,13 +2012,22 @@ static void ufshcd_init_clk_gating(struct ufs_hba *hba)
 
 static void ufshcd_exit_clk_gating(struct ufs_hba *hba)
 {
+	struct workqueue_struct *clk_gating_workq;
+
 	if (!ufshcd_is_clkgating_allowed(hba))
 		return;
 	device_remove_file(hba->dev, &hba->clk_gating.delay_attr);
 	device_remove_file(hba->dev, &hba->clk_gating.enable_attr);
-	cancel_work_sync(&hba->clk_gating.ungate_work);
-	cancel_delayed_work_sync(&hba->clk_gating.gate_work);
-	destroy_workqueue(hba->clk_gating.clk_gating_workq);
+
+	if (!hba->clk_gating.clk_gating_workq)
+		return;
+
+	ufshcd_hold(hba, false);
+	clk_gating_workq = hba->clk_gating.clk_gating_workq;
+	hba->clk_gating.clk_gating_workq = NULL;
+	ufshcd_release(hba);
+
+	destroy_workqueue(clk_gating_workq);
 }
 
 /* Must be called with host lock acquired */
@@ -2873,37 +2891,23 @@ static int ufshcd_wait_for_dev_cmd(struct ufs_hba *hba,
  * @hba: per-adapter instance
  * @tag_out: pointer to variable with available slot value
  *
- * Get a free slot and lock it until device management command
- * completes.
+ * Device management commands use the controller reserved slot and are
+ * serialized by hba->dev_cmd.lock.
  *
- * Returns false if free slot is unavailable for locking, else
- * return true with tag value in @tag.
+ * Returns false if @tag_out is invalid, else returns true with the reserved
+ * slot tag in @tag_out.
  */
 static bool ufshcd_get_dev_cmd_tag(struct ufs_hba *hba, int *tag_out)
 {
-	int tag;
-	bool ret = false;
-	unsigned long tmp;
-
 	if (!tag_out)
-		goto out;
+		return false;
 
-	do {
-		tmp = ~hba->lrb_in_use;
-		tag = find_last_bit(&tmp, hba->nutrs);
-		if (tag >= hba->nutrs)
-			goto out;
-	} while (test_and_set_bit_lock(tag, &hba->lrb_in_use));
-
-	*tag_out = tag;
-	ret = true;
-out:
-	return ret;
+	*tag_out = hba->nutrs - UFSHCD_NUM_RESERVED;
+	return true;
 }
 
 static inline void ufshcd_put_dev_cmd_tag(struct ufs_hba *hba, int tag)
 {
-	clear_bit_unlock(tag, &hba->lrb_in_use);
 }
 
 /**
@@ -2924,6 +2928,7 @@ static int ufshcd_exec_dev_cmd(struct ufs_hba *hba,
 	struct completion wait;
 	unsigned long flags;
 
+	lockdep_assert_held(&hba->dev_cmd.lock);
 	down_read(&hba->clk_scaling_lock);
 
 	/*
@@ -4474,7 +4479,7 @@ static int ufshcd_complete_dev_init(struct ufs_hba *hba)
 					QUERY_FLAG_IDN_FDEVICEINIT, 0, &flag_res);
 		if (!flag_res)
 			break;
-		usleep_range(5000, 10000);
+		usleep_range(500, 1000);
 	} while (ktime_before(ktime_get(), timeout));
 
 	if (err) {
@@ -6559,6 +6564,7 @@ static int ufshcd_issue_devman_upiu_cmd(struct ufs_hba *hba,
 	unsigned long flags;
 	u32 upiu_flags;
 
+	lockdep_assert_held(&hba->dev_cmd.lock);
 	down_read(&hba->clk_scaling_lock);
 
 	wait_event(hba->dev_cmd.tag_wq, ufshcd_get_dev_cmd_tag(hba, &tag));
@@ -9186,11 +9192,7 @@ int ufshcd_system_resume(struct ufs_hba *hba)
 	if (!hba)
 		return -EINVAL;
 
-	if (!hba->is_powered || pm_runtime_suspended(hba->dev))
-		/*
-		 * Let the runtime resume take care of resuming
-		 * if runtime suspended.
-		 */
+	if (!hba->is_powered)
 		goto out;
 	else
 		ret = ufshcd_resume(hba, UFS_SYSTEM_PM);
@@ -9198,8 +9200,14 @@ out:
 	trace_ufshcd_system_resume(dev_name(hba->dev), ret,
 		ktime_to_us(ktime_sub(ktime_get(), start)),
 		hba->curr_dev_pwr_mode, hba->uic_link_state);
-	if (!ret)
+	if (!ret) {
 		hba->is_sys_suspended = false;
+		if (pm_runtime_suspended(hba->dev)) {
+			pm_runtime_disable(hba->dev);
+			pm_runtime_set_active(hba->dev);
+			pm_runtime_enable(hba->dev);
+		}
+	}
 	return ret;
 }
 EXPORT_SYMBOL(ufshcd_system_resume);
@@ -9499,8 +9507,8 @@ int ufshcd_init(struct ufs_hba *hba, void __iomem *mmio_base, unsigned int irq)
 	/* Configure LRB */
 	ufshcd_host_memory_configure(hba);
 
-	host->can_queue = hba->nutrs;
-	host->cmd_per_lun = hba->nutrs;
+	host->cmd_per_lun = hba->nutrs - UFSHCD_NUM_RESERVED;
+	host->can_queue = hba->nutrs - UFSHCD_NUM_RESERVED;
 	host->max_id = UFSHCD_MAX_ID;
 	host->max_lun = UFS_MAX_LUNS;
 	host->max_channel = UFSHCD_MAX_CHANNEL;
@@ -9531,6 +9539,14 @@ int ufshcd_init(struct ufs_hba *hba, void __iomem *mmio_base, unsigned int irq)
 
 	/* Initialize mutex for device management commands */
 	mutex_init(&hba->dev_cmd.lock);
+	hba->wb_mutex = devm_kzalloc(hba->dev, sizeof(*hba->wb_mutex),
+				      GFP_KERNEL);
+	if (!hba->wb_mutex) {
+		err = -ENOMEM;
+		destroy_workqueue(hba->eh_wq);
+		goto out_disable;
+	}
+	mutex_init(hba->wb_mutex);
 
 	init_rwsem(&hba->clk_scaling_lock);
 
