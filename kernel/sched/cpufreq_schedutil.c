@@ -644,15 +644,39 @@ static struct kobj_type sugov_tunables_ktype = {
 
 static struct cpufreq_governor schedutil_gov;
 
+static bool sugov_is_little_policy(struct cpufreq_policy *policy)
+{
+	unsigned long policy_cap = 0, min_cap = ULONG_MAX, max_cap = 0;
+	int cpu;
+
+	for_each_cpu(cpu, policy->related_cpus)
+		policy_cap = max(policy_cap, capacity_orig_of(cpu));
+
+	for_each_possible_cpu(cpu) {
+		unsigned long cap = capacity_orig_of(cpu);
+
+		if (cap < min_cap)
+			min_cap = cap;
+		if (cap > max_cap)
+			max_cap = cap;
+	}
+
+	return max_cap > min_cap && policy_cap == min_cap;
+}
+
 static unsigned int sugov_default_rate_limit_us(struct cpufreq_policy *policy)
 {
 	unsigned int rate_limit_us = cpufreq_policy_transition_delay_us(policy);
 
 	/*
-	 * Use a tighter default update pacing while keeping a lower/upper
-	 * bound to avoid excess churn on slow-switch paths.
+	 * Keep the little policy a bit more relaxed to avoid useless churn,
+	 * while letting the bigger clusters react more aggressively for
+	 * bursty foreground work.
 	 */
-	rate_limit_us = clamp(rate_limit_us, 100U, 400U);
+	if (sugov_is_little_policy(policy))
+		rate_limit_us = clamp(rate_limit_us, 180U, 450U);
+	else
+		rate_limit_us = clamp(rate_limit_us, 80U, 250U);
 
 	return rate_limit_us;
 }

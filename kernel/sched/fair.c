@@ -54,7 +54,7 @@ static unsigned int normalized_sysctl_sched_base_slice	= 2800000ULL;
  */
 unsigned int sysctl_sched_idle_min_granularity			= 750000ULL;
 
-const_debug unsigned int sysctl_sched_migration_cost	= 0UL;
+const_debug unsigned int sysctl_sched_migration_cost	= 500000UL;
 
 int sched_thermal_decay_shift;
 static int __init setup_sched_thermal_decay_shift(char *str)
