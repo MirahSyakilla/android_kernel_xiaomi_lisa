@@ -693,6 +693,7 @@ static void q6asm_session_free(struct audio_client *ac)
 {
 	int session_id;
 	unsigned long flags = 0;
+	struct audio_client *free_ac = ac;
 
 	pr_debug("%s: sessionid[%d]\n", __func__, ac->session);
 	session_id = ac->session;
@@ -705,10 +706,9 @@ static void q6asm_session_free(struct audio_client *ac)
 	ac->fptr_cache_ops = NULL;
 	ac->cb = NULL;
 	ac->priv = NULL;
-	kfree(ac);
-	ac = NULL;
 	spin_unlock_irqrestore(&(session[session_id].session_lock), flags);
 	mutex_unlock(&session[session_id].mutex_lock_per_session);
+	kfree(free_ac);
 }
 
 static uint32_t q6asm_get_next_buf(struct audio_client *ac,
@@ -2636,9 +2636,9 @@ static int32_t q6asm_callback(struct apr_client_data *data, void *priv)
 		}
 		ac->cb(data->opcode, data->token,
 			(void *)pp_event_package, ac->priv);
-		kfree(pp_event_package);
 		spin_unlock_irqrestore(
 			&(session[session_id].session_lock), flags);
+		kfree(pp_event_package);
 		return 0;
 	case ASM_SESSION_CMDRSP_ADJUST_SESSION_CLOCK_V2:
 		if (data->payload_size >= 3 * sizeof(uint32_t))
