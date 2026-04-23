@@ -498,6 +498,8 @@ static void __blk_mq_free_request(struct request *rq)
 
 	blk_pm_mark_last_busy(rq);
 	rq->mq_hctx = NULL;
+	if (rq->rq_flags & RQF_MQ_INFLIGHT)
+		atomic_dec(&hctx->nr_active);
 	if (rq->tag != -1)
 		blk_mq_put_tag(hctx, hctx->tags, ctx, rq->tag);
 	if (sched_tag != -1)
@@ -511,7 +513,6 @@ void blk_mq_free_request(struct request *rq)
 	struct request_queue *q = rq->q;
 	struct elevator_queue *e = q->elevator;
 	struct blk_mq_ctx *ctx = rq->mq_ctx;
-	struct blk_mq_hw_ctx *hctx = rq->mq_hctx;
 
 	if (rq->rq_flags & RQF_ELVPRIV) {
 		if (e && e->type->ops.finish_request)
@@ -523,8 +524,6 @@ void blk_mq_free_request(struct request *rq)
 	}
 
 	ctx->rq_completed[rq_is_sync(rq)]++;
-	if (rq->rq_flags & RQF_MQ_INFLIGHT)
-		atomic_dec(&hctx->nr_active);
 
 	if (unlikely(laptop_mode && !blk_rq_is_passthrough(rq)))
 		laptop_io_completion(q->backing_dev_info);
