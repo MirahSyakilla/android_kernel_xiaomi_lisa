@@ -818,7 +818,6 @@ bool hif_napi_correct_cpu(struct qca_napi_info *napi_info)
 
 			irq_modify_status(napi_info->irq, IRQ_NO_BALANCING, 0);
 			ret = qdf_dev_set_irq_affinity(napi_info->irq,
-						       (struct qdf_cpu_mask *)
 						       &napi_info->cpumask);
 			rc = qdf_status_to_os_return(ret);
 			irq_modify_status(napi_info->irq, 0, IRQ_NO_BALANCING);
@@ -1464,7 +1463,6 @@ static int hncm_migrate_to(struct qca_napi_data *napid,
 
 	irq_modify_status(napid->napis[napi_ce]->irq, IRQ_NO_BALANCING, 0);
 	status = qdf_dev_set_irq_affinity(napid->napis[napi_ce]->irq,
-					  (struct qdf_cpu_mask *)
 					  &napid->napis[napi_ce]->cpumask);
 	rc = qdf_status_to_os_return(status);
 

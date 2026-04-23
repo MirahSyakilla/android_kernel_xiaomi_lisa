@@ -76,7 +76,7 @@ qdf_dev_modify_irq_status(uint32_t irnum, unsigned long cmask,
 qdf_export_symbol(qdf_dev_modify_irq_status);
 
 QDF_STATUS
-qdf_dev_set_irq_affinity(uint32_t irnum, struct qdf_cpu_mask *cpmask)
+qdf_dev_set_irq_affinity(uint32_t irnum, qdf_cpu_mask *cpmask)
 {
 	int ret;
 

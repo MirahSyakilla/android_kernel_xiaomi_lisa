@@ -3919,7 +3919,7 @@ static int check_wait_context(struct task_struct *curr, struct held_lock *next)
 		/*
 		 * Check if force_irqthreads will run us threaded.
 		 */
-		if (curr->hardirq_threaded)
+		if (force_irqthreads)
 			curr_inner = LD_WAIT_CONFIG;
 		else
 			curr_inner = LD_WAIT_SPIN;

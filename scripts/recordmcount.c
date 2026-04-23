@@ -26,6 +26,7 @@
 #include <sys/stat.h>
 #include <getopt.h>
 #include <elf.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -57,6 +58,40 @@ static void *file_ptr;	/* current file pointer location */
 
 static void *file_append; /* added to the end of the file */
 static size_t file_append_size; /* how much is added to end of file */
+
+static int write_all(int fd, const void *buf, size_t count)
+{
+	const char *p = buf;
+
+	while (count) {
+		size_t chunk = count;
+		ssize_t written;
+
+		/*
+		 * Linux caps a single write() well below SIZE_MAX. Large LTO
+		 * objects can exceed that cap, so split the write explicitly
+		 * instead of treating a short successful write as a hard error.
+		 */
+		if (chunk > 0x40000000)
+			chunk = 0x40000000;
+
+		written = write(fd, p, chunk);
+		if (written < 0) {
+			if (errno == EINTR)
+				continue;
+			return -1;
+		}
+		if (!written) {
+			errno = EIO;
+			return -1;
+		}
+
+		p += written;
+		count -= written;
+	}
+
+	return 0;
+}
 
 /* Per-file resource cleanup when multiple files. */
 static void file_append_cleanup(void)
@@ -321,7 +356,6 @@ static int make_nop_arm64(void *map, size_t const offset)
 static int write_file(const char *fname)
 {
 	char tmp_file[strlen(fname) + 4];
-	size_t n;
 
 	if (!file_updated)
 		return 0;
@@ -338,15 +372,13 @@ static int write_file(const char *fname)
 		perror(fname);
 		return -1;
 	}
-	n = write(fd_map, file_map, sb.st_size);
-	if (n != sb.st_size) {
+	if (write_all(fd_map, file_map, sb.st_size) < 0) {
 		perror("write");
 		close(fd_map);
 		return -1;
 	}
 	if (file_append_size) {
-		n = write(fd_map, file_append, file_append_size);
-		if (n != file_append_size) {
+		if (write_all(fd_map, file_append, file_append_size) < 0) {
 			perror("write");
 			close(fd_map);
 			return -1;

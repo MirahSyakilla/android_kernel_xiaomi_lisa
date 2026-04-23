@@ -2261,6 +2261,7 @@ static void iommu_debug_destroy_tests(void)
 	debugfs_remove_recursive(debugfs_tests_dir);
 }
 #else
+static inline int iommu_debug_device_setup(struct device *dev) { return 0; }
 static inline int iommu_debug_init_tests(void) { return 0; }
 static inline void iommu_debug_destroy_tests(void) { }
 #endif

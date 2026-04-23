@@ -52,16 +52,8 @@ do {						\
 	current->softirq_context--;		\
 } while (0)
 
-# define lockdep_irq_work_enter(_flags)					\
-	  do {								\
-		  if (!((_flags) & IRQ_WORK_HARD_IRQ))			\
-			current->irq_config = 1;			\
-	  } while (0)
-# define lockdep_irq_work_exit(_flags)					\
-	  do {								\
-		  if (!((_flags) & IRQ_WORK_HARD_IRQ))			\
-			current->irq_config = 0;			\
-	  } while (0)
+# define lockdep_irq_work_enter(_flags)	do { (void)(_flags); } while (0)
+# define lockdep_irq_work_exit(_flags)	do { (void)(_flags); } while (0)
 
 #else
 # define trace_hardirqs_on()		do { } while (0)

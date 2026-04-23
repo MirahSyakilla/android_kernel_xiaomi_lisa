@@ -418,9 +418,9 @@ static void trace_event_helper(struct psi_group *group)
 	unsigned long file;
 
 	u64 mem_some_delta = group->total[PSI_POLL][PSI_MEM_SOME] -
-			group->polling_total[PSI_MEM_SOME];
+			group->rtpoll_total[PSI_MEM_SOME];
 	u64 mem_full_delta = group->total[PSI_POLL][PSI_MEM_FULL] -
-			group->polling_total[PSI_MEM_FULL];
+			group->rtpoll_total[PSI_MEM_FULL];
 
 	for_each_populated_zone(zone) {
 		wmark = TOKB(high_wmark_pages(zone));

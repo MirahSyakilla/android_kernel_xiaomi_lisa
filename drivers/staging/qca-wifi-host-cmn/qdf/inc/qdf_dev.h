@@ -87,7 +87,7 @@ qdf_dev_modify_irq_status(uint32_t irnum, unsigned long cmask,
  * Return: QDF_STATUS_SUCCESS on success
  */
 QDF_STATUS
-qdf_dev_set_irq_affinity(uint32_t irnum, struct qdf_cpu_mask *cpmask);
+qdf_dev_set_irq_affinity(uint32_t irnum, qdf_cpu_mask *cpmask);
 #else
 static inline QDF_STATUS
 qdf_dev_alloc_mem(struct qdf_dev *qdfdev, struct qdf_devm **mrptr,
@@ -110,7 +110,7 @@ qdf_dev_modify_irq_status(uint32_t irnum, unsigned long cmask,
 }
 
 static inline QDF_STATUS
-qdf_dev_set_irq_affinity(uint32_t irnum, struct qdf_cpu_mask *cpmask)
+qdf_dev_set_irq_affinity(uint32_t irnum, qdf_cpu_mask *cpmask)
 {
 	return __qdf_dev_set_irq_affinity(irnum, cpmask);
 }

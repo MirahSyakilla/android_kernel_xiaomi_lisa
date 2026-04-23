@@ -2994,7 +2994,6 @@ void hif_pci_irq_set_affinity_hint(
 	for (i = 0; i < hif_ext_group->numirq; i++) {
 		if (mask_set) {
 			ret = qdf_dev_set_irq_affinity(hif_ext_group->os_irq[i],
-						       (struct qdf_cpu_mask *)
 						       &hif_ext_group->
 						       new_cpu_mask[i]);
 			if (ret)
@@ -3050,7 +3049,7 @@ void hif_pci_ce_irq_set_affinity_hint(
 				 &ce_cpu_mask);
 		ret = qdf_dev_set_irq_affinity(
 			pci_sc->ce_msi_irq_num[ce_id],
-			(struct qdf_cpu_mask *)&pci_sc->ce_irq_cpu_mask[ce_id]);
+			&pci_sc->ce_irq_cpu_mask[ce_id]);
 		if (ret)
 			hif_err_rl("Set affinity %*pbl fails for CE IRQ %d",
 				   qdf_cpumask_pr_args(

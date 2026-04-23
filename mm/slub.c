@@ -4569,7 +4569,7 @@ static int validate_slab(struct kmem_cache *s, struct page *page,
 	}
 
 	for_each_object(p, s, addr, page->objects)
-		if (!test_bit(slab_index(p, s, addr), map))
+		if (!test_bit(__obj_to_index(s, addr, p), map))
 			if (!check_object(s, page, p, SLUB_RED_ACTIVE))
 				return 0;
 	return 1;

@@ -598,7 +598,7 @@ static void hif_ipci_ce_irq_set_affinity_hint(struct hif_softc *scn)
 				 &ce_cpu_mask);
 		ret = qdf_dev_set_irq_affinity(
 		       ipci_sc->ce_msi_irq_num[ce_id],
-		       (struct qdf_cpu_mask *)&ipci_sc->ce_irq_cpu_mask[ce_id]);
+		       &ipci_sc->ce_irq_cpu_mask[ce_id]);
 		if (ret)
 			hif_err_rl("Set affinity %*pbl fails for CE IRQ %d",
 				   qdf_cpumask_pr_args(
