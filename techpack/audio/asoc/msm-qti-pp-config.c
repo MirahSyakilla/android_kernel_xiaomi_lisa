@@ -8,6 +8,7 @@
 #include <linux/bitops.h>
 #include <linux/mutex.h>
 #include <sound/control.h>
+#include <sound/soc.h>
 #include <sound/tlv.h>
 #include <dsp/q6adm-v2.h>
 #include <dsp/q6asm-v2.h>
@@ -74,6 +75,51 @@ static const DECLARE_TLV_DB_LINEAR(sec_auxpcm_lb_vol_gain, 0,
 
 static int msm_multichannel_ec_primary_mic_ch;
 static int msm_ffecns_effect;
+static DEFINE_MUTEX(msm_adm_callback_lock);
+static unsigned int msm_adm_callback_users;
+
+static bool msm_adsp_ctl_name_matches(const char *name, const char *ctl_name)
+{
+	size_t name_len;
+	size_t ctl_len;
+
+	if (!name || !ctl_name)
+		return false;
+
+	name_len = strlen(name);
+	ctl_len = strlen(ctl_name);
+
+	if (name_len == ctl_len)
+		return !strcmp(name, ctl_name);
+
+	return name_len > ctl_len &&
+		name[name_len - ctl_len - 1] == ' ' &&
+		!strcmp(name + name_len - ctl_len, ctl_name);
+}
+
+static struct snd_kcontrol *msm_adsp_get_card_kcontrol(
+		struct snd_soc_card *card, const char *ctl_name)
+{
+	struct snd_kcontrol *kctl = NULL;
+
+	if (!card || !card->snd_card)
+		return NULL;
+
+	kctl = snd_soc_card_get_kcontrol(card, ctl_name);
+	if (kctl)
+		return kctl;
+
+	down_read(&card->snd_card->controls_rwsem);
+	list_for_each_entry(kctl, &card->snd_card->controls, list) {
+		if (msm_adsp_ctl_name_matches(kctl->id.name, ctl_name))
+			goto found;
+	}
+	kctl = NULL;
+found:
+	up_read(&card->snd_card->controls_rwsem);
+
+	return kctl;
+}
 
 static void msm_qti_pp_send_eq_values_(int eq_idx)
 {
@@ -1211,10 +1257,8 @@ done:
 int msm_adsp_init_mixer_ctl_adm_pp_event_queue(struct snd_soc_pcm_runtime *rtd)
 {
 	struct snd_kcontrol *kctl = NULL;
-	char *mixer_str = NULL;
-	int ctl_len = 0, ret = 0;
-	const char *mixer_ctl_name = DSP_ADM_CALLBACK;
 	struct dsp_adm_callback_prtd *kctl_prtd = NULL;
+	int ret = 0;
 
 	if (!rtd) {
 		pr_err("%s: rtd is NULL\n", __func__);
@@ -1222,40 +1266,35 @@ int msm_adsp_init_mixer_ctl_adm_pp_event_queue(struct snd_soc_pcm_runtime *rtd)
 		goto done;
 	}
 
-	ctl_len = strlen(mixer_ctl_name) + 1;
-	mixer_str = kzalloc(ctl_len, GFP_KERNEL);
-	if (!mixer_str) {
-		ret = -EINVAL;
-		goto done;
-	}
-
-	snprintf(mixer_str, ctl_len, "%s", mixer_ctl_name);
-	kctl = snd_soc_card_get_kcontrol(rtd->card, mixer_str);
-	kfree(mixer_str);
+	mutex_lock(&msm_adm_callback_lock);
+	kctl = msm_adsp_get_card_kcontrol(rtd->card, DSP_ADM_CALLBACK);
 	if (!kctl) {
-		pr_err("%s: failed to get kctl.\n", __func__);
+		pr_err("%s: failed to get kctl %s.\n", __func__,
+			DSP_ADM_CALLBACK);
 		ret = -EINVAL;
-		goto done;
+		goto unlock;
 	}
 
 	if (kctl->private_data != NULL) {
-		pr_err("%s: kctl_prtd is not NULL at initialization.\n",
-			__func__);
-		return -EINVAL;
+		msm_adm_callback_users++;
+		goto unlock;
 	}
 
 	kctl_prtd = kzalloc(sizeof(struct dsp_adm_callback_prtd),
 			GFP_KERNEL);
 	if (!kctl_prtd) {
 		ret = -ENOMEM;
-		goto done;
+		goto unlock;
 	}
 
 	spin_lock_init(&kctl_prtd->prtd_spin_lock);
 	INIT_LIST_HEAD(&kctl_prtd->event_queue);
 	kctl_prtd->event_count = 0;
 	kctl->private_data = kctl_prtd;
+	msm_adm_callback_users = 1;
 
+unlock:
+	mutex_unlock(&msm_adm_callback_lock);
 done:
 	return ret;
 }
@@ -1263,11 +1302,9 @@ done:
 int msm_adsp_clean_mixer_ctl_adm_pp_event_queue(struct snd_soc_pcm_runtime *rtd)
 {
 	struct snd_kcontrol *kctl = NULL;
-	char *mixer_str = NULL;
-	int ctl_len = 0, ret = 0;
+	int ret = 0;
 	struct dsp_adm_callback_list *node = NULL, *n = NULL;
 	unsigned long spin_flags = 0;
-	const char *mixer_ctl_name = DSP_ADM_CALLBACK;
 	struct dsp_adm_callback_prtd *kctl_prtd = NULL;
 
 	if (!rtd) {
@@ -1276,24 +1313,34 @@ int msm_adsp_clean_mixer_ctl_adm_pp_event_queue(struct snd_soc_pcm_runtime *rtd)
 		goto done;
 	}
 
-	ctl_len = strlen(mixer_ctl_name) + 1;
-	mixer_str = kzalloc(ctl_len, GFP_KERNEL);
-	if (!mixer_str) {
-		ret = -EINVAL;
-		goto done;
-	}
-
-	snprintf(mixer_str, ctl_len, "%s", mixer_ctl_name);
-	kctl = snd_soc_card_get_kcontrol(rtd->card, mixer_str);
-	kfree(mixer_str);
+	mutex_lock(&msm_adm_callback_lock);
+	kctl = msm_adsp_get_card_kcontrol(rtd->card, DSP_ADM_CALLBACK);
 	if (!kctl) {
-		pr_err("%s: failed to get kctl.\n", __func__);
+		pr_err("%s: failed to get kctl %s.\n", __func__,
+			DSP_ADM_CALLBACK);
 		ret = -EINVAL;
-		goto done;
+		goto unlock;
 	}
 
 	kctl_prtd = (struct dsp_adm_callback_prtd *)
 			kctl->private_data;
+	if (!kctl_prtd) {
+		msm_adm_callback_users = 0;
+		goto unlock;
+	}
+
+	if (msm_adm_callback_users > 1) {
+		msm_adm_callback_users--;
+		kctl_prtd = NULL;
+		goto unlock;
+	}
+
+	msm_adm_callback_users = 0;
+	kctl->private_data = NULL;
+
+unlock:
+	mutex_unlock(&msm_adm_callback_lock);
+
 	if (kctl_prtd != NULL) {
 		spin_lock_irqsave(&kctl_prtd->prtd_spin_lock, spin_flags);
 		/* clean the queue */
@@ -1309,7 +1356,6 @@ int msm_adsp_clean_mixer_ctl_adm_pp_event_queue(struct snd_soc_pcm_runtime *rtd)
 	}
 
 	kfree(kctl_prtd);
-	kctl->private_data = NULL;
 
 done:
 	return ret;
@@ -1321,14 +1367,12 @@ int msm_adsp_copp_inform_mixer_ctl(struct snd_soc_pcm_runtime *rtd,
 	/* adsp adm pp event notifier */
 	struct snd_kcontrol *kctl = NULL;
 	struct snd_ctl_elem_value control = {0};
-	char *mixer_str = NULL;
-	int ctl_len = 0, ret = 0;
+	int ret = 0;
 	struct dsp_adm_callback_list *new_event = NULL;
 	struct dsp_adm_callback_list *oldest_event = NULL;
 	unsigned long spin_flags = 0;
 	struct dsp_adm_callback_prtd *kctl_prtd = NULL;
 	struct msm_adsp_event_data *event_data = NULL;
-	const char *mixer_ctl_name = DSP_ADM_CALLBACK;
 	struct snd_ctl_elem_info kctl_info = {0};
 
 	if (!rtd || !payload) {
@@ -1344,18 +1388,10 @@ int msm_adsp_copp_inform_mixer_ctl(struct snd_soc_pcm_runtime *rtd,
 		goto done;
 	}
 
-	ctl_len = strlen(mixer_ctl_name) + 1;
-	mixer_str = kzalloc(ctl_len, GFP_ATOMIC);
-	if (!mixer_str) {
-		ret = -EINVAL;
-		goto done;
-	}
-
-	snprintf(mixer_str, ctl_len, "%s", mixer_ctl_name);
-	kctl = snd_soc_card_get_kcontrol(rtd->card, mixer_str);
-	kfree(mixer_str);
+	kctl = msm_adsp_get_card_kcontrol(rtd->card, DSP_ADM_CALLBACK);
 	if (!kctl) {
-		pr_err("%s: failed to get kctl.\n", __func__);
+		pr_err("%s: failed to get kctl %s.\n", __func__,
+			DSP_ADM_CALLBACK);
 		ret = -EINVAL;
 		goto done;
 	}

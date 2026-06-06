@@ -82,6 +82,14 @@
 
 #define MSM_LL_QOS_VALUE	0 /* keep audio path out of deep idle while active */
 
+#if defined(CONFIG_TARGET_PRODUCT_LISA) && \
+	defined(CONFIG_SND_SOC_TFA9874_DAVI_TDM)
+#define LISA_TFA_VI_FEEDBACK_CHANNELS	4
+static unsigned int lisa_tfa_vi_slot_offset[LISA_TFA_VI_FEEDBACK_CHANNELS] = {
+	0, 4, 8, 12,
+};
+#endif
+
 #define ADSP_STATE_READY_TIMEOUT_MS 3000
 
 #define WCN_CDC_SLIM_RX_CH_MAX 2
@@ -591,7 +599,11 @@ static struct tdm_dev_config pri_tdm_dev_config[MAX_PATH][TDM_PORT_MAX] = {
 	},
 	{
 #if defined(CONFIG_TARGET_PRODUCT_LISA) || defined(CONFIG_TARGET_PRODUCT_MONA) || defined(CONFIG_TARGET_PRODUCT_ZIJIN)
+#if defined(CONFIG_TARGET_PRODUCT_LISA) && defined(CONFIG_SND_SOC_TFA9874_DAVI_TDM)
+		{ {0,   4,   8, 12, 0xFFFF} }, /* TX_0 */
+#else
 		{ {0,   4, 0xFFFF} }, /* TX_0 */
+#endif
 		{ {8,  12, 0xFFFF} }, /* TX_1 */
 		{ {0xFFFF} }, /* TX_2 */
 		{ {0xFFFF} }, /* TX_3 */
@@ -4781,8 +4793,19 @@ static int msm_be_hw_params_fixup(struct snd_soc_pcm_runtime *rtd,
 #endif
 
 	case MSM_BACKEND_DAI_PRI_TDM_TX_0:
+#if defined(CONFIG_TARGET_PRODUCT_LISA) && \
+	defined(CONFIG_SND_SOC_TFA9874_DAVI_TDM)
+		/*
+		 * Lisa TFA9873 stereo speaker protection sends both speakers'
+		 * V/I feedback over PRI_TDM_TX_0.  The generic default is only
+		 * one stereo pair, which leaves the bottom/right speaker without
+		 * feedback and makes TFADSP clamp it to a very faint output.
+		 */
+		channels->min = channels->max = LISA_TFA_VI_FEEDBACK_CHANNELS;
+#else
 		channels->min = channels->max =
 				tdm_tx_cfg[TDM_PRI][TDM_0].channels;
+#endif
 		param_set_mask(params, SNDRV_PCM_HW_PARAM_FORMAT,
 			       tdm_tx_cfg[TDM_PRI][TDM_0].bit_format);
 		rate->min = rate->max = tdm_tx_cfg[TDM_PRI][TDM_0].sample_rate;
@@ -5270,6 +5293,19 @@ static int lahaina_tdm_snd_hw_params(struct snd_pcm_substream *substream,
 		channels = tdm_tx_cfg[interface][channel_interface].channels;
 	else
 		channels = tdm_rx_cfg[interface][channel_interface].channels;
+
+#if defined(CONFIG_TARGET_PRODUCT_LISA) && \
+	defined(CONFIG_SND_SOC_TFA9874_DAVI_TDM)
+	if (substream->stream == SNDRV_PCM_STREAM_CAPTURE &&
+	    cpu_dai->id == AFE_PORT_ID_PRIMARY_TDM_TX) {
+		slot_offset = lisa_tfa_vi_slot_offset;
+		channels = LISA_TFA_VI_FEEDBACK_CHANNELS;
+		if (slots < LISA_TFA_VI_FEEDBACK_CHANNELS)
+			slots = LISA_TFA_VI_FEEDBACK_CHANNELS;
+		pr_debug("%s: Lisa TFA VI feedback: channels=%u slots=%u\n",
+			__func__, channels, slots);
+	}
+#endif
 
 	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
 		/*2 slot config - bits 0 and 1 set for the first two slots */

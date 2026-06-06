@@ -12797,67 +12797,73 @@ EXPORT_SYMBOL(send_tfa_cal_unmap_memory);
 
 int send_tfa_cal_in_band(void *buf, int cmd_size)
 {
-	union afe_spkr_prot_config afe_spk_config;
+	union afe_spkr_prot_config afe_spk_config = {0};
 	int32_t port_id = AFE_PORT_ID_TFADSP_RX;
+	int ret;
 
 	if (cmd_size > sizeof(afe_spk_config))
 		return -EINVAL;
 
 	memcpy(&afe_spk_config, buf, cmd_size);
 
-	if (afe_spk_prot_prepare(port_id, 0,
+	ret = afe_spk_prot_prepare(port_id, 0,
 			AFE_PARAM_ID_TFADSP_RX_CFG,
 			&afe_spk_config,
-			sizeof(afe_spk_config))) {
+			cmd_size);
+	if (ret) {
 			pr_err("%s: AFE_PARAM_ID_TFADSP_RX_CFG failed\n",
 				   __func__);
 	}
 
-	return 0;
+	return ret;
 }
 EXPORT_SYMBOL(send_tfa_cal_in_band);
 
 int send_tfa_cal_set_bypass(void *buf, int cmd_size)
 {
-	union afe_spkr_prot_config afe_spk_config;
+	union afe_spkr_prot_config afe_spk_config = {0};
 	int32_t port_id = AFE_PORT_ID_TFADSP_RX;
+	int ret;
 
 	if (cmd_size > sizeof(afe_spk_config))
 		return -EINVAL;
 
 	memcpy(&afe_spk_config, buf, cmd_size);
 
-	if (afe_spk_prot_prepare(port_id, 0,
+	ret = afe_spk_prot_prepare(port_id, 0,
 			AFE_PARAM_ID_TFADSP_RX_SET_BYPASS,
 			&afe_spk_config,
-			sizeof(afe_spk_config))) {
+			cmd_size);
+	if (ret) {
 		pr_err("%s: AFE_PARAM_ID_TFADSP_RX_SET_BYPASS failed\n",
 				   __func__);
 	}
 
-	return 0;
+	return ret;
 }
 EXPORT_SYMBOL(send_tfa_cal_set_bypass);
 
 int send_tfa_cal_set_tx_enable(void *buf, int cmd_size)
 {
-	union afe_spkr_prot_config afe_spk_config;
+	union afe_spkr_prot_config afe_spk_config = {0};
 	int32_t port_id = AFE_PORT_ID_TFADSP_TX;
+	int ret;
 
 	if (cmd_size > sizeof(afe_spk_config))
 		return -EINVAL;
 
 	memcpy(&afe_spk_config, buf, cmd_size);
 
-	if (afe_spk_prot_prepare(port_id, 0,
+	ret = afe_spk_prot_prepare(port_id, 0,
 			AFE_PARAM_ID_TFADSP_TX_SET_ENABLE,
 			&afe_spk_config,
-			sizeof(afe_spk_config))) {
+			cmd_size);
+	if (ret) {
 		pr_err("%s: AFE_PARAM_ID_TFADSP_TX_SET_ENABLE failed\n",
 				   __func__);
 	}
 
-	return 0;
+	return ret;
 }
 EXPORT_SYMBOL(send_tfa_cal_set_tx_enable);
 

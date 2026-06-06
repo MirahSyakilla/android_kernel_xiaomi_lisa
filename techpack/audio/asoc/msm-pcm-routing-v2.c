@@ -175,6 +175,11 @@ static struct msm_ec_ref_port_cfg ec_ref_port_cfg;
 static int32_t mclk_cfg_be_idx;
 static int32_t mclk_cfg_src_id;
 static uint32_t mclk_cfg_freq;
+#ifdef CONFIG_QTI_PP
+static uint32_t adm_pp_reg_event_opcode[] = {
+	ADM_CMD_REGISTER_EVENT
+};
+#endif
 
 #ifdef CONFIG_MSM_CSPL
 	extern void msm_crus_pb_add_controls(struct snd_soc_component *platform);
@@ -33278,12 +33283,22 @@ static int spkr_prot_put_vi_lch_port(struct snd_kcontrol *kcontrol,
 		pr_debug("%s RX DAI ID %d TX DAI id %d\n",
 			__func__, e->shift_l, e->values[vi_lch_port]);
 		if (e->shift_l < MSM_BACKEND_DAI_MAX &&
-			e->values[vi_lch_port] < MSM_BACKEND_DAI_MAX)
+			e->values[vi_lch_port] < MSM_BACKEND_DAI_MAX) {
 			/* Enable feedback TX path */
+#if defined(CONFIG_TARGET_PRODUCT_LISA) && \
+	defined(CONFIG_SND_SOC_TFA9874_DAVI_TDM)
+			if (e->shift_l == PLATFORM_TDM_RX_VI_FB_MUX_ENUM &&
+			    e->values[vi_lch_port] ==
+				    PLATFORM_TDM_RX_VI_FB_TX_VALUE)
+				ret = afe_spk_prot_feed_back_cfg(
+				   msm_bedais[e->values[vi_lch_port]].port_id,
+				   msm_bedais[e->shift_l].port_id, 1, 1, 1);
+			else
+#endif
 			ret = afe_spk_prot_feed_back_cfg(
 			   msm_bedais[e->values[vi_lch_port]].port_id,
 			   msm_bedais[e->shift_l].port_id, 1, 0, 1);
-		else {
+		} else {
 			pr_debug("%s values are out of range item %d\n",
 			__func__, e->values[vi_lch_port]);
 			/* Disable feedback TX path */
@@ -42900,6 +42915,177 @@ static const struct snd_kcontrol_new device_pp_params_mixer_controls[] = {
 	msm_routing_put_device_pp_params_mixer),
 };
 
+#ifdef CONFIG_QTI_PP
+static int adsp_copp_event_handler(uint32_t opcode,
+		uint32_t token_adm, uint32_t *payload, void *priv)
+{
+	struct snd_soc_pcm_runtime *rtd = priv;
+	int ret;
+
+	if (!rtd) {
+		pr_err("%s: rtd is NULL\n", __func__);
+		return -EINVAL;
+	}
+
+	ret = msm_adsp_copp_inform_mixer_ctl(rtd, payload);
+	if (ret) {
+		pr_err("%s: failed to inform mixer ctrl. err = %d\n",
+			__func__, ret);
+		return -EINVAL;
+	}
+
+	return ret;
+}
+
+static int msm_routing_get_copp_callback_event(struct snd_kcontrol *kcontrol,
+					struct snd_ctl_elem_value *ucontrol)
+{
+	uint32_t payload_size = 0;
+	struct dsp_adm_callback_list *oldest_event = NULL;
+	unsigned long spin_flags = 0;
+	struct dsp_adm_callback_prtd *kctl_prtd = NULL;
+	int ret = 0;
+
+	kctl_prtd = (struct dsp_adm_callback_prtd *)kcontrol->private_data;
+	if (!kctl_prtd) {
+		pr_err("%s: ADM PP event queue is not initialized.\n",
+			__func__);
+		return -EINVAL;
+	}
+
+	spin_lock_irqsave(&kctl_prtd->prtd_spin_lock, spin_flags);
+	pr_debug("%s: %d events in queue.\n", __func__,
+		 kctl_prtd->event_count);
+	if (list_empty(&kctl_prtd->event_queue)) {
+		pr_err("%s: ADM PP event queue is empty.\n", __func__);
+		ret = -EINVAL;
+		spin_unlock_irqrestore(&kctl_prtd->prtd_spin_lock,
+				       spin_flags);
+		goto done;
+	}
+
+	oldest_event = list_first_entry(&kctl_prtd->event_queue,
+					struct dsp_adm_callback_list, list);
+	list_del(&oldest_event->list);
+	kctl_prtd->event_count--;
+	spin_unlock_irqrestore(&kctl_prtd->prtd_spin_lock, spin_flags);
+
+	payload_size = oldest_event->event.payload_len;
+	pr_debug("%s: event fetched: type %d length %d\n",
+		 __func__, oldest_event->event.event_type,
+		 oldest_event->event.payload_len);
+	memcpy(ucontrol->value.bytes.data, &oldest_event->event,
+	       sizeof(struct msm_adsp_event_data) + payload_size);
+	kfree(oldest_event);
+
+done:
+	return ret;
+}
+
+static int msm_routing_put_copp_callback_event(struct snd_kcontrol *kcontrol,
+					struct snd_ctl_elem_value *ucontrol)
+{
+	pr_debug("%s\n", __func__);
+	return 0;
+}
+
+static int msm_copp_callback_event_info(struct snd_kcontrol *kcontrol,
+			struct snd_ctl_elem_info *uinfo)
+{
+	uinfo->type = SNDRV_CTL_ELEM_TYPE_BYTES;
+	uinfo->count =
+		sizeof(((struct snd_ctl_elem_value *)0)->value.bytes.data);
+
+	return 0;
+}
+
+static const struct snd_kcontrol_new copp_callback_event_controls[] = {
+	{
+		.access = SNDRV_CTL_ELEM_ACCESS_READWRITE,
+		.iface  = SNDRV_CTL_ELEM_IFACE_MIXER,
+		.name   = "ADSP COPP Callback Event",
+		.info   = msm_copp_callback_event_info,
+		.get    = msm_routing_get_copp_callback_event,
+		.put    = msm_routing_put_copp_callback_event,
+	},
+};
+
+static int msm_copp_event_info(struct snd_kcontrol *kcontrol,
+			struct snd_ctl_elem_info *uinfo)
+{
+	uinfo->type = SNDRV_CTL_ELEM_TYPE_BYTES;
+	uinfo->count =
+		sizeof(((struct snd_ctl_elem_value *)0)->value.bytes.data);
+
+	return 0;
+}
+
+static int msm_routing_get_copp_event_cmd(struct snd_kcontrol *kcontrol,
+					struct snd_ctl_elem_value *ucontrol)
+{
+	pr_debug("%s\n", __func__);
+	return 0;
+}
+
+static int msm_routing_put_copp_event_cmd(struct snd_kcontrol *kcontrol,
+					struct snd_ctl_elem_value *ucontrol)
+{
+	struct msm_adm_event_data *ev;
+	int be_id, copp_idx = -1, opcode, param_size, port_id, ret;
+
+	ev = (struct msm_adm_event_data *)ucontrol->value.bytes.data;
+	if (ev->event_type < ADSP_ADM_SERVICE_ID ||
+	    ev->event_type >= ADSP_ADM_SERVICE_ID +
+			      ARRAY_SIZE(adm_pp_reg_event_opcode)) {
+		pr_err("%s: invalid ADSP ADM event type %u\n",
+		       __func__, ev->event_type);
+		return -EINVAL;
+	}
+
+	param_size = ev->payload_length - sizeof(struct module_info_data);
+	if (param_size < 0)
+		return -EINVAL;
+
+	opcode = adm_pp_reg_event_opcode[ev->event_type -
+					 ADSP_ADM_SERVICE_ID];
+	be_id = ev->mod_info.be_id;
+	if (be_id < 0 || be_id >= MSM_BACKEND_DAI_MAX)
+		return -EINVAL;
+
+	port_id = msm_bedais[be_id].port_id;
+	pr_debug("%s: port_id= 0x%x, be_id=%d\n", __func__, port_id,
+		 be_id);
+
+	ret = msm_audio_get_copp_idx_from_port_id(port_id, SESSION_TYPE_RX,
+						  &copp_idx);
+	if (ret) {
+		pr_debug("%s: failure in getting copp_idx\n", __func__);
+		return ret;
+	}
+
+	q6adm_register_callback(&adsp_copp_event_handler);
+	ret = q6adm_send_event_register_cmd(port_id, copp_idx,
+					    (u8 *)ev->payload,
+					    param_size, opcode);
+	if (ret)
+		pr_err("%s: failed to register COPP event, ret=%d\n",
+		       __func__, ret);
+
+	return ret;
+}
+
+static const struct snd_kcontrol_new copp_event_controls[] = {
+	{
+		.access = SNDRV_CTL_ELEM_ACCESS_READWRITE,
+		.iface  = SNDRV_CTL_ELEM_IFACE_MIXER,
+		.name   = "COPP Event Cmd",
+		.info   = msm_copp_event_info,
+		.get    = msm_routing_get_copp_event_cmd,
+		.put    = msm_routing_put_copp_event_cmd,
+	},
+};
+#endif
+
 static int msm_aptx_dec_license_control_get(struct snd_kcontrol *kcontrol,
 				struct snd_ctl_elem_value *ucontrol)
 {
@@ -44068,6 +44254,11 @@ void msm_routing_add_doa_control(struct snd_soc_component *component)
 /* Not used but frame seems to require it */
 static int msm_routing_probe(struct snd_soc_component *component)
 {
+#ifdef CONFIG_QTI_PP
+	struct snd_kcontrol *kctl;
+	int ret;
+#endif
+
 	snd_soc_dapm_new_controls(&component->dapm, msm_qdsp6_widgets,
 			   ARRAY_SIZE(msm_qdsp6_widgets));
 
@@ -44195,6 +44386,33 @@ static int msm_routing_probe(struct snd_soc_component *component)
 #ifdef CONFIG_MSM_INTERNAL_MCLK
 	snd_soc_add_component_controls(component, internal_mclk_control,
 				      ARRAY_SIZE(internal_mclk_control));
+#endif
+#ifdef CONFIG_QTI_PP
+	ret = snd_soc_add_component_controls(component,
+					     copp_callback_event_controls,
+					     ARRAY_SIZE(copp_callback_event_controls));
+	if (ret) {
+		pr_err("%s: failed to add COPP callback event controls, ret=%d\n",
+		       __func__, ret);
+		return ret;
+	}
+
+	ret = snd_soc_add_component_controls(component, copp_event_controls,
+					     ARRAY_SIZE(copp_event_controls));
+	if (ret) {
+		pr_err("%s: failed to add COPP event controls, ret=%d\n",
+		       __func__, ret);
+		return ret;
+	}
+
+	kctl = snd_soc_card_get_kcontrol(component->card, DSP_ADM_CALLBACK);
+	if (!kctl) {
+		pr_err("%s: failed to get kctl %s.\n", __func__,
+		       DSP_ADM_CALLBACK);
+		return -EINVAL;
+	}
+	kctl->private_data = NULL;
+
 #endif
 	return 0;
 }
