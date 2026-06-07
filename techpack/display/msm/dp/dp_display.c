@@ -1203,7 +1203,7 @@ static int dp_display_panel_ready(struct dp_display_private *dp)
 		}
 	}
 	if (!dp->dp_display.cont_splash_enabled)
-		dp->panel->init(dp->panel);
+		dp->panel->init(dp->panel, false);
 
 	return 0;
 }

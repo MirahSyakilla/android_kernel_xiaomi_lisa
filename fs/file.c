@@ -742,17 +742,15 @@ static inline void __range_close(struct files_struct *cur_fds, unsigned int fd,
 }
 
 /**
- * sys_close_range() - Close all file descriptors in a given range.
+ * __close_range() - Close all file descriptors in a given range.
  *
  * @fd:     starting file descriptor to close
  * @max_fd: last file descriptor to close
  *
  * This closes a range of file descriptors. All file descriptors
  * from @fd up to and including @max_fd are closed.
- * Currently, errors to close a given file descriptor are ignored.
  */
-SYSCALL_DEFINE3(close_range, unsigned int, fd, unsigned int, max_fd,
-		unsigned int, flags)
+int __close_range(unsigned fd, unsigned max_fd, unsigned int flags)
 {
 	struct task_struct *me = current;
 	struct files_struct *cur_fds = me->files, *fds = NULL;

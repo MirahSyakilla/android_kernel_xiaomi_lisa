@@ -1202,7 +1202,7 @@ static inline int is_highmem(struct zone *zone)
 /* These two functions are used to setup the per zone pages min values */
 struct ctl_table;
 int kswapd_threads_sysctl_handler(struct ctl_table *table, int write,
-					void __user *buffer, size_t *length,
+					void *buffer, size_t *length,
 					loff_t *pos);
 int min_free_kbytes_sysctl_handler(struct ctl_table *, int,
 					void *, size_t *, loff_t *);

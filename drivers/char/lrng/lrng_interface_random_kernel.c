@@ -36,17 +36,15 @@ static int __init lrng_parse_trust_bootloader(char *arg)
 }
 early_param("random.trust_bootloader", lrng_parse_trust_bootloader);
 
-static void __init random_init_early(const char *command_line)
+void __init random_init_early(const char *command_line)
 {
 	lrng_rand_initialize_early();
 	lrng_pool_insert_aux(command_line, strlen(command_line), 0);
 }
 
-int __init random_init(const char *command_line)
+void __init random_init(void)
 {
-	random_init_early(command_line);
 	lrng_rand_initialize();
-	return 0;
 }
 
 /*
