@@ -1796,13 +1796,24 @@ static int tfa98xx_create_controls(struct tfa98xx *tfa98xx)
 	return ret;
 }
 
-static void *tfa98xx_devm_kstrdup(struct device *dev, char *buf)
+static char *tfa98xx_devm_kstrdup(struct device *dev, const char *buf)
 {
 	char *str = devm_kzalloc(dev, strlen(buf) + 1, GFP_KERNEL);
 	if (!str)
 		return str;
 	memcpy(str, buf, strlen(buf));
 	return str;
+}
+
+static char *tfa98xx_devm_i2c_name(struct device *dev,
+	struct i2c_client *i2c, const char *name)
+{
+	char buf[50];
+
+	snprintf(buf, sizeof(buf), "%s-%x-%x", name,
+		i2c->adapter->nr, i2c->addr);
+
+	return tfa98xx_devm_kstrdup(dev, buf);
 }
 
 static int tfa98xx_append_i2c_address(struct device *dev,
@@ -1818,45 +1829,106 @@ static int tfa98xx_append_i2c_address(struct device *dev,
 	int addr = i2c->addr;
 	if (dai_drv && num_dai > 0)
 		for (i = 0; i < num_dai; i++) {
-			memset(buf, 0x00, sizeof(buf));
-			snprintf(buf, 50, "%s-%x-%x", dai_drv[i].name, i2cbus,
-				addr);
-			dai_drv[i].name = tfa98xx_devm_kstrdup(dev, buf);
-			pr_info("tfa98xx_append_i2c_address()  dai_drv[%d].name = [%s]\n", i, dai_drv[i].name);
+			if (dai_drv[i].name) {
+				memset(buf, 0x00, sizeof(buf));
+				snprintf(buf, 50, "%s-%x-%x", dai_drv[i].name, i2cbus,
+					addr);
+				dai_drv[i].name = tfa98xx_devm_kstrdup(dev, buf);
+				if (!dai_drv[i].name)
+					return -ENOMEM;
+				pr_info("tfa98xx_append_i2c_address()  dai_drv[%d].name = [%s]\n", i, dai_drv[i].name);
+			}
 
-			memset(buf, 0x00, sizeof(buf));
-			snprintf(buf, 50, "%s-%x-%x",
-				dai_drv[i].playback.stream_name,
-				i2cbus, addr);
-			dai_drv[i].playback.stream_name = tfa98xx_devm_kstrdup(dev, buf);
-			pr_info("tfa98xx_append_i2c_address()  dai_drv[%d].playback.stream_name = [%s]\n", i, dai_drv[i].playback.stream_name);
+			if (dai_drv[i].playback.stream_name) {
+				memset(buf, 0x00, sizeof(buf));
+				snprintf(buf, 50, "%s-%x-%x",
+					dai_drv[i].playback.stream_name,
+					i2cbus, addr);
+				dai_drv[i].playback.stream_name = tfa98xx_devm_kstrdup(dev, buf);
+				if (!dai_drv[i].playback.stream_name)
+					return -ENOMEM;
+				pr_info("tfa98xx_append_i2c_address()  dai_drv[%d].playback.stream_name = [%s]\n", i, dai_drv[i].playback.stream_name);
+			}
 
-			memset(buf, 0x00, sizeof(buf));
-			snprintf(buf, 50, "%s-%x-%x",
-				dai_drv[i].capture.stream_name,
-				i2cbus, addr);
-			dai_drv[i].capture.stream_name = tfa98xx_devm_kstrdup(dev, buf);
-			pr_info("tfa98xx_append_i2c_address()  dai_drv[%d].capture.stream_name = [%s]\n", i, dai_drv[i].capture.stream_name);
+			if (dai_drv[i].capture.stream_name) {
+				memset(buf, 0x00, sizeof(buf));
+				snprintf(buf, 50, "%s-%x-%x",
+					dai_drv[i].capture.stream_name,
+					i2cbus, addr);
+				dai_drv[i].capture.stream_name = tfa98xx_devm_kstrdup(dev, buf);
+				if (!dai_drv[i].capture.stream_name)
+					return -ENOMEM;
+				pr_info("tfa98xx_append_i2c_address()  dai_drv[%d].capture.stream_name = [%s]\n", i, dai_drv[i].capture.stream_name);
+			}
 		}
 
 	/* the idea behind this is convert:
 	 * SND_SOC_DAPM_AIF_IN("AIF IN", "AIF Playback", 0, SND_SOC_NOPM, 0, 0),
 	 * into:
-	 * SND_SOC_DAPM_AIF_IN("AIF IN", "AIF Playback-2-36", 0, SND_SOC_NOPM, 0, 0),
+	 * SND_SOC_DAPM_AIF_IN("AIF IN-2-36", "AIF Playback-2-36", 0, SND_SOC_NOPM, 0, 0),
 	 */
 	if (widgets && num_widgets > 0)
 		for (i = 0; i < num_widgets; i++) {
-			if (!widgets[i].sname)
-				continue;
+			if (widgets[i].name) {
+				widgets[i].name = tfa98xx_devm_i2c_name(dev, i2c,
+					widgets[i].name);
+				if (!widgets[i].name)
+					return -ENOMEM;
+			}
 			if ((widgets[i].id == snd_soc_dapm_aif_in)
 				|| (widgets[i].id == snd_soc_dapm_aif_out)) {
+				if (!widgets[i].sname)
+					continue;
 				snprintf(buf, 50, "%s-%x-%x", widgets[i].sname,
 					i2cbus, addr);
 				widgets[i].sname = tfa98xx_devm_kstrdup(dev, buf);
+				if (!widgets[i].sname)
+					return -ENOMEM;
 			}
 		}
 
 	return 0;
+}
+
+static int tfa98xx_append_i2c_address_to_routes(struct device *dev,
+	struct i2c_client *i2c,
+	struct snd_soc_dapm_route *routes,
+	int num_routes)
+{
+	int i;
+
+	if (!routes || num_routes <= 0)
+		return 0;
+
+	for (i = 0; i < num_routes; i++) {
+		if (routes[i].sink) {
+			routes[i].sink = tfa98xx_devm_i2c_name(dev, i2c,
+				routes[i].sink);
+			if (!routes[i].sink)
+				return -ENOMEM;
+		}
+
+		if (routes[i].source) {
+			routes[i].source = tfa98xx_devm_i2c_name(dev, i2c,
+				routes[i].source);
+			if (!routes[i].source)
+				return -ENOMEM;
+		}
+	}
+
+	return 0;
+}
+
+static int tfa98xx_dapm_ignore_i2c_suspend(struct tfa98xx *tfa98xx,
+	struct snd_soc_dapm_context *dapm, const char *name)
+{
+	char *pin;
+
+	pin = tfa98xx_devm_i2c_name(&tfa98xx->i2c->dev, tfa98xx->i2c, name);
+	if (!pin)
+		return -ENOMEM;
+
+	return snd_soc_dapm_ignore_suspend(dapm, pin);
 }
 
 static struct snd_soc_dapm_widget tfa98xx_dapm_widgets_common[] = {
@@ -1910,58 +1982,93 @@ static struct snd_soc_dapm_context *snd_soc_codec_get_dapm(struct snd_soc_codec 
 }
 #endif
 
-static void tfa98xx_add_widgets(struct tfa98xx *tfa98xx)
+static int tfa98xx_add_widgets_and_routes(struct tfa98xx *tfa98xx,
+	struct snd_soc_dapm_context *dapm,
+	const struct snd_soc_dapm_widget *template_widgets,
+	unsigned int num_widgets,
+	const struct snd_soc_dapm_route *template_routes,
+	unsigned int num_routes)
+{
+	struct snd_soc_dapm_widget *widgets;
+	struct snd_soc_dapm_route *routes;
+	struct device *dev = &tfa98xx->i2c->dev;
+	int ret;
+
+	widgets = devm_kmemdup(dev, template_widgets,
+		sizeof(*template_widgets) * num_widgets, GFP_KERNEL);
+	if (!widgets)
+		return -ENOMEM;
+
+	ret = tfa98xx_append_i2c_address(dev, tfa98xx->i2c, widgets,
+		num_widgets, NULL, 0);
+	if (ret)
+		return ret;
+
+	ret = snd_soc_dapm_new_controls(dapm, widgets, num_widgets);
+	if (ret)
+		return ret;
+
+	routes = devm_kmemdup(dev, template_routes,
+		sizeof(*template_routes) * num_routes, GFP_KERNEL);
+	if (!routes)
+		return -ENOMEM;
+
+	ret = tfa98xx_append_i2c_address_to_routes(dev, tfa98xx->i2c,
+		routes, num_routes);
+	if (ret)
+		return ret;
+
+	return snd_soc_dapm_add_routes(dapm, routes, num_routes);
+}
+
+static int tfa98xx_add_widgets(struct tfa98xx *tfa98xx)
 {
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4,18,0)
 	struct snd_soc_dapm_context *dapm = snd_soc_component_get_dapm(tfa98xx->codec);
 #else
 	struct snd_soc_dapm_context *dapm = snd_soc_codec_get_dapm(tfa98xx->codec);
 #endif
-	struct snd_soc_dapm_widget *widgets;
-	unsigned int num_dapm_widgets = ARRAY_SIZE(tfa98xx_dapm_widgets_common);
+	int ret;
 
-	widgets = devm_kzalloc(&tfa98xx->i2c->dev,
-		sizeof(struct snd_soc_dapm_widget) *
+	ret = tfa98xx_add_widgets_and_routes(tfa98xx, dapm,
+		tfa98xx_dapm_widgets_common,
 		ARRAY_SIZE(tfa98xx_dapm_widgets_common),
-		GFP_KERNEL);
-	if (!widgets)
-		return;
-	memcpy(widgets, tfa98xx_dapm_widgets_common,
-		sizeof(struct snd_soc_dapm_widget) *
-		ARRAY_SIZE(tfa98xx_dapm_widgets_common));
-
-	tfa98xx_append_i2c_address(&tfa98xx->i2c->dev,
-		tfa98xx->i2c,
-		widgets,
-		num_dapm_widgets,
-		NULL,
-		0);
-
-	snd_soc_dapm_new_controls(dapm, widgets,
-		ARRAY_SIZE(tfa98xx_dapm_widgets_common));
-	snd_soc_dapm_add_routes(dapm, tfa98xx_dapm_routes_common,
+		tfa98xx_dapm_routes_common,
 		ARRAY_SIZE(tfa98xx_dapm_routes_common));
+	if (ret)
+		return ret;
 
 	if (tfa98xx->flags & TFA98XX_FLAG_STEREO_DEVICE) {
-		snd_soc_dapm_new_controls(dapm, tfa98xx_dapm_widgets_stereo,
-			ARRAY_SIZE(tfa98xx_dapm_widgets_stereo));
-		snd_soc_dapm_add_routes(dapm, tfa98xx_dapm_routes_stereo,
+		ret = tfa98xx_add_widgets_and_routes(tfa98xx, dapm,
+			tfa98xx_dapm_widgets_stereo,
+			ARRAY_SIZE(tfa98xx_dapm_widgets_stereo),
+			tfa98xx_dapm_routes_stereo,
 			ARRAY_SIZE(tfa98xx_dapm_routes_stereo));
+		if (ret)
+			return ret;
 	}
 
 	if (tfa98xx->flags & TFA98XX_FLAG_MULTI_MIC_INPUTS) {
-		snd_soc_dapm_new_controls(dapm, tfa9888_dapm_inputs,
-			ARRAY_SIZE(tfa9888_dapm_inputs));
-		snd_soc_dapm_add_routes(dapm, tfa9888_input_dapm_routes,
+		ret = tfa98xx_add_widgets_and_routes(tfa98xx, dapm,
+			tfa9888_dapm_inputs,
+			ARRAY_SIZE(tfa9888_dapm_inputs),
+			tfa9888_input_dapm_routes,
 			ARRAY_SIZE(tfa9888_input_dapm_routes));
+		if (ret)
+			return ret;
 	}
 
 	if (tfa98xx->flags & TFA98XX_FLAG_SAAM_AVAILABLE) {
-		snd_soc_dapm_new_controls(dapm, tfa98xx_dapm_widgets_saam,
-			ARRAY_SIZE(tfa98xx_dapm_widgets_saam));
-		snd_soc_dapm_add_routes(dapm, tfa98xx_dapm_routes_saam,
+		ret = tfa98xx_add_widgets_and_routes(tfa98xx, dapm,
+			tfa98xx_dapm_widgets_saam,
+			ARRAY_SIZE(tfa98xx_dapm_widgets_saam),
+			tfa98xx_dapm_routes_saam,
 			ARRAY_SIZE(tfa98xx_dapm_routes_saam));
+		if (ret)
+			return ret;
 	}
+
+	return 0;
 }
 
 /* I2C wrapper functions */
@@ -3153,18 +3260,58 @@ static int tfa98xx_probe(struct snd_soc_codec *codec)
 		return ret;
 	}
 #endif
-	tfa98xx_add_widgets(tfa98xx);
+	ret = tfa98xx_add_widgets(tfa98xx);
+	if (ret) {
+		dev_err(codec->dev, "Failed to add TFA98xx DAPM widgets: %d\n",
+			ret);
+		return ret;
+	}
 
-	snd_soc_dapm_ignore_suspend(dapm, "AIF IN");
-	snd_soc_dapm_ignore_suspend(dapm, "AIF OUT");
-	snd_soc_dapm_ignore_suspend(dapm, "OUTL");
-	snd_soc_dapm_ignore_suspend(dapm, "AEC Loopback");
-	snd_soc_dapm_ignore_suspend(dapm, "DMIC1");
-	snd_soc_dapm_ignore_suspend(dapm, "DMIC2");
-	snd_soc_dapm_ignore_suspend(dapm, "DMIC3");
-	snd_soc_dapm_ignore_suspend(dapm, "DMIC4");
-	snd_soc_dapm_ignore_suspend(dapm, "AIF Playback-1-34");
-	snd_soc_dapm_ignore_suspend(dapm, "AIF Capture-1-34");
+	ret = tfa98xx_dapm_ignore_i2c_suspend(tfa98xx, dapm, "AIF IN");
+	if (ret)
+		return ret;
+	ret = tfa98xx_dapm_ignore_i2c_suspend(tfa98xx, dapm, "AIF OUT");
+	if (ret)
+		return ret;
+	ret = tfa98xx_dapm_ignore_i2c_suspend(tfa98xx, dapm, "OUTL");
+	if (ret)
+		return ret;
+	ret = tfa98xx_dapm_ignore_i2c_suspend(tfa98xx, dapm, "AEC Loopback");
+	if (ret)
+		return ret;
+	ret = tfa98xx_dapm_ignore_i2c_suspend(tfa98xx, dapm, "AIF Playback");
+	if (ret)
+		return ret;
+	ret = tfa98xx_dapm_ignore_i2c_suspend(tfa98xx, dapm, "AIF Capture");
+	if (ret)
+		return ret;
+
+	if (tfa98xx->flags & TFA98XX_FLAG_MULTI_MIC_INPUTS) {
+		ret = tfa98xx_dapm_ignore_i2c_suspend(tfa98xx, dapm, "DMIC1");
+		if (ret)
+			return ret;
+		ret = tfa98xx_dapm_ignore_i2c_suspend(tfa98xx, dapm, "DMIC2");
+		if (ret)
+			return ret;
+		ret = tfa98xx_dapm_ignore_i2c_suspend(tfa98xx, dapm, "DMIC3");
+		if (ret)
+			return ret;
+		ret = tfa98xx_dapm_ignore_i2c_suspend(tfa98xx, dapm, "DMIC4");
+		if (ret)
+			return ret;
+	}
+
+	if (tfa98xx->flags & TFA98XX_FLAG_STEREO_DEVICE) {
+		ret = tfa98xx_dapm_ignore_i2c_suspend(tfa98xx, dapm, "OUTR");
+		if (ret)
+			return ret;
+	}
+
+	if (tfa98xx->flags & TFA98XX_FLAG_SAAM_AVAILABLE) {
+		ret = tfa98xx_dapm_ignore_i2c_suspend(tfa98xx, dapm, "SAAM MIC");
+		if (ret)
+			return ret;
+	}
 
 	dev_info(codec->dev, "tfa98xx codec registered (%s)",
 		tfa98xx->fw.name);
@@ -4129,12 +4276,14 @@ static int tfa98xx_i2c_probe(struct i2c_client *i2c,
 		return -ENOMEM;
 	memcpy(dai, tfa98xx_dai, sizeof(tfa98xx_dai));
 
-	tfa98xx_append_i2c_address(&i2c->dev,
+	ret = tfa98xx_append_i2c_address(&i2c->dev,
 		i2c,
 		NULL,
 		0,
 		dai,
 		ARRAY_SIZE(tfa98xx_dai));
+	if (ret)
+		return ret;
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4,18,0)
 	ret = devm_snd_soc_register_component(&i2c->dev,
@@ -4313,4 +4462,3 @@ module_exit(tfa98xx_i2c_exit);
 
 MODULE_DESCRIPTION("ASoC TFA98XX driver");
 MODULE_LICENSE("GPL");
-
