@@ -5302,8 +5302,9 @@ static int lahaina_tdm_snd_hw_params(struct snd_pcm_substream *substream,
 		channels = LISA_TFA_VI_FEEDBACK_CHANNELS;
 		if (slots < LISA_TFA_VI_FEEDBACK_CHANNELS)
 			slots = LISA_TFA_VI_FEEDBACK_CHANNELS;
-		pr_debug("%s: Lisa TFA VI feedback: channels=%u slots=%u\n",
-			__func__, channels, slots);
+		pr_info("%s: Lisa TFA VI feedback: channels=%u slots=%u slot0=%u slot1=%u slot2=%u slot3=%u\n",
+			__func__, channels, slots, slot_offset[0],
+			slot_offset[1], slot_offset[2], slot_offset[3]);
 	}
 #endif
 

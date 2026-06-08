@@ -3070,10 +3070,6 @@ enum Tfa98xx_Error tfaRunStartup(struct tfa_device *tfa, int profile)
 		 * in case something else was given in cnt file, profile below will apply this. */
 		TFA_SET_BF(tfa, AUDFS, audfs);
 		TFA_SET_BF(tfa, FRACTDEL, fractdel);
-#ifdef __KERNEL__		
-	if ((tfa->dynamicTDMmode == 3) && tfa_dev_set_tdm_bitwidth(tfa,tfa->bitwidth))
-		return Tfa98xx_Error_Fail;
-#endif//	
 	}
 	else {
 		pr_debug("\nWarning: No init keyword found in the cnt file. Init is skipped! \n");
@@ -3088,6 +3084,16 @@ enum Tfa98xx_Error tfaRunStartup(struct tfa_device *tfa, int profile)
 	// NOTE we may still have ACS=1 so we can switch sample rate here
 	err = tfaContWriteRegsProf(tfa, profile);
 	PRINT_ASSERT(err);
+#ifdef __KERNEL__
+	if ((tfa->daimap & Tfa98xx_DAI_TDM) && tfa->bitwidth > 0) {
+		pr_info("TFA startup TDM bitwidth: dev=%d addr=0x%x width=%d dynamic=%d daimap=0x%x family=%d probus=%d\n",
+			tfa->dev_idx, tfa->slave_address, tfa->bitwidth,
+			tfa->dynamicTDMmode, tfa->daimap, tfa->tfa_family,
+			tfa->is_probus_device);
+		if (tfa_dev_set_tdm_bitwidth(tfa, tfa->bitwidth))
+			return Tfa98xx_Error_Fail;
+	}
+#endif//
 
 	/* Factory trimming for the Boost converter */
 	tfa98xx_factory_trimmer(tfa);
@@ -4291,9 +4297,40 @@ enum Tfa98xx_Error tfa_status(struct tfa_device *tfa)
 	return Tfa98xx_Error_Ok;
 }
 #ifdef __KERNEL__
+static void tfa_log_tdm_registers(struct tfa_device *tfa, const char *context)
+{
+	unsigned short reg20 = 0;
+	unsigned short reg21 = 0;
+	unsigned short reg22 = 0;
+	unsigned short reg23 = 0;
+	unsigned short reg26 = 0;
+	unsigned short reg27 = 0;
+	unsigned short reg68 = 0;
+	enum Tfa98xx_Error err;
+
+	err = reg_read(tfa, 0x20, &reg20);
+	err |= reg_read(tfa, 0x21, &reg21);
+	err |= reg_read(tfa, 0x22, &reg22);
+	err |= reg_read(tfa, 0x23, &reg23);
+	err |= reg_read(tfa, 0x26, &reg26);
+	err |= reg_read(tfa, 0x27, &reg27);
+	err |= reg_read(tfa, 0x68, &reg68);
+	if (err) {
+		pr_err("TFA %s TDM regs: dev=%d addr=0x%x rev=0x%x read failed err=%d\n",
+			context, tfa->dev_idx, tfa->slave_address,
+			tfa->rev, err);
+		return;
+	}
+
+	pr_info("TFA %s TDM regs: dev=%d addr=0x%x rev=0x%x r20=0x%04x r21=0x%04x r22=0x%04x r23=0x%04x r26=0x%04x r27=0x%04x r68=0x%04x\n",
+		context, tfa->dev_idx, tfa->slave_address, tfa->rev,
+		reg20, reg21, reg22, reg23, reg26, reg27, reg68);
+}
+
 int tfa_dev_set_tdm_bitwidth(struct tfa_device* tfa, int width)
 {
 	uint8_t nbck, slotlen, samplesize;
+	int ret;
 
 	switch (width) {
 	case 16: /* 16-bit sample in 16-bit slot */
@@ -4320,26 +4357,52 @@ int tfa_dev_set_tdm_bitwidth(struct tfa_device* tfa, int width)
 	if (tfa->tfa_family == 2)
 	{
 		/* stop tdm */
-		TFA2_SET_TDM(tfa, TDME, 0);
-		TFA2_SET_TDM(tfa, TDMNBCK, nbck);
-		TFA2_SET_TDM(tfa, TDMSLLN, slotlen);
-		TFA2_SET_TDM(tfa, TDMSSIZE, samplesize);
+		ret = TFA2_SET_TDM(tfa, TDME, 0);
+		if (ret)
+			goto err;
+		ret = TFA2_SET_TDM(tfa, TDMNBCK, nbck);
+		if (ret)
+			goto err;
+		ret = TFA2_SET_TDM(tfa, TDMSLLN, slotlen);
+		if (ret)
+			goto err;
+		ret = TFA2_SET_TDM(tfa, TDMSSIZE, samplesize);
+		if (ret)
+			goto err;
 		/* enable tdm */
-		TFA2_SET_TDM(tfa, TDME, 1);
+		ret = TFA2_SET_TDM(tfa, TDME, 1);
+		if (ret)
+			goto err;
 	}
 	else if (tfa->daimap == Tfa98xx_DAI_TDM)
 	{
 		/* stop tdm */
-		tfa_set_bf(tfa, TFA1_BF_TDMEN, 0);
-		tfa_set_bf(tfa, TFA1_BF_NBCK, nbck);
-		tfa_set_bf(tfa, TFA1_BF_TDMSLLN, slotlen);
-		tfa_set_bf(tfa, TFA1_BF_TDMSAMSZ, samplesize);
+		ret = tfa_set_bf(tfa, TFA1_BF_TDMEN, 0);
+		if (ret)
+			goto err;
+		ret = tfa_set_bf(tfa, TFA1_BF_NBCK, nbck);
+		if (ret)
+			goto err;
+		ret = tfa_set_bf(tfa, TFA1_BF_TDMSLLN, slotlen);
+		if (ret)
+			goto err;
+		ret = tfa_set_bf(tfa, TFA1_BF_TDMSAMSZ, samplesize);
+		if (ret)
+			goto err;
 		/* enable tdm */
-		tfa_set_bf(tfa, TFA1_BF_TDMEN, 1);
+		ret = tfa_set_bf(tfa, TFA1_BF_TDMEN, 1);
+		if (ret)
+			goto err;
 
 	}
+	tfa_log_tdm_registers(tfa, "bitwidth");
 	return 0;
 
+err:
+	pr_err("failed to set tdm bitwidth:%d dev=%d addr=0x%x rev=0x%x ret=%d\n",
+		width, tfa->dev_idx, tfa->slave_address, tfa->rev, ret);
+	tfa_log_tdm_registers(tfa, "bitwidth-failed");
+	return ret;
 }
 #define NR_OF_BATS 10
 void tfa_adapt_noisemode(struct tfa_device *tfa)

@@ -871,7 +871,11 @@ uint16_t tfaContBfEnumAny(const char *name);
 
 #define TFA_FAM(tfa, fieldname) ((tfa->tfa_family == 1) ? TFA1_BF_##fieldname :  TFA2_BF_##fieldname)
 #define TFA_FAM_FW(tfa, fwname) ((tfa->tfa_family == 1) ? TFA1_FW_##fwname :  TFA2_FW_##fwname)
-#define TFA2_FAM_TDM(tfa, fieldname) (((tfa->rev & 0xff) == 0x94) ? TFA9894_BF_##fieldname :  TFA2_BF_##fieldname)
+#define TFA2_FAM_TDM(tfa, fieldname) \
+	(((tfa->rev & 0xff) == 0x73) ? TFA9873_BF_##fieldname : \
+	(((tfa->rev & 0xff) == 0x78) ? TFA9878_BF_##fieldname : \
+	(((tfa->rev & 0xff) == 0x94) ? TFA9894_BF_##fieldname : \
+	TFA2_BF_##fieldname)))
 
 /* set/get bit fields to HW register*/
 #define TFA_SET_BF(tfa, fieldname, value) tfa_set_bf(tfa, TFA_FAM(tfa, fieldname), value)
