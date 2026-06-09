@@ -693,6 +693,19 @@ int proc_cgroupstats_show(struct seq_file *m, void *v)
 			   atomic_read(&ss->root->nr_cgrps),
 			   cgroup_ssid_enabled(i));
 
+#ifdef CONFIG_CGROUP_SCHED
+	/*
+	 * Android userspace may still discover and mount the legacy schedtune
+	 * controller.  The scheduler state is backed by the cpu/uclamp
+	 * controller, so mirror cpu here and let the cgroup1 mount parser alias
+	 * -o schedtune to cpu.
+	 */
+	ss = cgroup_subsys[cpu_cgrp_id];
+	seq_printf(m, "schedtune\t%d\t%d\t%d\n",
+		   ss->root->hierarchy_id, atomic_read(&ss->root->nr_cgrps),
+		   cgroup_ssid_enabled(cpu_cgrp_id));
+#endif
+
 	mutex_unlock(&cgroup_mutex);
 	return 0;
 }
@@ -945,6 +958,24 @@ int cgroup1_parse_param(struct fs_context *fc, struct fs_parameter *param)
 			param->string = NULL;
 			return 0;
 		}
+#ifdef CONFIG_CGROUP_SCHED
+		/*
+		 * Android userspace before uclamp may still mount the
+		 * schedtune controller at /dev/stune.  This kernel exposes the
+		 * replacement knobs through the legacy cpu controller, so accept
+		 * schedtune as an alias for cpu instead of leaving /dev/stune as
+		 * a hollow compatibility directory.
+		 */
+		if (!strcmp(param->key, "schedtune")) {
+			if (!cgroup_ssid_enabled(cpu_cgrp_id) ||
+			    cgroup1_ssid_disabled(cpu_cgrp_id))
+				return invalf(fc, "Disabled controller '%s'",
+					      param->key);
+			ctx->subsys_mask |= (1 << cpu_cgrp_id);
+			ctx->schedtune_compat = true;
+			return 0;
+		}
+#endif
 		for_each_subsys(ss, i) {
 			if (strcmp(param->key, ss->legacy_name))
 				continue;
@@ -1254,6 +1285,11 @@ int cgroup1_get_tree(struct fs_context *fc)
 
 	if (!ret)
 		ret = cgroup_do_get_tree(fc);
+
+#ifdef CONFIG_CGROUP_SCHED
+	if (!ret && ctx->schedtune_compat)
+		ctx->root->schedtune_compat = true;
+#endif
 
 	if (!ret && percpu_ref_is_dying(&ctx->root->cgrp.self.refcnt)) {
 		fc_drop_locked(fc);

@@ -53,6 +53,7 @@ struct cgroup_fs_context {
 	bool		cpuset_clone_children;
 	bool		none;			/* User explicitly requested empty subsystem */
 	bool		all_ss;			/* Seen 'all' option */
+	bool		schedtune_compat;	/* schedtune alias for cpu */
 	u16		subsys_mask;		/* Selected subsystems */
 	char		*name;			/* Hierarchy name */
 	char		*release_agent;		/* Path for release notifications */

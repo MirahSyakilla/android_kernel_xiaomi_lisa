@@ -9914,37 +9914,45 @@ capacity_from_percent(char *buf)
 	return req;
 }
 
-static ssize_t cpu_uclamp_write(struct kernfs_open_file *of, char *buf,
-				size_t nbytes, loff_t off,
-				enum uclamp_id clamp_id)
+static void cpu_uclamp_apply(struct cgroup_subsys_state *css,
+			     struct uclamp_request *req,
+			     enum uclamp_id clamp_id)
 {
-	struct uclamp_request req;
 	struct task_group *tg;
-
-	req = capacity_from_percent(buf);
-	if (req.ret)
-		return req.ret;
 
 	static_branch_enable(&sched_uclamp_used);
 
 	mutex_lock(&uclamp_mutex);
 	rcu_read_lock();
 
-	tg = css_tg(of_css(of));
-	if (tg->uclamp_req[clamp_id].value != req.util)
-		uclamp_se_set(&tg->uclamp_req[clamp_id], req.util, false);
+	tg = css_tg(css);
+	if (tg->uclamp_req[clamp_id].value != req->util)
+		uclamp_se_set(&tg->uclamp_req[clamp_id], req->util, false);
 
 	/*
 	 * Because of not recoverable conversion rounding we keep track of the
 	 * exact requested value
 	 */
-	tg->uclamp_pct[clamp_id] = req.percent;
+	tg->uclamp_pct[clamp_id] = req->percent;
 
 	/* Update effective clamps to track the most restrictive value */
-	cpu_util_update_eff(of_css(of));
+	cpu_util_update_eff(css);
 
 	rcu_read_unlock();
 	mutex_unlock(&uclamp_mutex);
+}
+
+static ssize_t cpu_uclamp_write(struct kernfs_open_file *of, char *buf,
+				size_t nbytes, loff_t off,
+				enum uclamp_id clamp_id)
+{
+	struct uclamp_request req;
+
+	req = capacity_from_percent(buf);
+	if (req.ret)
+		return req.ret;
+
+	cpu_uclamp_apply(of_css(of), &req, clamp_id);
 
 	return nbytes;
 }
@@ -10017,6 +10025,55 @@ static u64 cpu_uclamp_ls_read_u64(struct cgroup_subsys_state *css,
 	struct task_group *tg = css_tg(css);
 
 	return (u64) tg->latency_sensitive;
+}
+
+static s64 cpu_schedtune_boost_read_s64(struct cgroup_subsys_state *css,
+					struct cftype *cft)
+{
+	struct task_group *tg = css_tg(css);
+
+	return DIV_ROUND_CLOSEST(tg->uclamp_pct[UCLAMP_MIN],
+				 POW10(UCLAMP_PERCENT_SHIFT));
+}
+
+static int cpu_schedtune_boost_write_s64(struct cgroup_subsys_state *css,
+					 struct cftype *cftype, s64 boost)
+{
+	struct uclamp_request req = {
+		.percent = 0,
+		.util = 0,
+		.ret = 0,
+	};
+
+	if (boost < -100 || boost > 100)
+		return -EINVAL;
+
+	if (boost > 0) {
+		req.percent = boost * POW10(UCLAMP_PERCENT_SHIFT);
+		req.util = req.percent << SCHED_CAPACITY_SHIFT;
+		req.util = DIV_ROUND_CLOSEST_ULL(req.util,
+						 UCLAMP_PERCENT_SCALE);
+	}
+
+	cpu_uclamp_apply(css, &req, UCLAMP_MIN);
+
+	return 0;
+}
+
+static s64 cpu_schedtune_prefer_idle_read_s64(struct cgroup_subsys_state *css,
+					      struct cftype *cft)
+{
+	return cpu_uclamp_ls_read_u64(css, cft);
+}
+
+static int cpu_schedtune_prefer_idle_write_s64(struct cgroup_subsys_state *css,
+					       struct cftype *cftype,
+					       s64 prefer_idle)
+{
+	if (prefer_idle < 0)
+		return -EINVAL;
+
+	return cpu_uclamp_ls_write_u64(css, cftype, prefer_idle);
 }
 #endif /* CONFIG_UCLAMP_TASK_GROUP */
 
@@ -10448,6 +10505,18 @@ static struct cftype cpu_legacy_files[] = {
 	},
 #endif
 #ifdef CONFIG_UCLAMP_TASK_GROUP
+	{
+		.name = "schedtune.boost",
+		.flags = CFTYPE_NO_PREFIX | CFTYPE_WORLD_WRITABLE,
+		.read_s64 = cpu_schedtune_boost_read_s64,
+		.write_s64 = cpu_schedtune_boost_write_s64,
+	},
+	{
+		.name = "schedtune.prefer_idle",
+		.flags = CFTYPE_NO_PREFIX | CFTYPE_WORLD_WRITABLE,
+		.read_s64 = cpu_schedtune_prefer_idle_read_s64,
+		.write_s64 = cpu_schedtune_prefer_idle_write_s64,
+	},
 	{
 		.name = "uclamp.min",
 		.flags = CFTYPE_NOT_ON_ROOT,

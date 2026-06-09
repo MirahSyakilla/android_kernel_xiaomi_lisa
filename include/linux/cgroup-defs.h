@@ -532,6 +532,9 @@ struct cgroup_root {
 
 	/* The name for this hierarchy - may be empty */
 	char name[MAX_CGROUP_ROOT_NAMELEN];
+
+	/* Android schedtune compatibility mount backed by the cpu controller */
+	bool schedtune_compat;
 };
 
 /*

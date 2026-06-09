@@ -6131,6 +6131,28 @@ int proc_cgroup_show(struct seq_file *m, struct pid_namespace *ns,
 			seq_puts(m, " (deleted)\n");
 		else
 			seq_putc(m, '\n');
+
+#ifdef CONFIG_CGROUP_SCHED
+		/*
+		 * Android API-30 task profiles still resolve schedtune by
+		 * searching /proc/<pid>/cgroup for ":schedtune:".  This
+		 * kernel backs /dev/stune with the cpu/uclamp controller,
+		 * so expose a second legacy-name line only after userspace
+		 * explicitly mounted the schedtune compatibility alias.
+		 */
+		if (root->schedtune_compat) {
+			seq_printf(m, "%d:schedtune:", root->hierarchy_id);
+			if (cgroup_on_dfl(cgrp) || !(tsk->flags & PF_EXITING))
+				seq_puts(m, buf);
+			else
+				seq_puts(m, "/");
+
+			if (cgroup_on_dfl(cgrp) && cgroup_is_dead(cgrp))
+				seq_puts(m, " (deleted)\n");
+			else
+				seq_putc(m, '\n');
+		}
+#endif
 	}
 
 	retval = 0;
