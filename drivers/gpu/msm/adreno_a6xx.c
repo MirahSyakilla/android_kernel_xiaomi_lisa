@@ -2533,6 +2533,7 @@ int a6xx_perfcounter_update(struct adreno_device *adreno_dev,
 	struct cpu_gpu_lock *lock = ptr;
 	u32 *data = ptr + sizeof(*lock);
 	int i, offset = 0;
+	u32 pending_pairs = 2;
 
 	if (cpu_gpu_lock(lock)) {
 		cpu_gpu_unlock(lock);
@@ -2561,6 +2562,11 @@ int a6xx_perfcounter_update(struct adreno_device *adreno_dev,
 	 * so overwrite the existing A6XX_RBBM_PERFCNTL_CTRL and add it back to
 	 * the end.
 	 */
+	if ((offset + (pending_pairs * 2)) >=
+			(adreno_dev->pwrup_reglist->size / sizeof(u32))) {
+		cpu_gpu_unlock(lock);
+		return -ENOSPC;
+	}
 
 	data[offset] = reg->select;
 	data[offset + 1] = reg->countable;

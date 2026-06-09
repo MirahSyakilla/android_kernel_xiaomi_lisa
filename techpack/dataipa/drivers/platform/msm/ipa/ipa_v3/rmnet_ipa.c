@@ -1322,10 +1322,19 @@ out:
 static void ipa3_wwan_tx_timeout(struct net_device *dev)
 {
 	struct ipa3_wwan_private *wwan_ptr = netdev_priv(dev);
+	int outstanding = atomic_read(&wwan_ptr->outstanding_pkts);
 
-	if (atomic_read(&wwan_ptr->outstanding_pkts) != 0)
+	if (outstanding != 0) {
 		IPAWANERR("[%s] data stall in UL, %d outstanding\n",
-			dev->name, atomic_read(&wwan_ptr->outstanding_pkts));
+			dev->name, outstanding);
+	} else if (netif_queue_stopped(dev) &&
+		   !atomic_read(&rmnet_ipa3_ctx->is_ssr) &&
+		   !atomic_read(&rmnet_ipa3_ctx->ap_suspend)) {
+		IPAWANERR("[%s] recovering stopped TX queue with no outstanding packets\n",
+			dev->name);
+		netif_trans_update(dev);
+		netif_wake_queue(dev);
+	}
 }
 
 /**
