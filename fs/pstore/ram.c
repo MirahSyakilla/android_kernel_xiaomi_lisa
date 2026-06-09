@@ -917,6 +917,7 @@ static int ramoops_probe(struct platform_device *pdev)
 	 */
 	mem_size = pdata->mem_size;
 	mem_address = pdata->mem_address;
+	mem_type = pdata->mem_type;
 	record_size = pdata->record_size;
 	dump_oops = pdata->dump_oops;
 	ramoops_console_size = pdata->console_size;
