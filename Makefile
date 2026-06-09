@@ -1671,7 +1671,7 @@ help:
 	 echo  '                    (default: $(INSTALL_HDR_PATH))'; \
 	 echo  ''
 	@echo  'Release helpers:'
-	@echo  '  ak3             - Copy Image/dtbo.img to $(AK3_DIR) and create'
+	@echo  '  ak3             - Build dtb/dtbo.img, copy artifacts to $(AK3_DIR), and create'
 	@echo  '                    $(AK3_RELEASE_DIR)/$(AK3_ZIP_PREFIX)_<version>.zip'
 	@echo  '  adb_push        - adb push the versioned zip to /storage/emulated/0/'
 	@echo  ''
@@ -1970,10 +1970,13 @@ AK3_DIR := $(HOME)/AnyKernel3
 AK3_RELEASE_DIR := $(HOME)/KernelReleases
 AK3_VERSION_FILE := $(AK3_DIR)/version.txt
 AK3_ZIP_PREFIX := MeowKernel
-AK3_IMAGE_SRC := $(objtree)/arch/$(SRCARCH)/boot/Image
-AK3_DTBO_SRC := $(objtree)/arch/$(SRCARCH)/boot/dtbo.img
+AK3_BOOT_DIR := $(objtree)/arch/$(SRCARCH)/boot
+AK3_DTS_DIR := $(AK3_BOOT_DIR)/dts/vendor/qcom
+AK3_IMAGE_SRC := $(AK3_BOOT_DIR)/Image
+AK3_DTB_SRC := $(AK3_BOOT_DIR)/dtb
+AK3_DTBO_SRC := $(AK3_BOOT_DIR)/dtbo.img
 
-PHONY += checkstack kernelrelease kernelversion image_name ak3 adb_push
+PHONY += checkstack kernelrelease kernelversion image_name dtb dtbo.img dt_images ak3 adb_push
 
 # UML needs a little special treatment here.  It wants to use the host
 # toolchain, so needs $(SUBARCH) passed to checkstack.pl.  Everyone
@@ -1998,10 +2001,40 @@ kernelversion:
 image_name:
 	@echo $(KBUILD_IMAGE)
 
-ak3: Image dtbo.img
+dtb: dtbs
+	@set -e; \
+	dtb_dir="$(AK3_DTS_DIR)"; \
+	out="$(AK3_DTB_SRC)"; \
+	files=$$(find "$$dtb_dir" -maxdepth 1 -type f -name '*.dtb' | LC_ALL=C sort); \
+	if [ -z "$$files" ]; then \
+		echo "Missing DTB outputs in $$dtb_dir"; \
+		exit 1; \
+	fi; \
+	cat $$files > "$$out"; \
+	echo "Created $$out"
+
+dtbo.img: dtbs
+	@set -e; \
+	dtbo_dir="$(AK3_DTS_DIR)"; \
+	out="$(AK3_DTBO_SRC)"; \
+	files=$$(find "$$dtbo_dir" -maxdepth 1 -type f -name '*.dtbo' | LC_ALL=C sort); \
+	if [ -z "$$files" ]; then \
+		echo "Missing DTBO outputs in $$dtbo_dir"; \
+		exit 1; \
+	fi; \
+	python3 "$(srctree)/scripts/mkdtboimg.py" create "$$out" --page_size=4096 $$files; \
+	echo "Created $$out"
+
+dt_images: dtb dtbo.img
+
+ak3: Image dt_images
 	@set -e; \
 	if [ ! -f "$(AK3_IMAGE_SRC)" ]; then \
 		echo "Missing kernel image: $(AK3_IMAGE_SRC)"; \
+		exit 1; \
+	fi; \
+	if [ ! -f "$(AK3_DTB_SRC)" ]; then \
+		echo "Missing dtb: $(AK3_DTB_SRC)"; \
 		exit 1; \
 	fi; \
 	if [ ! -f "$(AK3_DTBO_SRC)" ]; then \
@@ -2013,6 +2046,7 @@ ak3: Image dtbo.img
 		exit 1; \
 	fi; \
 	cp -f "$(AK3_IMAGE_SRC)" "$(AK3_DIR)/Image"; \
+	cp -f "$(AK3_DTB_SRC)" "$(AK3_DIR)/dtb"; \
 	cp -f "$(AK3_DTBO_SRC)" "$(AK3_DIR)/dtbo.img"; \
 	version=$$(tr -d '\r\n' < "$(AK3_VERSION_FILE)"); \
 	if [ -z "$$version" ]; then \
@@ -2041,7 +2075,7 @@ adb_push: ak3
 		echo "Missing zip: $$zip_file (run 'make ak3' first)"; \
 		exit 1; \
 	fi; \
-	adb push "$$zip_file" /storage/emulated/0/
+	adb push "$$zip_file" "/storage/emulated/0/$$(basename "$$zip_file")"
 
 # Clear a bunch of variables before executing the submake
 
