@@ -115,17 +115,18 @@ static void fuse_file_put(struct inode *inode, struct fuse_file *ff,
 {
 	struct fuse_args *args = &ff->release_args->args;
 #ifdef CONFIG_FUSE_BPF
-	struct fuse_err_ret fer;
+	struct fuse_err_ret fer = {0};
 #endif
 
 	if (!refcount_dec_and_test(&ff->count))
 		return;
 
 #ifdef CONFIG_FUSE_BPF
-	fer = fuse_bpf_backing(inode, struct fuse_release_in,
-		       fuse_release_initialize, fuse_release_backing,
-		       fuse_release_finalize,
-		       inode, ff);
+	if (inode)
+		fer = fuse_bpf_backing(inode, struct fuse_release_in,
+			       fuse_release_initialize, fuse_release_backing,
+			       fuse_release_finalize,
+			       inode, ff);
 	if (fer.ret) {
 		fuse_release_end(ff->fm, args, 0);
 	} else
@@ -359,8 +360,14 @@ void fuse_release_common(struct file *file, bool isdir)
 	 * Make the release synchronous if this is a fuseblk mount,
 	 * synchronous RELEASE is allowed (and desirable) in this case
 	 * because the server can be trusted not to screw up.
+	 *
+	 * Always use the asynchronous file put because the current thread
+	 * might be the fuse server. This can happen if a process starts some
+	 * aio and closes the fd before the aio completes. Since aio takes its
+	 * own ref to the file, the IO completion has to drop the ref, which is
+	 * how the fuse server can end up closing its clients' files.
 	 */
-	fuse_file_put(ra->inode, ff, ff->fm->fc->destroy, isdir);
+	fuse_file_put(ra ? ra->inode : NULL, ff, false, isdir);
 }
 
 static int fuse_open(struct inode *inode, struct file *file)
@@ -390,7 +397,7 @@ void fuse_sync_release(struct fuse_inode *fi, struct fuse_file *ff, int flags)
 	 * iput(NULL) is a no-op and since the refcount is 1 and everything's
 	 * synchronous, we are fine with not doing igrab() here"
 	 */
-	fuse_file_put(&fi->inode, ff, true, false);
+	fuse_file_put(fi ? &fi->inode : NULL, ff, true, false);
 }
 EXPORT_SYMBOL_GPL(fuse_sync_release);
 
