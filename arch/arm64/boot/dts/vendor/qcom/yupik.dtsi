@@ -487,7 +487,10 @@
 	qcom: ramoops {
 		compatible = "ramoops";
 		reg = <0x0 0xa9000000 0x0 0x200000>;
-		pmsg-size = <0x200000>;
+		record-size = <0x100000>;
+		console-size = <0x40000>;
+		ftrace-size = <0x40000>;
+		pmsg-size = <0x80000>;
 		mem-type = <2>;
 	};
 
