@@ -12,7 +12,9 @@
 #include <linux/uaccess.h>
 #include <linux/ctype.h>
 #include <linux/kprobes.h>
+#ifdef CONFIG_TRACE_PRINTK
 #include <linux/spinlock.h>
+#endif
 #include <linux/syscalls.h>
 #include <linux/error-injection.h>
 #include <linux/btf_ids.h>
@@ -25,8 +27,10 @@
 #include "trace_probe.h"
 #include "trace.h"
 
+#ifdef CONFIG_TRACE_PRINTK
 #define CREATE_TRACE_POINTS
 #include "bpf_trace.h"
+#endif
 
 #define bpf_event_rcu_dereference(p)					\
 	rcu_dereference_protected(p, lockdep_is_held(&bpf_event_mutex))
@@ -394,6 +398,7 @@ static void bpf_trace_copy_string(char *buf, void *unsafe_ptr, char fmt_ptype,
 	}
 }
 
+#ifdef CONFIG_TRACE_PRINTK
 static DEFINE_RAW_SPINLOCK(trace_printk_lock);
 
 #define BPF_TRACE_PRINTK_SIZE   1024
@@ -417,6 +422,7 @@ static __printf(1, 0) int bpf_do_trace_printk(const char *fmt, ...)
 
 	return ret;
 }
+#endif
 
 /*
  * Only limited trace_printk() conversion specifiers allowed:
@@ -522,9 +528,10 @@ fmt_next:
 		fmt_cnt++;
 	}
 
-/* Horrid workaround for getting va_list handling working with different
- * argument type combinations generically for 32 and 64 bit archs.
- */
+	/* Horrid workaround for getting va_list handling working with different
+	 * argument type combinations generically for 32 and 64 bit archs.
+	 */
+#ifdef CONFIG_TRACE_PRINTK
 #define __BPF_TP_EMIT()	__BPF_ARG3_TP()
 #define __BPF_TP(...)							\
 	bpf_do_trace_printk(fmt, ##__VA_ARGS__)
@@ -551,6 +558,9 @@ fmt_next:
 	      : __BPF_ARG2_TP((u32)arg3, ##__VA_ARGS__)))
 
 	return __BPF_TP_EMIT();
+#else
+	return 0;
+#endif /* CONFIG_TRACE_PRINTK */
 }
 
 static const struct bpf_func_proto bpf_trace_printk_proto = {
@@ -563,6 +573,7 @@ static const struct bpf_func_proto bpf_trace_printk_proto = {
 
 const struct bpf_func_proto *bpf_get_trace_printk_proto(void)
 {
+#ifdef CONFIG_TRACE_PRINTK
 	/*
 	 * This program might be calling bpf_trace_printk,
 	 * so enable the associated bpf_trace/bpf_trace_printk event.
@@ -573,6 +584,7 @@ const struct bpf_func_proto *bpf_get_trace_printk_proto(void)
 	 */
 	if (trace_set_clr_event("bpf_trace", "bpf_trace_printk", 1))
 		pr_warn_ratelimited("could not enable bpf_trace_printk events");
+#endif
 
 	return &bpf_trace_printk_proto;
 }

@@ -820,26 +820,31 @@ static s64 entity_lag(struct cfs_rq *cfs_rq, struct sched_entity *se, u64 avrunt
  * Similarly, check that the entity didn't gain positive lag when DELAY_ZERO
  * is set.
  *
- * Return true if the lag has been adjusted.
+ * Return true if the vlag has been modified. Specifically:
+ *
+ *   se->vlag != avg_vruntime() - se->vruntime
+ *
+ * This can be due to clamping in entity_lag() or clamping due to
+ * sched_delayed. Either way, when vlag is modified and the entity is
+ * retained, the tree needs to be adjusted.
  */
 static __always_inline
 bool update_entity_lag(struct cfs_rq *cfs_rq, struct sched_entity *se)
 {
-	s64 vlag = entity_lag(cfs_rq, se, avg_vruntime(cfs_rq));
-	bool ret;
+	u64 avruntime = avg_vruntime(cfs_rq);
+	s64 vlag = entity_lag(cfs_rq, se, avruntime);
 
 	SCHED_WARN_ON(!se->on_rq);
 
 	if (se->sched_delayed) {
 		/* previous vlag < 0 otherwise se would not be delayed */
 		vlag = max(vlag, se->vlag);
-			if (sched_feat(DELAY_ZERO))
-				vlag = min_t(s64, vlag, 0);
+		if (sched_feat(DELAY_ZERO))
+			vlag = min_t(s64, vlag, 0);
 	}
-	ret = (vlag == se->vlag);
 	se->vlag = vlag;
 
-	return ret;
+	return avruntime - vlag != se->vruntime;
 }
 
 /*
@@ -862,7 +867,7 @@ bool update_entity_lag(struct cfs_rq *cfs_rq, struct sched_entity *se)
 static int vruntime_eligible(struct cfs_rq *cfs_rq, u64 vruntime)
 {
 	struct sched_entity *curr = cfs_rq->curr;
-	s64 avg = cfs_rq->sum_w_vruntime;
+	s64 key, avg = cfs_rq->sum_w_vruntime;
 	long load = cfs_rq->sum_weight;
 
 	if (curr && curr->on_rq) {
@@ -872,7 +877,24 @@ static int vruntime_eligible(struct cfs_rq *cfs_rq, u64 vruntime)
 		load += weight;
 	}
 
-	return avg >= vruntime_op(vruntime, "-", cfs_rq->zero_vruntime) * load;
+	key = vruntime_op(vruntime, "-", cfs_rq->zero_vruntime);
+
+#ifdef CONFIG_64BIT
+#ifdef CONFIG_ARCH_SUPPORTS_INT128
+	return avg >= (__int128)key * load;
+#else
+	{
+		s64 rhs;
+
+		if (check_mul_overflow(key, load, &rhs))
+			return key <= 0;
+
+		return avg >= rhs;
+	}
+#endif
+#else
+	return avg >= key * load;
+#endif
 }
 
 int entity_eligible(struct cfs_rq *cfs_rq, struct sched_entity *se)
@@ -1089,7 +1111,7 @@ static struct sched_entity *__pick_eevdf(struct cfs_rq *cfs_rq, bool protect)
 	/*
 	 * Picking the ->next buddy will affect latency but not fairness.
 	 */
-	if (sched_feat(PICK_BUDDY) &&
+	if (sched_feat(PICK_BUDDY) && protect &&
 	    cfs_rq->next && entity_eligible(cfs_rq, cfs_rq->next)) {
 		/* ->next will never be delayed */
 		SCHED_WARN_ON(cfs_rq->next->sched_delayed);
@@ -8219,7 +8241,7 @@ static void check_preempt_wakeup(struct rq *rq, struct task_struct *p, int wake_
 {
 	enum preempt_wakeup_action preempt_action = PREEMPT_WAKEUP_PICK;
 	struct task_struct *curr = rq->curr;
-	struct sched_entity *se = &curr->se, *pse = &p->se;
+	struct sched_entity *nse, *se = &curr->se, *pse = &p->se;
 	struct cfs_rq *cfs_rq = task_cfs_rq(curr);
 	int cse_is_idle, pse_is_idle;
 
@@ -8275,6 +8297,7 @@ static void check_preempt_wakeup(struct rq *rq, struct task_struct *p, int wake_
 		 * When non-idle entity preempt an idle entity,
 		 * don't give idle entity slice protection.
 		 */
+		cfs_rq = cfs_rq_of(se);
 		preempt_action = PREEMPT_WAKEUP_SHORT;
 		goto preempt;
 	}
@@ -8328,11 +8351,25 @@ static void check_preempt_wakeup(struct rq *rq, struct task_struct *p, int wake_
 	}
 
 pick:
+	nse = __pick_eevdf(cfs_rq, preempt_action != PREEMPT_WAKEUP_SHORT);
+	if (nse && nse->sched_delayed) {
+		dequeue_entities(rq, nse, DEQUEUE_SLEEP | DEQUEUE_DELAYED);
+		goto pick;
+	}
+
 	/*
 	 * If @p has become the most eligible task, force preemption.
 	 */
-	if (__pick_eevdf(cfs_rq, preempt_action != PREEMPT_WAKEUP_SHORT) == pse)
+	if (nse == pse)
 		goto preempt;
+
+	/*
+	 * Because p is enqueued, nse being null can only mean that we
+	 * dequeued a delayed task. If there are still entities queued in
+	 * cfs, check if the next one will be p.
+	 */
+	if (!nse && cfs_rq->nr_queued)
+		goto pick;
 
 	if (sched_feat(RUN_TO_PARITY))
 		update_protect_slice(cfs_rq, se);
@@ -8340,8 +8377,10 @@ pick:
 	return;
 
 preempt:
-	if (preempt_action == PREEMPT_WAKEUP_SHORT)
+	if (preempt_action == PREEMPT_WAKEUP_SHORT) {
 		cancel_protect_slice(se);
+		clear_buddies(cfs_rq, se);
+	}
 
 	resched_curr(rq);
 }
