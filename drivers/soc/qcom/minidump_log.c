@@ -388,7 +388,8 @@ static void update_md_cpu_stack(u32 cpu, u64 sp)
 }
 
 void md_current_stack_notifer(void *ignore, bool preempt,
-		struct task_struct *prev, struct task_struct *next)
+		struct task_struct *prev, struct task_struct *next,
+		unsigned int prev_state)
 {
 	u32 cpu = task_cpu(next);
 	u64 sp = (u64)next->stack;
@@ -711,7 +712,7 @@ static void md_dump_cgroup_state(char *status, struct sched_entity *se_p,
 		md_dump_task_info(task, status, curr);
 		return;
 	}
-	nr_running = my_q->nr_running;
+	nr_running = my_q->h_nr_queued;
 	md_dump_align();
 	seq_buf_printf(md_runq_seq_buf, "%s: %d process is grouping\n",
 				   status, nr_running);
@@ -751,8 +752,6 @@ static void md_dump_cfs_rq(struct cfs_rq *cfs, struct task_struct *curr)
 
 	md_dump_cgroup_state("curr", cfs->curr, curr);
 	md_dump_cgroup_state("next", cfs->next, curr);
-	md_dump_cgroup_state("last", cfs->last, curr);
-	md_dump_cgroup_state("skip", cfs->skip, curr);
 	md_rb_walk_cfs(rb_root_cached_p, curr);
 }
 
@@ -803,7 +802,7 @@ static void md_dump_runqueues(void)
 		md_dump_task_info(cpu_curr(cpu), "curr", NULL);
 		seq_buf_printf(md_runq_seq_buf,
 			       "CFS %d process is pending\n",
-			       cfs->nr_running);
+			       cfs->h_nr_queued);
 		md_dump_cfs_rq(cfs, cpu_curr(cpu));
 		seq_buf_printf(md_runq_seq_buf,
 			       "RT %d process is pending\n",

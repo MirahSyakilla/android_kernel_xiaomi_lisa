@@ -9,9 +9,10 @@
 #define __ASM_FTRACE_H
 
 #include <asm/insn.h>
+#include <asm/memory.h>
 
 #define HAVE_FUNCTION_GRAPH_FP_TEST
-#define MCOUNT_ADDR		((unsigned long)_mcount)
+#define MCOUNT_ADDR		((unsigned long)__va_function(_mcount))
 #define MCOUNT_INSN_SIZE	AARCH64_INSN_SIZE
 
 /*

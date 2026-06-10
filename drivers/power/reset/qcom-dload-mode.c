@@ -279,6 +279,12 @@ static int qcom_dload_panic(struct notifier_block *this, unsigned long event,
 	poweroff->in_panic = true;
 	if (enable_dump)
 		msm_enable_dump_mode(true);
+
+	/* Perform a warm reboot. */
+	set_download_mode(QCOM_DOWNLOAD_NODUMP);
+	reboot_mode = REBOOT_WARM;
+	mb();
+
 	return NOTIFY_OK;
 }
 
@@ -325,13 +331,13 @@ static void __iomem *map_prop_mem(const char *propname)
 	void __iomem *addr;
 
 	if (!np) {
-		pr_err("Unable to find DT property: %s\n", propname);
+		pr_debug("Unable to find DT property: %s\n", propname);
 		return NULL;
 	}
 
 	addr = of_iomap(np, 0);
 	if (!addr)
-		pr_err("Unable to map memory for DT property: %s\n", propname);
+		pr_debug("Unable to map memory for DT property: %s\n", propname);
 	return addr;
 }
 
@@ -364,7 +370,7 @@ static void check_pci_edl(struct device_node *np)
 
 	mem = of_iomap(np, 0);
 	if (!mem) {
-		pr_info("Unable to map memory for DT property: %s\n", np->name);
+		pr_debug("Unable to map memory for DT property: %s\n", np->name);
 		return;
 	}
 
@@ -381,26 +387,6 @@ static void check_pci_edl(struct device_node *np)
 	}
 
 	iounmap(mem);
-}
-
-#define DISPLAY_CONFIG_OFFSET_PROP "qcom,msm-imem-display_config_offset"
-/*
- ** set display config imem first 4 bytes to 0xdead4ead, because imem context
- ** will not lost when warm reset. if panic, xbl ramdump will display orange
- ** screen, and framebuffer addr is determined by these four bytes in
- ** MDP_GetDisplayBootConfig function. so set these four bytes to a invalid
- ** value and let the framebuffer of orange screen use
- ** RAMDUMP_FRAME_BUFFER_ADDRESS(0xE1000000)
- **/
-static void clear_display_config(void)
-{
-	void *display_config_imem_addr = map_prop_mem(DISPLAY_CONFIG_OFFSET_PROP);
-
-	if (display_config_imem_addr) {
-		__raw_writel(0xdead4ead, display_config_imem_addr);
-		iounmap(display_config_imem_addr);
-		pr_err("%s clear display config\n", __func__);
-	}
 }
 
 static int qcom_dload_probe(struct platform_device *pdev)
@@ -433,7 +419,6 @@ static int qcom_dload_probe(struct platform_device *pdev)
 	poweroff->dload_dest_addr = map_prop_mem("qcom,msm-imem-dload-type");
 	store_kaslr_offset();
 	check_pci_edl(pdev->dev.of_node);
-	clear_display_config();
 
 	msm_enable_dump_mode(enable_dump);
 	if (!enable_dump)
