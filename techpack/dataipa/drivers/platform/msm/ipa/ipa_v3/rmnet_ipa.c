@@ -81,6 +81,8 @@ static int ipa3_wwan_add_ul_flt_rule_to_ipa(void);
 static int ipa3_wwan_del_ul_flt_rule_to_ipa(void);
 static void ipa3_wwan_msg_free_cb(void*, u32, u32);
 static int ipa3_rmnet_poll(struct napi_struct *napi, int budget);
+static void ipa3_wake_tx_queue_unlocked(struct net_device *netdev);
+static void ipa3_wake_tx_queue_locked(struct net_device *netdev);
 
 static void ipa3_wake_tx_queue(struct work_struct *work);
 static DECLARE_WORK(ipa3_tx_wakequeue_work, ipa3_wake_tx_queue);
@@ -1332,8 +1334,7 @@ static void ipa3_wwan_tx_timeout(struct net_device *dev)
 		   !atomic_read(&rmnet_ipa3_ctx->ap_suspend)) {
 		IPAWANERR("[%s] recovering stopped TX queue with no outstanding packets\n",
 			dev->name);
-		netif_trans_update(dev);
-		netif_wake_queue(dev);
+		ipa3_wake_tx_queue_unlocked(dev);
 	}
 }
 
@@ -2431,12 +2432,29 @@ int ipa3_wwan_set_modem_perf_profile(int throughput)
 
 static void ipa3_wake_tx_queue(struct work_struct *work)
 {
-	if (IPA_NETDEV()) {
-		__netif_tx_lock_bh(netdev_get_tx_queue(IPA_NETDEV(), 0));
+	ipa3_wake_tx_queue_locked(IPA_NETDEV());
+}
+
+static void ipa3_wake_tx_queue_unlocked(struct net_device *netdev)
+{
+	netif_trans_update(netdev);
+	if (netif_queue_stopped(netdev)) {
 		IPAWANDBG("Waking up the workqueue.\n");
-		netif_wake_queue(IPA_NETDEV());
-		__netif_tx_unlock_bh(netdev_get_tx_queue(IPA_NETDEV(), 0));
+		netif_wake_queue(netdev);
 	}
+}
+
+static void ipa3_wake_tx_queue_locked(struct net_device *netdev)
+{
+	struct netdev_queue *txq;
+
+	if (!netdev || atomic_read(&rmnet_ipa3_ctx->is_ssr))
+		return;
+
+	txq = netdev_get_tx_queue(netdev, 0);
+	__netif_tx_lock_bh(txq);
+	ipa3_wake_tx_queue_unlocked(netdev);
+	__netif_tx_unlock_bh(txq);
 }
 
 /**
@@ -2901,7 +2919,7 @@ static int rmnet_ipa_ap_resume(struct device *dev)
 	atomic_set(&rmnet_ipa3_ctx->ap_suspend, 0);
 	if (netdev) {
 		netif_device_attach(netdev);
-		netif_trans_update(netdev);
+		ipa3_wake_tx_queue_locked(netdev);
 	}
 	IPAWANDBG("Exit\n");
 
