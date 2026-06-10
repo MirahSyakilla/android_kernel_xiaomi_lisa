@@ -1968,6 +1968,7 @@ export_report:
 
 AK3_DIR := $(HOME)/AnyKernel3
 AK3_RELEASE_DIR := $(HOME)/KernelReleases
+AK3_ANYKERNEL_SH := $(AK3_DIR)/anykernel.sh
 AK3_VERSION_FILE := $(AK3_DIR)/version.txt
 AK3_ZIP_PREFIX := MeowKernel
 AK3_BOOT_DIR := $(objtree)/arch/$(SRCARCH)/boot
@@ -1975,6 +1976,10 @@ AK3_DTS_DIR := $(AK3_BOOT_DIR)/dts/vendor/qcom
 AK3_IMAGE_SRC := $(AK3_BOOT_DIR)/Image
 AK3_DTB_SRC := $(AK3_BOOT_DIR)/dtb
 AK3_DTBO_SRC := $(AK3_BOOT_DIR)/dtbo.img
+AK3_BOOT_RAMDISK_DIR := $(AK3_DIR)/ramdisk
+AK3_BOOT_INIT_QCOM_RC := $(AK3_BOOT_RAMDISK_DIR)/init.qcom.rc
+AK3_VENDOR_RAMDISK_DIR := $(AK3_DIR)/vendor_ramdisk
+AK3_RECOVERY_MODULES_LOAD := $(AK3_VENDOR_RAMDISK_DIR)/lib/modules/modules.load.recovery
 
 PHONY += checkstack kernelrelease kernelversion image_name dtb dtbo.img dt_images ak3 adb_push
 
@@ -2045,6 +2050,13 @@ ak3: Image dt_images
 		echo "Missing version file: $(AK3_VERSION_FILE)"; \
 		exit 1; \
 	fi; \
+	if ! grep -q "Installing dtb and recovery ramdisk compatibility" "$(AK3_ANYKERNEL_SH)"; then \
+		echo "AnyKernel3 vendor_boot ramdisk repack hook is missing in $(AK3_ANYKERNEL_SH)"; \
+		exit 1; \
+	fi; \
+	rm -f "$(AK3_BOOT_INIT_QCOM_RC)"; \
+	mkdir -p "$$(dirname "$(AK3_RECOVERY_MODULES_LOAD)")"; \
+	: > "$(AK3_RECOVERY_MODULES_LOAD)"; \
 	cp -f "$(AK3_IMAGE_SRC)" "$(AK3_DIR)/Image"; \
 	cp -f "$(AK3_DTB_SRC)" "$(AK3_DIR)/dtb"; \
 	cp -f "$(AK3_DTBO_SRC)" "$(AK3_DIR)/dtbo.img"; \
