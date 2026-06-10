@@ -15,11 +15,15 @@
 #include <linux/workqueue.h>
 #include <linux/sched.h>
 #include <linux/wait.h>
+#include <linux/bitmap.h>
+#include <linux/capability.h>
 #include <linux/delay.h>
 #include <linux/interrupt.h>
 #include <linux/mtd/mtd.h>
 #include <linux/kmsg_dump.h>
 #include <linux/proc_fs.h>
+#include <linux/slab.h>
+#include <linux/string.h>
 #include <linux/uaccess.h>
 
 /* Maximum MTD partition size */
@@ -57,6 +61,9 @@ static struct mtdoops_context {
 
 	void *oops_buf;
 } oops_cxt;
+
+static int mtdoops_erase_block(struct mtdoops_context *cxt, int offset);
+static void mtdoops_inc_counter(struct mtdoops_context *cxt);
 
 #ifdef CONFIG_PROC_FS
 static ssize_t mtdoops_last_kmsg_read(struct file *file, char __user *buf,
@@ -102,8 +109,72 @@ static ssize_t mtdoops_last_kmsg_read(struct file *file, char __user *buf,
 	return ret;
 }
 
+static int mtdoops_clear(struct mtdoops_context *cxt)
+{
+	struct mtd_info *mtd = cxt->mtd;
+	int erased = 0;
+	int ret;
+	int offset;
+
+	if (!mtd || cxt->oops_pages <= 0)
+		return -ENODEV;
+
+	cancel_work_sync(&cxt->work_erase);
+	cancel_work_sync(&cxt->work_write);
+
+	for (offset = 0; offset < mtd->size; offset += mtd->erasesize) {
+		ret = mtd_block_isbad(mtd, offset);
+		if (ret > 0)
+			continue;
+		if (ret < 0)
+			return ret;
+
+		ret = mtdoops_erase_block(cxt, offset);
+		if (ret)
+			return ret;
+		erased++;
+	}
+
+	bitmap_zero(cxt->oops_page_used, cxt->oops_pages);
+	memset(cxt->oops_buf, 0xff, record_size);
+	cxt->nextpage = cxt->oops_pages - 1;
+	cxt->nextcount = 0;
+	mtdoops_inc_counter(cxt);
+	mtd_sync(mtd);
+
+	pr_info("mtdoops: cleared %d eraseblocks for /proc/last_kmsg\n", erased);
+	return 0;
+}
+
+static ssize_t mtdoops_last_kmsg_write(struct file *file,
+				       const char __user *buf,
+				       size_t count, loff_t *ppos)
+{
+	char *kbuf;
+	int ret;
+
+	if (!capable(CAP_SYS_ADMIN))
+		return -EPERM;
+	if (count > PAGE_SIZE)
+		return -EINVAL;
+
+	kbuf = memdup_user_nul(buf, count);
+	if (IS_ERR(kbuf))
+		return PTR_ERR(kbuf);
+
+	strim(kbuf);
+	if (!strcmp(kbuf, "clear") || !strcmp(kbuf, "1"))
+		ret = mtdoops_clear(&oops_cxt);
+	else
+		ret = -EINVAL;
+
+	kfree(kbuf);
+	return ret ? ret : count;
+}
+
 static const struct proc_ops mtdoops_last_kmsg_fops = {
 	.proc_read = mtdoops_last_kmsg_read,
+	.proc_write = mtdoops_last_kmsg_write,
 	.proc_lseek = default_llseek,
 };
 #endif
@@ -457,7 +528,15 @@ static int __init mtdoops_init(void)
 
 	register_mtd_user(&mtdoops_notifier);
 #ifdef CONFIG_PROC_FS
-	proc_create("last_kmsg", 0444, NULL, &mtdoops_last_kmsg_fops);
+	{
+		struct proc_dir_entry *last_kmsg;
+
+		last_kmsg = proc_create("last_kmsg", 0444, NULL,
+					&mtdoops_last_kmsg_fops);
+		if (last_kmsg)
+			proc_set_size(last_kmsg,
+				      record_size - MTDOOPS_HEADER_SIZE);
+	}
 #endif
 	return 0;
 }

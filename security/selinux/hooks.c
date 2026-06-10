@@ -1369,6 +1369,39 @@ static int selinux_genfs_get_sid(struct dentry *dentry,
 				path++;
 			}
 		}
+
+		/*
+		 * Some Android userspace policies only carry the modern pstorefs
+		 * label and no longer define proc_last_kmsg.  Keep the legacy
+		 * /proc/last_kmsg compatibility source readable through the same
+		 * policy path BootReceiver already uses for pstore.
+		 */
+		if (tclass == SECCLASS_FILE &&
+		    !strcmp(sb->s_type->name, "proc") &&
+		    !strcmp(path, "/last_kmsg")) {
+			static const char proc_last_kmsg_context[] =
+				"u:object_r:proc_last_kmsg:s0";
+			static const char pstorefs_context[] =
+				"u:object_r:pstorefs:s0";
+			u32 unused_sid;
+			int fallback_rc;
+
+			rc = security_context_to_sid(&selinux_state,
+						     proc_last_kmsg_context,
+						     sizeof(proc_last_kmsg_context) - 1,
+						     &unused_sid, GFP_NOFS);
+			if (rc) {
+				fallback_rc = security_context_to_sid(&selinux_state,
+								     pstorefs_context,
+								     sizeof(pstorefs_context) - 1,
+								     sid, GFP_NOFS);
+				if (!fallback_rc) {
+					rc = 0;
+					goto out;
+				}
+			}
+		}
+
 		rc = security_genfs_sid(&selinux_state, sb->s_type->name,
 					path, tclass, sid);
 		if (rc == -ENOENT) {
@@ -1377,6 +1410,7 @@ static int selinux_genfs_get_sid(struct dentry *dentry,
 			rc = 0;
 		}
 	}
+out:
 	free_page((unsigned long)buffer);
 	return rc;
 }
