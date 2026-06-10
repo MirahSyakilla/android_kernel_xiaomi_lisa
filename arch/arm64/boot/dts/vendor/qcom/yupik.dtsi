@@ -3568,6 +3568,8 @@
 			compatible = "qcom,rimps-memlat-mon-l3";
 			qcom,cpulist = <&CPU0 &CPU1 &CPU2 &CPU3>;
 			qcom,cachemiss-ev = <0x17>;
+			qcom,wb-ev = <0x18>;
+			qcom,access-ev = <0x2B>;
 			reg = <0x18590100 0xa0>, <0x18590340 0x4>;
 			reg-names = "ftbl-base", "perf-base";
 
