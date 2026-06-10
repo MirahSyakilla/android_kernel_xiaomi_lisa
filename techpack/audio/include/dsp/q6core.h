@@ -5,6 +5,7 @@
 
 #ifndef __Q6CORE_H__
 #define __Q6CORE_H__
+#include <linux/kobject.h>
 #include <ipc/apr.h>
 #include <dsp/apr_audio-v2.h>
 

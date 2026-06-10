@@ -1018,11 +1018,12 @@ static int msm_qti_pp_asphere_send_params(int port_id, int copp_idx, bool force)
 		/* add strength command */
 		param_hdr.param_id = AUDPROC_PARAM_ID_AUDIOSPHERE_STRENGTH;
 		param_hdr.param_size = sizeof(asphere_state.strength);
-		ret = q6common_pack_pp_params(packed_params +
-						      packed_params_size,
-					      &param_hdr,
-					      (u8 *) &asphere_state.strength,
-					      &param_size);
+		ret = q6common_pack_pp_params_v2(packed_params +
+						 packed_params_size,
+						 &param_hdr,
+						 (u8 *)&asphere_state.strength,
+						 &param_size,
+						 q6common_is_adm_pp_instance_id_supported());
 		if (ret) {
 			pr_err("%s: Failed to pack params for audio sphere"
 				" strength, error %d\n", __func__, ret);
@@ -1034,10 +1035,12 @@ static int msm_qti_pp_asphere_send_params(int port_id, int copp_idx, bool force)
 		/* add enable command */
 		param_hdr.param_id = AUDPROC_PARAM_ID_AUDIOSPHERE_ENABLE;
 		param_hdr.param_size = sizeof(asphere_state.enabled);
-		q6common_pack_pp_params(packed_params + packed_params_size,
-					&param_hdr,
-					(u8 *) &asphere_state.enabled,
-					&param_size);
+		ret = q6common_pack_pp_params_v2(packed_params +
+						 packed_params_size,
+						 &param_hdr,
+						 (u8 *)&asphere_state.enabled,
+						 &param_size,
+						 q6common_is_adm_pp_instance_id_supported());
 		if (ret) {
 			pr_err("%s: Failed to pack params for audio sphere"
 				" enable, error %d\n", __func__, ret);

@@ -4,6 +4,11 @@
  */
 
 #include <dsp/q6common.h>
+#include <dsp/q6core.h>
+#include <dsp/q6adm-v2.h>
+#include <dsp/q6afe-v2.h>
+#include <dsp/q6asm-v2.h>
+#include <dsp/q6lsm.h>
 
 struct q6common_ctl {
 	bool instance_id_supported;
@@ -31,9 +36,56 @@ EXPORT_SYMBOL(q6common_update_instance_id_support);
  */
 bool q6common_is_instance_id_supported(void)
 {
-	return common.instance_id_supported;
+	int adm_api_version;
+	int afe_api_version;
+	int asm_api_version;
+	int lsm_api_version;
+
+	if (!common.instance_id_supported)
+		return false;
+
+	/*
+	 * The mixer toggle only indicates that userspace wants IID-capable
+	 * parameter paths. Some ADSP images still expose older per-service
+	 * contracts though, especially on ADM/AFE/TDM routes. Require the
+	 * core audio services we rely on for speaker playback to report the
+	 * corresponding IID-aware API revisions before advertising support.
+	 */
+	adm_api_version = q6core_get_avcs_api_version_per_service(
+		APRV2_IDS_SERVICE_ID_ADSP_ADM_V);
+	if (adm_api_version < ADSP_ADM_API_VERSION_V3)
+		return false;
+
+	afe_api_version = q6core_get_avcs_api_version_per_service(
+		APRV2_IDS_SERVICE_ID_ADSP_AFE_V);
+	if (afe_api_version < AFE_API_VERSION_V3)
+		return false;
+
+	asm_api_version = q6core_get_avcs_api_version_per_service(
+		APRV2_IDS_SERVICE_ID_ADSP_ASM_V);
+	if (asm_api_version < ADSP_ASM_API_VERSION_V2)
+		return false;
+
+	lsm_api_version = q6core_get_avcs_api_version_per_service(
+		APRV2_IDS_SERVICE_ID_ADSP_LSM_V);
+	if (lsm_api_version < LSM_API_VERSION_V3)
+		return false;
+
+	return true;
 }
 EXPORT_SYMBOL(q6common_is_instance_id_supported);
+
+bool q6common_is_adm_pp_instance_id_supported(void)
+{
+	/*
+	 * Some Yupik/Lahaina ADSP images expose enough service versioning for
+	 * the generic IID gate, but still reject ADM_CMD_SET_PP_PARAMS_V6.
+	 * Keep ADM PP set/get packets on the V5 ABI while other services can
+	 * continue using the generic instance-ID path.
+	 */
+	return false;
+}
+EXPORT_SYMBOL(q6common_is_adm_pp_instance_id_supported);
 
 /**
  * q6common_pack_pp_params

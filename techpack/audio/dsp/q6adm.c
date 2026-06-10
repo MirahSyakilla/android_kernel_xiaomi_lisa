@@ -52,6 +52,11 @@ enum adm_cal_status {
 	ADM_STATUS_MAX,
 };
 
+static bool adm_cal_send_optional_error(int ret)
+{
+	return ret == -ENODATA;
+}
+
 typedef int (*adm_cb)(uint32_t opcode, uint32_t token,
 		       uint32_t *pp_event_package, void *pvt);
 
@@ -531,8 +536,10 @@ int srs_trumedia_open(int port_id, int copp_idx, __s32 srs_tech_id,
 		param_hdr.param_id = SRS_TRUMEDIA_PARAMS_AEQ;
 		param_hdr.param_size = sizeof(struct srs_trumedia_params_AEQ);
 
-		ret = q6common_pack_pp_params(update_params_ptr, &param_hdr,
-					      srs_params, &total_param_size);
+		ret = q6common_pack_pp_params_v2(update_params_ptr, &param_hdr,
+						 srs_params,
+						 &total_param_size,
+						 q6common_is_adm_pp_instance_id_supported());
 		if (ret) {
 			pr_err("%s: Failed to pack param header and data, error %d\n",
 			       __func__, ret);
@@ -1152,6 +1159,8 @@ int adm_set_pp_params(int port_id, int copp_idx,
 		      u32 param_size)
 {
 	struct adm_cmd_set_pp_params *adm_set_params = NULL;
+	union param_hdrs *param_hdr = NULL;
+	bool iid_supported;
 	int size = 0;
 	int port_idx = 0;
 	int ret = 0;
@@ -1187,7 +1196,8 @@ int adm_set_pp_params(int port_id, int copp_idx,
 		atomic_read(&this_adm.copp.id[port_idx][copp_idx]);
 	adm_set_params->apr_hdr.token = port_idx << 16 | copp_idx;
 
-	if (q6common_is_instance_id_supported())
+	iid_supported = q6common_is_adm_pp_instance_id_supported();
+	if (iid_supported)
 		adm_set_params->apr_hdr.opcode = ADM_CMD_SET_PP_PARAMS_V6;
 	else
 		adm_set_params->apr_hdr.opcode = ADM_CMD_SET_PP_PARAMS_V5;
@@ -1214,6 +1224,36 @@ int adm_set_pp_params(int port_id, int copp_idx,
 	ret = adm_apr_send_pkt((uint32_t *) adm_set_params,
 			&this_adm.copp.wait[port_idx][copp_idx],
 			port_idx, copp_idx, adm_set_params->apr_hdr.opcode);
+	if (ret && param_data && param_size >= sizeof(struct param_hdr_v1)) {
+		param_hdr = (union param_hdrs *)param_data;
+		if (iid_supported && param_size >= sizeof(struct param_hdr_v3))
+			pr_err("%s: SET_PP failed port=0x%x port_idx=%d copp=%d copp_id=%d opcode=0x%x payload=%u module=0x%x instance=0x%x param=0x%x param_size=%u ret=%d\n",
+			       __func__, port_id, port_idx, copp_idx,
+			       atomic_read(&this_adm.copp.id[port_idx][copp_idx]),
+			       adm_set_params->apr_hdr.opcode, param_size,
+			       param_hdr->v3.module_id, param_hdr->v3.instance_id,
+			       param_hdr->v3.param_id, param_hdr->v3.param_size,
+			       ret);
+		else
+			pr_err("%s: SET_PP failed port=0x%x port_idx=%d copp=%d copp_id=%d opcode=0x%x payload=%u module=0x%x param=0x%x param_size=%u ret=%d\n",
+			       __func__, port_id, port_idx, copp_idx,
+			       atomic_read(&this_adm.copp.id[port_idx][copp_idx]),
+			       adm_set_params->apr_hdr.opcode, param_size,
+			       param_hdr->v1.module_id, param_hdr->v1.param_id,
+			       param_hdr->v1.param_size, ret);
+	} else if (ret && adm_cal_send_optional_error(ret) && mem_hdr) {
+		pr_debug("%s: optional OOB SET_PP skipped by DSP port=0x%x port_idx=%d copp=%d copp_id=%d opcode=0x%x payload=%u ret=%d\n",
+			       __func__, port_id, port_idx, copp_idx,
+			       atomic_read(&this_adm.copp.id[port_idx][copp_idx]),
+			       adm_set_params->apr_hdr.opcode, param_size, ret);
+		ret = 0;
+	} else if (ret) {
+		pr_err("%s: SET_PP failed port=0x%x port_idx=%d copp=%d copp_id=%d opcode=0x%x payload=%u mem_hdr=%d ret=%d\n",
+			       __func__, port_id, port_idx, copp_idx,
+			       atomic_read(&this_adm.copp.id[port_idx][copp_idx]),
+			       adm_set_params->apr_hdr.opcode, param_size,
+			       mem_hdr != NULL, ret);
+	}
 done:
 	kfree(adm_set_params);
 	return ret;
@@ -1232,8 +1272,9 @@ int adm_pack_and_set_one_pp_param(int port_id, int copp_idx,
 	if (!packed_data)
 		return -ENOMEM;
 
-	ret = q6common_pack_pp_params(packed_data, &param_hdr, param_data,
-				      &total_size);
+	ret = q6common_pack_pp_params_v2(packed_data, &param_hdr, param_data,
+					 &total_size,
+					 q6common_is_adm_pp_instance_id_supported());
 	if (ret) {
 		pr_err("%s: Failed to pack parameter data, error %d\n",
 		       __func__, ret);
@@ -1243,8 +1284,10 @@ int adm_pack_and_set_one_pp_param(int port_id, int copp_idx,
 	ret = adm_set_pp_params(port_id, copp_idx, NULL, packed_data,
 				total_size);
 	if (ret)
-		pr_err("%s: Failed to set parameter data, error %d\n", __func__,
-		       ret);
+		pr_err("%s: Failed to set parameter data module=0x%x instance=0x%x param=0x%x param_size=%u packed_size=%u iid=%d error=%d\n",
+		       __func__, param_hdr.module_id, param_hdr.instance_id,
+		       param_hdr.param_id, param_hdr.param_size, total_size,
+		       q6common_is_adm_pp_instance_id_supported(), ret);
 done:
 	kfree(packed_data);
 	return ret;
@@ -1290,8 +1333,9 @@ int adm_get_pp_params(int port_id, int copp_idx, uint32_t client_id,
 	if (mem_hdr != NULL)
 		adm_get_params.mem_hdr = *mem_hdr;
 
-	q6common_pack_pp_params((u8 *) &adm_get_params.param_hdr, param_hdr,
-				NULL, &total_size);
+	q6common_pack_pp_params_v2((u8 *) &adm_get_params.param_hdr,
+				   param_hdr, NULL, &total_size,
+				   q6common_is_adm_pp_instance_id_supported());
 
 	/* Pack APR header after filling body so total_size has correct value */
 	adm_get_params.apr_hdr.hdr_field =
@@ -1308,7 +1352,7 @@ int adm_get_pp_params(int port_id, int copp_idx, uint32_t client_id,
 	adm_get_params.apr_hdr.token =
 		port_idx << 16 | client_id << 8 | copp_idx;
 
-	if (q6common_is_instance_id_supported())
+	if (q6common_is_adm_pp_instance_id_supported())
 		adm_get_params.apr_hdr.opcode = ADM_CMD_GET_PP_PARAMS_V6;
 	else
 		adm_get_params.apr_hdr.opcode = ADM_CMD_GET_PP_PARAMS_V5;
@@ -2384,6 +2428,8 @@ static int send_adm_cal_block(int port_id, int copp_idx,
 			      struct cal_block_data *cal_block, int perf_mode)
 {
 	struct mem_mapping_hdr mem_hdr;
+	struct audio_cal_info_audproc *audproc_cal_info = NULL;
+	struct audio_cal_info_audvol *audvol_cal_info = NULL;
 	int payload_size = 0;
 	int port_idx = 0;
 	int topology = 0;
@@ -2430,7 +2476,37 @@ static int send_adm_cal_block(int port_id, int copp_idx,
 	mem_hdr.mem_map_handle = cal_block->map_data.q6map_handle;
 	payload_size = cal_block->cal_data.size;
 
-	adm_set_pp_params(port_id, copp_idx, &mem_hdr, NULL, payload_size);
+	result = adm_set_pp_params(port_id, copp_idx, &mem_hdr, NULL,
+				   payload_size);
+	if (result) {
+		audproc_cal_info = cal_block->cal_info;
+		audvol_cal_info = cal_block->cal_info;
+		if (adm_cal_send_optional_error(result)) {
+			pr_debug("%s: optional ADM cal skipped by DSP port=0x%x port_idx=%d copp=%d topology=0x%x buf=%d size=%d ret=%d\n",
+			       __func__, port_id, port_idx, copp_idx, topology,
+			       cal_block->buffer_number, payload_size, result);
+			goto done;
+		}
+		if (cal_block->cal_info) {
+			pr_err("%s: ADM cal send failed port=0x%x port_idx=%d copp=%d topology=0x%x buf=%d size=%d map_size=%zu q6map=0x%x audproc[path=%d app=%d acdb=%d rate=%d] audvol[path=%d app=%d acdb=%d vol=%d] ret=%d\n",
+			       __func__, port_id, port_idx, copp_idx, topology,
+			       cal_block->buffer_number, payload_size,
+			       cal_block->map_data.map_size,
+			       cal_block->map_data.q6map_handle,
+			       audproc_cal_info->path, audproc_cal_info->app_type,
+			       audproc_cal_info->acdb_id,
+			       audproc_cal_info->sample_rate,
+			       audvol_cal_info->path, audvol_cal_info->app_type,
+			       audvol_cal_info->acdb_id,
+			       audvol_cal_info->vol_index, result);
+		} else {
+			pr_err("%s: ADM cal send failed port=0x%x port_idx=%d copp=%d topology=0x%x buf=%d size=%d map_size=%zu q6map=0x%x ret=%d\n",
+			       __func__, port_id, port_idx, copp_idx, topology,
+			       cal_block->buffer_number, payload_size,
+			       cal_block->map_data.map_size,
+			       cal_block->map_data.q6map_handle, result);
+		}
+	}
 
 done:
 	return result;
@@ -2629,12 +2705,12 @@ done:
 	return ret;
 }
 
-static void send_adm_cal_type(int fedai_id, int cal_index, int path, int port_id,
-			      int copp_idx, int perf_mode, int app_type,
-			      int acdb_id, int sample_rate)
+static int send_adm_cal_type(int fedai_id, int cal_index, int path, int port_id,
+			     int copp_idx, int perf_mode, int app_type,
+			     int acdb_id, int sample_rate)
 {
 	struct cal_block_data		*cal_block = NULL;
-	int ret;
+	int ret = 0;
 	int dest_perms[2] = {PERM_READ | PERM_WRITE, PERM_READ | PERM_WRITE};
 	int source_vm[1] = {VMID_HLOS};
 	int dest_vm[2] = {VMID_LPASS, VMID_ADSP_HEAP};
@@ -2644,14 +2720,17 @@ static void send_adm_cal_type(int fedai_id, int cal_index, int path, int port_id
 	if (this_adm.cal_data[cal_index] == NULL) {
 		pr_debug("%s: cal_index %d not allocated!\n",
 			__func__, cal_index);
+		ret = -ENOENT;
 		goto done;
 	}
 
 	mutex_lock(&this_adm.cal_data[cal_index]->lock);
 	cal_block = adm_find_cal_by_buf_number(fedai_id, cal_index, path, app_type, acdb_id,
 				sample_rate);
-	if (cal_block == NULL)
+	if (cal_block == NULL) {
+		ret = -ENOENT;
 		goto unlock;
+	}
 
 	if (cal_block->cma_mem) {
 		if (cal_block->cal_data.paddr == 0 ||
@@ -2679,11 +2758,22 @@ static void send_adm_cal_type(int fedai_id, int cal_index, int path, int port_id
 	ret = adm_remap_and_send_cal_block(cal_index, port_id, copp_idx,
 		cal_block, perf_mode, app_type, acdb_id, sample_rate);
 
-	cal_utils_mark_cal_used(cal_block);
+	if (!ret || adm_cal_send_optional_error(ret)) {
+		if (ret)
+			pr_debug("%s: marking optional ADM cal used after DSP ret=%d cal_index=%d port=0x%x copp=%d path=%d app=%d acdb=%d rate=%d\n",
+			       __func__, ret, cal_index, port_id, copp_idx, path,
+			       app_type, acdb_id, sample_rate);
+		cal_utils_mark_cal_used(cal_block);
+		ret = 0;
+	} else {
+		pr_err("%s: keeping ADM cal stale for retry cal_index=%d port=0x%x copp=%d path=%d app=%d acdb=%d rate=%d ret=%d\n",
+		       __func__, cal_index, port_id, copp_idx, path, app_type,
+		       acdb_id, sample_rate, ret);
+	}
 unlock:
 	mutex_unlock(&this_adm.cal_data[cal_index]->lock);
 done:
-	return;
+	return ret;
 }
 
 static int get_cal_path(int path)
@@ -2694,31 +2784,47 @@ static int get_cal_path(int path)
 		return TX_DEVICE;
 }
 
-static void send_adm_cal(int fedai_id, int port_id, int copp_idx, int path, int perf_mode,
-			 int app_type, int acdb_id, int sample_rate,
-			 int passthr_mode)
+static int send_adm_cal(int fedai_id, int port_id, int copp_idx, int path, int perf_mode,
+			int app_type, int acdb_id, int sample_rate,
+			int passthr_mode)
 {
+	int ret = 0;
+	int cal_ret = 0;
+
 	pr_debug("%s: port id 0x%x copp_idx %d\n", __func__, port_id, copp_idx);
 
 	if (passthr_mode != LISTEN) {
-		send_adm_cal_type(fedai_id, ADM_AUDPROC_CAL, path, port_id, copp_idx,
+		cal_ret = send_adm_cal_type(fedai_id, ADM_AUDPROC_CAL, path, port_id, copp_idx,
 				perf_mode, app_type, acdb_id, sample_rate);
+		if (cal_ret && cal_ret != -ENOENT)
+			ret = cal_ret;
 		/* send persistent cal only in case of record */
-		if (path == TX_DEVICE)
-			send_adm_cal_type(fedai_id, ADM_AUDPROC_PERSISTENT_CAL, path,
+		if (path == TX_DEVICE) {
+			cal_ret = send_adm_cal_type(fedai_id, ADM_AUDPROC_PERSISTENT_CAL, path,
 				  port_id, copp_idx, perf_mode, app_type,
 				  acdb_id, sample_rate);
+			if (cal_ret && cal_ret != -ENOENT && !ret)
+				ret = cal_ret;
+		}
 	} else {
-		send_adm_cal_type(fedai_id, ADM_LSM_AUDPROC_CAL, path, port_id, copp_idx,
+		cal_ret = send_adm_cal_type(fedai_id, ADM_LSM_AUDPROC_CAL, path, port_id, copp_idx,
 				  perf_mode, app_type, acdb_id, sample_rate);
+		if (cal_ret && cal_ret != -ENOENT)
+			ret = cal_ret;
 
-		send_adm_cal_type(fedai_id, ADM_LSM_AUDPROC_PERSISTENT_CAL, path,
+		cal_ret = send_adm_cal_type(fedai_id, ADM_LSM_AUDPROC_PERSISTENT_CAL, path,
 				  port_id, copp_idx, perf_mode, app_type,
 				  acdb_id, sample_rate);
+		if (cal_ret && cal_ret != -ENOENT && !ret)
+			ret = cal_ret;
 	}
 
-	send_adm_cal_type(fedai_id, ADM_AUDVOL_CAL, path, port_id, copp_idx, perf_mode,
+	cal_ret = send_adm_cal_type(fedai_id, ADM_AUDVOL_CAL, path, port_id, copp_idx, perf_mode,
 			  app_type, acdb_id, sample_rate);
+	if (cal_ret && cal_ret != -ENOENT && !ret)
+		ret = cal_ret;
+
+	return ret;
 }
 
 /**
@@ -4161,6 +4267,7 @@ int adm_matrix_map(int fedai_id, int path, struct route_payload payload_map, int
 	void *payload = NULL;
 	void *matrix_map = NULL;
 	int port_idx, copp_idx;
+	int cal_ret;
 
 	/* Assumes port_ids have already been validated during adm_open */
 	cmd_size = (sizeof(struct adm_cmd_matrix_map_routings_v5) +
@@ -4260,16 +4367,27 @@ int adm_matrix_map(int fedai_id, int path, struct route_payload payload_map, int
 						__func__, port_idx, copp_idx);
 				continue;
 			}
-			send_adm_cal(fedai_id, payload_map.port_id[i], copp_idx,
-				     get_cal_path(path), perf_mode,
-				     payload_map.app_type[i],
-				     payload_map.acdb_dev_id[i],
-				     payload_map.sample_rate[i],
-				     passthr_mode);
-			/* ADM COPP calibration is already sent */
-			clear_bit(ADM_STATUS_CALIBRATION_REQUIRED,
-				(void *)&this_adm.copp.
-				adm_status[port_idx][copp_idx]);
+			cal_ret = send_adm_cal(fedai_id,
+					       payload_map.port_id[i],
+					       copp_idx, get_cal_path(path),
+					       perf_mode,
+					       payload_map.app_type[i],
+					       payload_map.acdb_dev_id[i],
+					       payload_map.sample_rate[i],
+					       passthr_mode);
+			if (!cal_ret) {
+				/* ADM COPP calibration is already sent */
+				clear_bit(ADM_STATUS_CALIBRATION_REQUIRED,
+					(void *)&this_adm.copp.
+					adm_status[port_idx][copp_idx]);
+			} else {
+				pr_err("%s: ADM COPP calibration failed; keeping retry bit port=0x%x port_idx=%d copp=%d app=%d acdb=%d rate=%d ret=%d\n",
+				       __func__, payload_map.port_id[i],
+				       port_idx, copp_idx,
+				       payload_map.app_type[i],
+				       payload_map.acdb_dev_id[i],
+				       payload_map.sample_rate[i], cal_ret);
+			}
 			pr_debug("%s: copp_id: %d\n", __func__,
 				 atomic_read(&this_adm.copp.id[port_idx]
 							      [copp_idx]));

@@ -2974,7 +2974,7 @@ static int tfa98xx_hw_params(struct snd_pcm_substream *substream,
 		params_channels(params), tfa98xx_mixer_profile,
 		tfa98xx->tfa->dynamicTDMmode, tfa98xx->tfa->daimap,
 		tfa98xx->flags);
-	if ((tfa98xx->flags & TFA98XX_FLAG_TDM_DEVICE) &&
+	if ((tfa98xx->tfa->dynamicTDMmode == 3) &&
 	    tfa_dev_set_tdm_bitwidth(tfa98xx->tfa, tfa98xx->tfa->bitwidth))
 		return -EINVAL;
 	/* check if samplerate is supported for this mixer profile */

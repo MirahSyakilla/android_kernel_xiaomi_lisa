@@ -2856,6 +2856,7 @@ enum Tfa98xx_Error tfaGetFwApiVersion(struct tfa_device *tfa, unsigned char *pFi
 enum Tfa98xx_Error tfaRunSpeakerBoost(struct tfa_device *tfa, int force, int profile)
 {
 	enum Tfa98xx_Error err = Tfa98xx_Error_Ok;
+	enum tfa_state state;
 	int value;
 
 	if (force) {
@@ -2865,6 +2866,15 @@ enum Tfa98xx_Error tfaRunSpeakerBoost(struct tfa_device *tfa, int force, int pro
 
 	/* Returns 1 when device is "cold" and 0 when device is warm */
 	value = tfa_is_cold(tfa);
+	state = tfa_dev_get_state(tfa);
+	if (tfa->is_probus_device && state == TFA_STATE_POWERDOWN) {
+		if (!value)
+			pr_info("Forcing coldstart for device [%s] in powerdown state\n",
+				tfaContDeviceName(tfa->cnt, tfa->dev_idx));
+		value = 1;
+		if (tfa->ext_dsp == 2)
+			tfa->ext_dsp = 1;
+	}
 
 	pr_debug("Startup of device [%s] is a %sstart\n", tfaContDeviceName(tfa->cnt, tfa->dev_idx), value ? "cold" : "warm");
 	/* cold start and not tap profile */
@@ -3085,7 +3095,7 @@ enum Tfa98xx_Error tfaRunStartup(struct tfa_device *tfa, int profile)
 	err = tfaContWriteRegsProf(tfa, profile);
 	PRINT_ASSERT(err);
 #ifdef __KERNEL__
-	if ((tfa->daimap & Tfa98xx_DAI_TDM) && tfa->bitwidth > 0) {
+	if ((tfa->dynamicTDMmode == 3) && tfa->bitwidth > 0) {
 		pr_info("TFA startup TDM bitwidth: dev=%d addr=0x%x width=%d dynamic=%d daimap=0x%x family=%d probus=%d\n",
 			tfa->dev_idx, tfa->slave_address, tfa->bitwidth,
 			tfa->dynamicTDMmode, tfa->daimap, tfa->tfa_family,
@@ -3434,6 +3444,11 @@ enum tfa_error tfa_dev_stop(struct tfa_device *tfa)
 		msleep_interruptible(10);
 		manstate = TFA_GET_BF(tfa, MANSTATE);
 		retry++;
+	}
+	if (tfa->is_probus_device && tfa->ext_dsp == 2) {
+		pr_info("Invalidate warm external DSP state after probus powerdown for device [%s]\n",
+			tfaContDeviceName(tfa->cnt, tfa->dev_idx));
+		tfa->ext_dsp = 1;
 	}
 
 error_exit:

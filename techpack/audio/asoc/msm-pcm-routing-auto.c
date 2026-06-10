@@ -25352,10 +25352,11 @@ static int msm_routing_put_module_cfg_control(struct snd_kcontrol *kcontrol,
 				if (!test_bit(copp_idx, &copp))
 					continue;
 
-				ret = q6common_pack_pp_params(packed_params,
+				ret = q6common_pack_pp_params_v2(packed_params,
 							&param_hdr,
 							(u8 *) &param_value,
-							&packed_param_size);
+							&packed_param_size,
+							q6common_is_adm_pp_instance_id_supported());
 				if (ret) {
 					pr_err("%s: Failed to pack params, error %d\n",
 					       __func__, ret);
@@ -33482,10 +33483,11 @@ static int asrc_pack_and_set_params(int module_id, int instance_id, int param_id
 
 	mutex_lock(&routing_lock);
 
-	ret = q6common_pack_pp_params(packed_params,
+	ret = q6common_pack_pp_params_v2(packed_params,
 				&param_hdr,
 				(u8 *) params,
-				&packed_param_size);
+				&packed_param_size,
+				q6common_is_adm_pp_instance_id_supported());
 	if (ret) {
 		pr_err("%s: Failed to pack pp params, error=%d\n",
 			__func__, ret);

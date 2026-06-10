@@ -2028,6 +2028,35 @@ static int q6afe_set_params(u16 port_id, int index,
 					   packed_param_data, packed_data_size);
 }
 
+static int q6afe_set_params_legacy(u16 port_id, int index,
+				   struct mem_mapping_hdr *mem_hdr,
+				   u8 *packed_param_data, u32 packed_data_size)
+{
+	int ret = 0;
+
+	ret = afe_q6_interface_prepare();
+	if (ret != 0) {
+		pr_err("%s: Q6 interface prepare failed %d\n", __func__, ret);
+		return ret;
+	}
+
+	port_id = q6audio_get_port_id(port_id);
+	ret = q6audio_validate_port(port_id);
+	if (ret < 0) {
+		pr_err("%s: Not a valid port id = 0x%x ret %d\n", __func__,
+		       port_id, ret);
+		return -EINVAL;
+	}
+
+	if (index < 0 || index >= AFE_MAX_PORTS) {
+		pr_err("%s: AFE port index[%d] invalid\n", __func__, index);
+		return -EINVAL;
+	}
+
+	return q6afe_set_params_v2(port_id, index, mem_hdr, packed_param_data,
+				   packed_data_size);
+}
+
 static int q6afe_pack_and_set_param_in_band(u16 port_id, int index,
 					    struct param_hdr_v3 param_hdr,
 					    u8 *param_data)
@@ -2050,6 +2079,34 @@ static int q6afe_pack_and_set_param_in_band(u16 port_id, int index,
 
 	ret = q6afe_set_params(port_id, index, NULL, packed_param_data,
 			       packed_data_size);
+
+fail_cmd:
+	kfree(packed_param_data);
+	return ret;
+}
+
+static int q6afe_pack_and_set_param_in_band_legacy(u16 port_id, int index,
+						   struct param_hdr_v3 param_hdr,
+						   u8 *param_data)
+{
+	u8 *packed_param_data = NULL;
+	int packed_data_size = sizeof(union param_hdrs) + param_hdr.param_size;
+	int ret;
+
+	packed_param_data = kzalloc(packed_data_size, GFP_KERNEL);
+	if (packed_param_data == NULL)
+		return -ENOMEM;
+
+	ret = q6common_pack_pp_params_v2(packed_param_data, &param_hdr,
+					 param_data, &packed_data_size, false);
+	if (ret) {
+		pr_err("%s: Failed to pack param header and data, error %d\n",
+		       __func__, ret);
+		goto fail_cmd;
+	}
+
+	ret = q6afe_set_params_legacy(port_id, index, NULL, packed_param_data,
+				      packed_data_size);
 
 fail_cmd:
 	kfree(packed_param_data);
@@ -3606,7 +3663,7 @@ static int afe_port_topology_deregister(u16 port_id)
 	param_info.instance_id = INSTANCE_ID_0;
 	param_info.param_id = AFE_PARAM_ID_DEREGISTER_TOPOLOGY;
 	param_info.param_size =  0;
-	ret = q6afe_pack_and_set_param_in_band(port_id,
+	ret = q6afe_pack_and_set_param_in_band_legacy(port_id,
 					q6audio_get_port_index(port_id),
 					param_info, NULL);
 	if (ret < 0)
@@ -3656,12 +3713,17 @@ static int afe_send_port_topology_id(u16 port_id)
 	topology.minor_version = AFE_API_VERSION_TOPOLOGY_V1;
 	topology.topology_id = topology_id;
 
-	ret = q6afe_pack_and_set_param_in_band(port_id,
+	ret = q6afe_pack_and_set_param_in_band_legacy(port_id,
 					       q6audio_get_port_index(port_id),
 					       param_info, (u8 *) &topology);
 	if (ret) {
-		pr_err("%s: AFE set topology id enable for port 0x%x failed %d\n",
-			__func__, port_id, ret);
+		pr_err("%s: AFE set topology failed port=0x%x index=%d topology=0x%x module=0x%x instance=0x%x param=0x%x param_size=%u cal_mode=%d acdb_id=%d sample_rate=%u ret=%d\n",
+			__func__, port_id, index, topology_id,
+			param_info.module_id, param_info.instance_id,
+			param_info.param_id, param_info.param_size,
+			this_afe.afe_cal_mode[index],
+			this_afe.dev_acdb_id[index],
+			this_afe.afe_sample_rates[index], ret);
 		goto done;
 	}
 
@@ -5132,6 +5194,7 @@ int afe_tdm_port_start(u16 port_id, struct afe_tdm_port_config *tdm_port,
 	enum afe_mad_type mad_type = MAD_HW_NONE;
 	int ret = 0;
 	atomic_t *port_ref = NULL;
+	bool has_afe_topology = false;
 
 	if (!tdm_port) {
 		pr_err("%s: Error, no configuration data\n", __func__);
@@ -5171,11 +5234,17 @@ int afe_tdm_port_start(u16 port_id, struct afe_tdm_port_config *tdm_port,
 
 	/* Also send the topology id here: */
 	if (!(this_afe.afe_cal_mode[port_index] == AFE_CAL_MODE_NONE)) {
+		has_afe_topology = true;
 		/* One time call: only for first time */
 		afe_send_custom_topology();
-		afe_send_port_topology_id(port_id);
-		afe_send_cal(port_id);
-		afe_send_hw_delay(port_id, rate);
+		/*
+		 * Reset a stale topology before retrying a port that failed
+		 * during an earlier start attempt.
+		 */
+		if (this_afe.afe_port_start_failed[port_index] == true) {
+			afe_port_topology_deregister(port_id);
+			this_afe.afe_port_start_failed[port_index] = false;
+		}
 	}
 
 	/* Start SW MAD module */
@@ -5245,11 +5314,35 @@ int afe_tdm_port_start(u16 port_id, struct afe_tdm_port_config *tdm_port,
 		}
 	}
 
+	if (has_afe_topology) {
+		/*
+		 * Program the TDM interface before binding the AFE topology.
+		 * Lisa TFADSP playback can reject SET_TOPOLOGY on the first
+		 * open if the port has not received its TDM/slot config yet.
+		 */
+		ret = afe_send_port_topology_id(port_id);
+		if (ret) {
+			pr_warn_ratelimited("%s: continuing after topology set failure port=0x%x index=%d rate=%u groups=%u cal_mode=%d acdb_id=%d tdm_fmt=0x%x tdm_ch=%u tdm_width=%u ret=%d\n",
+					    __func__, port_id, port_index, rate,
+					    num_groups,
+					    this_afe.afe_cal_mode[port_index],
+					    this_afe.dev_acdb_id[port_index],
+					    tdm_port->tdm.data_format,
+					    tdm_port->tdm.num_channels,
+					    tdm_port->tdm.bit_width, ret);
+			ret = 0;
+		}
+		afe_send_cal(port_id);
+		afe_send_hw_delay(port_id, rate);
+	}
+
 	ret = afe_send_cmd_port_start(port_id);
 	if(!ret)
 		atomic_inc(port_ref);
 
 fail_cmd:
+	if (ret && port_index < AFE_MAX_PORTS)
+		this_afe.afe_port_start_failed[port_index] = true;
 	return ret;
 }
 EXPORT_SYMBOL(afe_tdm_port_start);

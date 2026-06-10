@@ -32320,10 +32320,11 @@ static int msm_routing_put_module_cfg_control(struct snd_kcontrol *kcontrol,
 				if (!test_bit(copp_idx, &copp))
 					continue;
 
-				ret = q6common_pack_pp_params(packed_params,
+				ret = q6common_pack_pp_params_v2(packed_params,
 							&param_hdr,
 							(u8 *) &param_value,
-							&packed_param_size);
+							&packed_param_size,
+							q6common_is_adm_pp_instance_id_supported());
 				if (ret) {
 					pr_err("%s: Failed to pack params, error %d\n",
 					       __func__, ret);
@@ -33300,7 +33301,7 @@ static int spkr_prot_put_vi_lch_port(struct snd_kcontrol *kcontrol,
 			   msm_bedais[e->shift_l].port_id, 1, 0, 1);
 		} else {
 			pr_debug("%s values are out of range item %d\n",
-			__func__, e->values[vi_lch_port]);
+				__func__, e->values[vi_lch_port]);
 			/* Disable feedback TX path */
 			if (e->values[vi_lch_port] == MSM_BACKEND_DAI_MAX)
 				ret = afe_spk_prot_feed_back_cfg(0, 0, 0, 0, 0);
@@ -43747,10 +43748,11 @@ static int asrc_pack_and_set_params(int module_id, int instance_id, int param_id
 
 	mutex_lock(&routing_lock);
 
-	ret = q6common_pack_pp_params(packed_params,
+	ret = q6common_pack_pp_params_v2(packed_params,
 				&param_hdr,
 				(u8 *) params,
-				&packed_param_size);
+				&packed_param_size,
+				q6common_is_adm_pp_instance_id_supported());
 	if (ret) {
 		pr_err("%s: Failed to pack pp params, error=%d\n",
 			__func__, ret);

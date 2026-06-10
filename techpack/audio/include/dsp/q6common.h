@@ -10,6 +10,7 @@
 
 void q6common_update_instance_id_support(bool supported);
 bool q6common_is_instance_id_supported(void);
+bool q6common_is_adm_pp_instance_id_supported(void);
 int q6common_pack_pp_params(u8 *dest, struct param_hdr_v3 *v3_hdr,
 			    u8 *param_data, u32 *total_size);
 int q6common_pack_pp_params_v2(u8 *dest, struct param_hdr_v3 *v3_hdr,
