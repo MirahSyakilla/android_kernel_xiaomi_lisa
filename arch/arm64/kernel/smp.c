@@ -852,6 +852,14 @@ static DEFINE_RAW_SPINLOCK(stop_lock);
 
 static DEFINE_PER_CPU(struct pt_regs, regs_before_stop);
 
+struct pt_regs *arch_get_regs_before_stop(int cpu)
+{
+	if (!cpu_possible(cpu))
+		return NULL;
+
+	return per_cpu_ptr(&regs_before_stop, cpu);
+}
+
 static void local_cpu_stop(void)
 {
 	unsigned int cpu = smp_processor_id();

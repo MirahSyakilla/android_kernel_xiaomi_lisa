@@ -43,6 +43,7 @@
 #include <asm/ptrace.h>
 #include <linux/uaccess.h>
 #include <linux/percpu.h>
+#include <asm/smp.h>
 
 #include <linux/module.h>
 #include <linux/cma.h>
@@ -143,6 +144,21 @@ static DEFINE_SPINLOCK(md_modules_lock);
 #endif	/* CONFIG_MODULES */
 #endif
 
+static bool md_vmap_addr_to_phys(u64 addr, phys_addr_t *phys)
+{
+	struct page *page;
+
+	page = vmalloc_to_page((const void *)addr);
+	if (!page) {
+		pr_err_ratelimited("Failed to translate vmapped minidump address %#llx\n",
+				   addr);
+		return false;
+	}
+
+	*phys = page_to_phys(page) + offset_in_page(addr);
+	return true;
+}
+
 static void __init register_log_buf(void)
 {
 	char *log_bufp;
@@ -167,14 +183,15 @@ static void __init register_log_buf(void)
 
 static int register_stack_entry(struct md_region *ksp_entry, u64 sp, u64 size)
 {
-	struct page *sp_page;
+	phys_addr_t phys;
 	int entry;
 
 	ksp_entry->virt_addr = sp;
 	ksp_entry->size = size;
 	if (is_vmap_stack) {
-		sp_page = vmalloc_to_page((const void *) sp);
-		ksp_entry->phys_addr = page_to_phys(sp_page);
+		if (!md_vmap_addr_to_phys(sp, &phys))
+			return -EINVAL;
+		ksp_entry->phys_addr = phys;
 	} else {
 		ksp_entry->phys_addr = virt_to_phys((uintptr_t *)sp);
 	}
@@ -239,10 +256,14 @@ static inline bool in_stack_range(
 
 static unsigned int calculate_copy_pages(u64 sp, struct vm_struct *stack_area)
 {
-	u64 tsk_stack_base = (u64) stack_area->addr;
+	u64 tsk_stack_base;
 	u64 offset;
 	unsigned int stack_pages, copy_pages;
 
+	if (!stack_area)
+		return 0;
+
+	tsk_stack_base = (u64) stack_area->addr;
 	if (in_stack_range(sp, tsk_stack_base, get_vm_area_size(stack_area))) {
 		offset = sp - tsk_stack_base;
 		stack_pages = get_vm_area_size(stack_area) / PAGE_SIZE;
@@ -308,12 +329,13 @@ void dump_stack_minidump(u64 sp)
 static void update_stack_entry(struct md_region *ksp_entry, u64 sp,
 			       int mdno)
 {
-	struct page *sp_page;
+	phys_addr_t phys;
 
 	ksp_entry->virt_addr = sp;
 	if (likely(is_vmap_stack)) {
-		sp_page = vmalloc_to_page((const void *) sp);
-		ksp_entry->phys_addr = page_to_phys(sp_page);
+		if (!md_vmap_addr_to_phys(sp, &phys))
+			return;
+		ksp_entry->phys_addr = phys;
 	} else {
 		ksp_entry->phys_addr = virt_to_phys((uintptr_t *)sp);
 	}
@@ -409,6 +431,8 @@ void md_current_stack_ipi_handler(void *data)
 		return;
 	if (likely(is_vmap_stack)) {
 		stack_vm_area = task_stack_vm_area(current);
+		if (!stack_vm_area)
+			return;
 		sp = (u64)stack_vm_area->addr;
 	}
 	update_md_cpu_stack(cpu, sp);
@@ -430,6 +454,8 @@ static void update_md_suspend_current_stack(void)
 
 	if (likely(is_vmap_stack)) {
 		stack_vm_area = task_stack_vm_area(current);
+		if (!stack_vm_area)
+			return;
 		sp = (u64)stack_vm_area->addr;
 	}
 	update_md_stack(md_suspend_context.stack_mdr,
@@ -470,6 +496,8 @@ static void register_current_stack(void)
 	 */
 	if (likely(is_vmap_stack)) {
 		stack_vm_area = task_stack_vm_area(current);
+		if (!stack_vm_area)
+			return;
 		sp = (u64)stack_vm_area->addr;
 	}
 	for_each_possible_cpu(cpu) {
@@ -498,10 +526,13 @@ static void register_suspend_stack(void)
 {
 	char name_str[MAX_NAME_LENGTH];
 	u64 sp = current_stack_pointer;
-	struct vm_struct *stack_vm_area = task_stack_vm_area(current);
+	struct vm_struct *stack_vm_area;
 
 	scnprintf(name_str, sizeof(name_str), "KSUSPSTK");
 	if (is_vmap_stack) {
+		stack_vm_area = task_stack_vm_area(current);
+		if (!stack_vm_area)
+			return;
 		sp = (u64)stack_vm_area->addr;
 		register_vmapped_stack(md_suspend_context.stack_mdr,
 				md_suspend_context.stack_mdidx,
@@ -571,6 +602,8 @@ static void register_irq_stack(void)
 
 	for_each_possible_cpu(cpu) {
 		irq_stack_base = (u64)per_cpu(irq_stack_ptr, cpu);
+		if (!irq_stack_base)
+			continue;
 		if (is_vmap_stack) {
 			irq_stack_pages_count = IRQ_STACK_SIZE / PAGE_SIZE;
 			sp = irq_stack_base & ~(PAGE_SIZE - 1);
@@ -937,12 +970,13 @@ static inline void md_dump_panic_regs(void)
 
 static void md_dump_other_cpus_context(void)
 {
-	unsigned long ipi_stop_addr = kallsyms_lookup_name("regs_before_stop");
 	int cpu;
 	struct pt_regs *regs;
 
 	for_each_possible_cpu(cpu) {
-		regs = (struct pt_regs *)(ipi_stop_addr + per_cpu_offset(cpu));
+		regs = arch_get_regs_before_stop(cpu);
+		if (!regs)
+			continue;
 		seq_buf_printf(md_cntxt_seq_buf, "\nSTOPPED CPU : %d\n", cpu);
 		md_reg_context_data(regs);
 	}
