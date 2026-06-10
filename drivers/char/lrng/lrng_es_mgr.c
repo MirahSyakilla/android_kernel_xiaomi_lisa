@@ -9,6 +9,7 @@
 
 #include <linux/module.h>
 #include <linux/random.h>
+#include <linux/semaphore.h>
 #include <linux/utsname.h>
 #include <linux/workqueue.h>
 
@@ -48,7 +49,7 @@ struct lrng_state {
 	 */
 
 	atomic_t boot_entropy_thresh;	/* Reseed threshold */
-	struct mutex reseed_in_progress;	/* Flag for on executing reseed */
+	struct semaphore reseed_in_progress;	/* Serialize executing reseeds */
 	struct work_struct lrng_seed_work;	/* (re)seed work queue */
 };
 
@@ -56,7 +57,7 @@ static struct lrng_state lrng_state = {
 	false, false, false, false, false, false,
 	.boot_entropy_thresh	= ATOMIC_INIT(LRNG_INIT_ENTROPY_BITS),
 	.reseed_in_progress	=
-		__MUTEX_INITIALIZER(lrng_state.reseed_in_progress),
+		__SEMAPHORE_INITIALIZER(lrng_state.reseed_in_progress, 1),
 };
 
 /*
@@ -138,17 +139,17 @@ void lrng_debug_report_seedlevel(const char *name)
  */
 int lrng_pool_trylock(void)
 {
-	return mutex_trylock(&lrng_state.reseed_in_progress);
+	return !down_trylock(&lrng_state.reseed_in_progress);
 }
 
 void lrng_pool_lock(void)
 {
-	mutex_lock(&lrng_state.reseed_in_progress);
+	down(&lrng_state.reseed_in_progress);
 }
 
 void lrng_pool_unlock(void)
 {
-	mutex_unlock(&lrng_state.reseed_in_progress);
+	up(&lrng_state.reseed_in_progress);
 }
 
 /* Set new entropy threshold for reseeding during boot */
