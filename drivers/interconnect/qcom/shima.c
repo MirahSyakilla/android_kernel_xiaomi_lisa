@@ -25,8 +25,6 @@
 static LIST_HEAD(qnoc_probe_list);
 static DEFINE_MUTEX(probe_list_lock);
 
-static int probe_count;
-
 static const struct regmap_config icc_regmap_config = {
 	.reg_bits = 32,
 	.reg_stride = 4,
