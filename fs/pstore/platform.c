@@ -49,9 +49,9 @@ MODULE_PARM_DESC(update_ms, "milliseconds before pstore updates its content "
 
 /* Names should be in the same order as the enum pstore_type_id */
 static const char * const pstore_type_names[] = {
-	"console",
+	"dmesg",
 	"mce",
-	"unused",
+	"console",
 	"ftrace",
 	"rtas",
 	"powerpc-ofw",
