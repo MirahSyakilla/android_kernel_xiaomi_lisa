@@ -1291,6 +1291,15 @@ int cgroup1_get_tree(struct fs_context *fc)
 		ctx->root->schedtune_compat = true;
 #endif
 
+	if (!ret && (ctx->root->subsys_mask & (1 << cpuset_cgrp_id))) {
+		int compat_ret;
+
+		compat_ret = cpuset_create_android_compat_groups(ctx->root);
+		if (compat_ret)
+			pr_warn_once("cgroup: failed to create Android cpuset compat groups: %d\n",
+				     compat_ret);
+	}
+
 	if (!ret && percpu_ref_is_dying(&ctx->root->cgrp.self.refcnt)) {
 		fc_drop_locked(fc);
 		ret = 1;

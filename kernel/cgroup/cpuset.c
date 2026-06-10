@@ -65,7 +65,11 @@
 #include <linux/atomic.h>
 #include <linux/mutex.h>
 #include <linux/cgroup.h>
+#include <linux/stat.h>
+#include <linux/uidgid.h>
 #include <linux/wait.h>
+
+#include "cgroup-internal.h"
 
 DEFINE_STATIC_KEY_FALSE(cpusets_pre_enable_key);
 DEFINE_STATIC_KEY_FALSE(cpusets_enabled_key);
@@ -570,6 +574,192 @@ static inline void free_cpuset(struct cpuset *cs)
 {
 	free_cpumasks(cs, NULL);
 	kfree(cs);
+}
+
+static int update_cpumask(struct cpuset *cs, struct cpuset *trialcs,
+			  const char *buf);
+static int update_nodemask(struct cpuset *cs, struct cpuset *trialcs,
+			   const char *buf);
+
+static int cpuset_apply_compat_resmask(struct cgroup *cgrp, const char *cpus,
+				       const char *mems)
+{
+	struct cgroup_subsys_state *css;
+	struct cpuset *cs;
+	struct cpuset *trialcs;
+	int ret = -ENODEV;
+
+	mutex_lock(&cgroup_mutex);
+	css = cgroup_e_css(cgrp, &cpuset_cgrp_subsys);
+	if (!css || !css_tryget_online(css)) {
+		mutex_unlock(&cgroup_mutex);
+		return -ENODEV;
+	}
+	mutex_unlock(&cgroup_mutex);
+
+	cs = css_cs(css);
+
+	get_online_cpus();
+	mutex_lock(&cpuset_mutex);
+
+	if (!is_cpuset_online(cs))
+		goto out_unlock;
+
+	trialcs = alloc_trial_cpuset(cs);
+	if (!trialcs) {
+		ret = -ENOMEM;
+		goto out_unlock;
+	}
+
+	ret = update_nodemask(cs, trialcs, mems);
+	if (!ret)
+		ret = update_cpumask(cs, trialcs, cpus);
+
+	free_cpuset(trialcs);
+
+out_unlock:
+	mutex_unlock(&cpuset_mutex);
+	put_online_cpus();
+	css_put(css);
+	flush_workqueue(cpuset_migrate_mm_wq);
+	return ret;
+}
+
+static int cpuset_set_compat_kn_attrs(struct kernfs_node *parent,
+				      const char *name, umode_t mode,
+				      bool system_owner)
+{
+	struct kernfs_node *kn;
+	struct iattr iattr = { .ia_valid = ATTR_MODE };
+	int ret;
+
+	if (system_owner) {
+		iattr.ia_valid |= ATTR_UID | ATTR_GID;
+		iattr.ia_uid = KUIDT_INIT(1000);
+		iattr.ia_gid = KGIDT_INIT(1000);
+	}
+
+	kn = kernfs_find_and_get(parent, name);
+	if (!kn)
+		return -ENOENT;
+
+	iattr.ia_mode = (kn->mode & S_IFMT) | (mode & ~S_IFMT);
+
+	ret = kernfs_setattr(kn, &iattr);
+	kernfs_put(kn);
+	return ret;
+}
+
+static int cpuset_create_compat_cgroup(struct cgroup *parent, const char *name)
+{
+	struct kernfs_node *kn;
+	int ret;
+
+	kn = kernfs_find_and_get(parent->kn, name);
+	if (kn) {
+		kernfs_put(kn);
+		return 0;
+	}
+
+	ret = cgroup_kernel_mkdir(parent, name, 0775);
+	if (ret && ret != -EEXIST)
+		return ret;
+
+	return 0;
+}
+
+static struct cgroup *cpuset_get_compat_child(struct cgroup *parent,
+					     const char *name)
+{
+	struct kernfs_node *kn;
+	struct cgroup *cgrp;
+
+	kn = kernfs_find_and_get(parent->kn, name);
+	if (!kn)
+		return ERR_PTR(-ENOENT);
+
+	mutex_lock(&cgroup_mutex);
+	cgrp = kn->priv;
+	if (cgrp)
+		cgroup_get(cgrp);
+	mutex_unlock(&cgroup_mutex);
+
+	kernfs_put(kn);
+	return cgrp ?: ERR_PTR(-ENOENT);
+}
+
+static int cpuset_setup_android_compat_group(struct cgroup *parent,
+					     const char *name,
+					     const char *cpus,
+					     const char *mems,
+					     struct cgroup **out)
+{
+	struct cgroup *cgrp;
+	int ret;
+
+	ret = cpuset_create_compat_cgroup(parent, name);
+	if (ret)
+		return ret;
+
+	cgrp = cpuset_get_compat_child(parent, name);
+	if (IS_ERR(cgrp))
+		return PTR_ERR(cgrp);
+
+	ret = cpuset_apply_compat_resmask(cgrp, cpus, mems);
+	if (ret)
+		goto out_put;
+
+	ret = cpuset_set_compat_kn_attrs(cgrp->kn, "cpus", 0664, true);
+	if (ret)
+		goto out_put;
+	ret = cpuset_set_compat_kn_attrs(cgrp->kn, "tasks", 0664, true);
+	if (ret)
+		goto out_put;
+	ret = cpuset_set_compat_kn_attrs(cgrp->kn, "cgroup.procs", 0664, true);
+	if (ret)
+		goto out_put;
+	ret = cpuset_set_compat_kn_attrs(parent->kn, name, 0775, true);
+	if (ret)
+		goto out_put;
+
+	if (out) {
+		*out = cgrp;
+		return 0;
+	}
+
+out_put:
+	cgroup_put(cgrp);
+	return ret;
+}
+
+int cpuset_create_android_compat_groups(struct cgroup_root *root)
+{
+	struct cgroup *camera_bg = NULL;
+	int ret;
+
+	if (!root || root != cpuset_cgrp_subsys.root)
+		return 0;
+
+	if (!(root->subsys_mask & (1 << cpuset_cgrp_id)))
+		return 0;
+
+	if (!(root->flags & CGRP_ROOT_NOPREFIX))
+		return 0;
+
+	ret = cpuset_setup_android_compat_group(&root->cgrp,
+						"camera-background",
+						"0-3", "0", &camera_bg);
+	if (ret)
+		return ret;
+
+	ret = cpuset_setup_android_compat_group(camera_bg, "background",
+						"0-2", "0", NULL);
+	cgroup_put(camera_bg);
+	if (ret)
+		return ret;
+
+	pr_info_once("cpuset: created Android camera-background compatibility groups\n");
+	return 0;
 }
 
 /*

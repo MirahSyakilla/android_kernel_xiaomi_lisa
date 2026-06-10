@@ -5581,6 +5581,67 @@ fail:
 	return ret;
 }
 
+int cgroup_kernel_mkdir(struct cgroup *parent, const char *name, umode_t mode)
+{
+	struct cgroup *cgrp;
+	int ret;
+
+	if (!parent || !name)
+		return -EINVAL;
+
+	/* do not accept '\n' to prevent making /proc/<pid>/cgroup unparsable */
+	if (strchr(name, '\n'))
+		return -EINVAL;
+
+	mutex_lock(&cgroup_mutex);
+
+	if (cgroup_is_dead(parent)) {
+		ret = -ENODEV;
+		goto out_unlock;
+	}
+
+	if (!cgroup_check_hierarchy_limits(parent)) {
+		ret = -EAGAIN;
+		goto out_unlock;
+	}
+
+	cgrp = cgroup_create(parent, name, mode);
+	if (IS_ERR(cgrp)) {
+		ret = PTR_ERR(cgrp);
+		goto out_unlock;
+	}
+
+	/*
+	 * This extra ref will be put in cgroup_free_fn() and guarantees
+	 * that @cgrp->kn is always accessible.
+	 */
+	kernfs_get(cgrp->kn);
+
+	ret = cgroup_kn_set_ugid(cgrp->kn);
+	if (ret)
+		goto out_destroy;
+
+	ret = css_populate_dir(&cgrp->self);
+	if (ret)
+		goto out_destroy;
+
+	ret = cgroup_apply_control_enable(cgrp);
+	if (ret)
+		goto out_destroy;
+
+	TRACE_CGROUP_PATH(mkdir, cgrp);
+	kernfs_activate(cgrp->kn);
+
+	ret = 0;
+	goto out_unlock;
+
+out_destroy:
+	cgroup_destroy_locked(cgrp);
+out_unlock:
+	mutex_unlock(&cgroup_mutex);
+	return ret;
+}
+
 int cgroup_mkdir(struct kernfs_node *parent_kn, const char *name, umode_t mode)
 {
 	struct cgroup *parent, *cgrp;

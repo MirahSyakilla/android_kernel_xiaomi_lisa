@@ -257,6 +257,7 @@ void cgroup_procs_write_finish(struct task_struct *task, bool locked)
 
 void cgroup_lock_and_drain_offline(struct cgroup *cgrp);
 
+int cgroup_kernel_mkdir(struct cgroup *parent, const char *name, umode_t mode);
 int cgroup_mkdir(struct kernfs_node *parent_kn, const char *name, umode_t mode);
 int cgroup_rmdir(struct kernfs_node *kn);
 int cgroup_show_path(struct seq_file *sf, struct kernfs_node *kf_node,
@@ -264,6 +265,15 @@ int cgroup_show_path(struct seq_file *sf, struct kernfs_node *kf_node,
 
 int __cgroup_task_count(const struct cgroup *cgrp);
 int cgroup_task_count(const struct cgroup *cgrp);
+
+#ifdef CONFIG_CPUSETS
+int cpuset_create_android_compat_groups(struct cgroup_root *root);
+#else
+static inline int cpuset_create_android_compat_groups(struct cgroup_root *root)
+{
+	return 0;
+}
+#endif
 
 /*
  * rstat.c
