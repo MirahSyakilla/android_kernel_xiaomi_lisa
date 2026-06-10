@@ -22,6 +22,7 @@
 #include <linux/blkdev.h>
 #include <linux/backing-dev.h>
 #include <linux/bio.h>
+#include <linux/mm.h>
 #include <linux/pagemap.h>
 #include <linux/list.h>
 #include <linux/init.h>
@@ -186,6 +187,105 @@ static int block2mtd_write(struct mtd_info *mtd, loff_t to, size_t len,
 	return err;
 }
 
+static int block2mtd_panic_flush(struct block_device *bdev)
+{
+	struct bio *bio;
+	int ret;
+
+	bio = bio_alloc(GFP_ATOMIC, 0);
+	if (!bio)
+		return -ENOMEM;
+
+	bio_set_dev(bio, bdev);
+	bio->bi_opf = REQ_OP_WRITE | REQ_PREFLUSH;
+
+	ret = submit_bio_wait(bio);
+	bio_put(bio);
+
+	return ret == -EOPNOTSUPP ? 0 : ret;
+}
+
+static struct page *block2mtd_buf_page(const void *addr)
+{
+	if (is_vmalloc_addr(addr))
+		return vmalloc_to_page(addr);
+
+	return virt_to_page(addr);
+}
+
+static int block2mtd_panic_write(struct mtd_info *mtd, loff_t to, size_t len,
+		size_t *retlen, const u_char *buf)
+{
+	struct block2mtd_dev *dev = mtd->priv;
+	sector_t sector = to >> SECTOR_SHIFT;
+	size_t done = 0;
+	int ret;
+
+	*retlen = 0;
+
+	if ((to | len) & ((1 << SECTOR_SHIFT) - 1))
+		return -EINVAL;
+
+	while (done < len) {
+		struct bio *bio;
+		unsigned int nr_pages;
+		unsigned int added = 0;
+
+		nr_pages = min_t(unsigned int,
+				 DIV_ROUND_UP(offset_in_page(buf + done) +
+					      len - done, PAGE_SIZE),
+				 BIO_MAX_PAGES);
+
+		bio = bio_alloc(GFP_ATOMIC, nr_pages);
+		if (!bio)
+			return done ? 0 : -ENOMEM;
+
+		bio_set_dev(bio, dev->blkdev);
+		bio->bi_iter.bi_sector = sector;
+		bio->bi_opf = REQ_OP_WRITE | REQ_SYNC | REQ_FUA;
+
+		while (done < len) {
+			struct page *page;
+			unsigned int offset;
+			unsigned int bytes;
+			int retbytes;
+
+			offset = offset_in_page(buf + done);
+			bytes = min_t(size_t, PAGE_SIZE - offset, len - done);
+			page = block2mtd_buf_page(buf + done);
+			if (!page) {
+				bio_put(bio);
+				return done ? 0 : -EFAULT;
+			}
+
+			retbytes = bio_add_page(bio, page, bytes, offset);
+			if (retbytes <= 0)
+				break;
+
+			done += retbytes;
+			sector += retbytes >> SECTOR_SHIFT;
+			added += retbytes;
+			if (retbytes != bytes)
+				break;
+		}
+
+		if (!added) {
+			bio_put(bio);
+			return done ? 0 : -EIO;
+		}
+
+		ret = submit_bio_wait(bio);
+		bio_put(bio);
+		if (ret)
+			return ret;
+
+		*retlen = done;
+	}
+
+	ret = block2mtd_panic_flush(dev->blkdev);
+	return ret;
+}
+
 
 /* sync the device - wait until the write queue is empty */
 static void block2mtd_sync(struct mtd_info *mtd)
@@ -210,6 +310,37 @@ static void block2mtd_free_device(struct block2mtd_dev *dev)
 	}
 
 	kfree(dev);
+}
+
+static dev_t block2mtd_name_to_dev_t(const char *devname)
+{
+	const char block_prefix[] = "/dev/block/";
+	const char by_name[] = "/by-name/";
+	char path[80];
+	const char *name;
+	dev_t devt;
+
+	devt = name_to_dev_t(devname);
+	if (devt)
+		return devt;
+
+	if (strncmp(devname, block_prefix, strlen(block_prefix)))
+		return 0;
+
+	name = devname + strlen(block_prefix);
+	if (!strchr(name, '/')) {
+		snprintf(path, sizeof(path), "/dev/%s", name);
+		return name_to_dev_t(path);
+	}
+
+	name = strstr(devname, by_name);
+	if (name) {
+		snprintf(path, sizeof(path), "PARTLABEL=%s",
+			 name + strlen(by_name));
+		return name_to_dev_t(path);
+	}
+
+	return 0;
 }
 
 
@@ -251,7 +382,7 @@ static struct block2mtd_dev *add_device(char *devname, int erase_size,
 			msleep(1000);
 		wait_for_device_probe();
 
-		devt = name_to_dev_t(devname);
+		devt = block2mtd_name_to_dev_t(devname);
 		if (!devt)
 			continue;
 		bdev = blkdev_get_by_dev(devt, mode, dev);
@@ -292,6 +423,7 @@ static struct block2mtd_dev *add_device(char *devname, int erase_size,
 	dev->mtd.flags = MTD_CAP_RAM;
 	dev->mtd._erase = block2mtd_erase;
 	dev->mtd._write = block2mtd_write;
+	dev->mtd._panic_write = block2mtd_panic_write;
 	dev->mtd._sync = block2mtd_sync;
 	dev->mtd._read = block2mtd_read;
 	dev->mtd.priv = dev;

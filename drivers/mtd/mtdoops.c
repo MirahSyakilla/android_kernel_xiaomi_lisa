@@ -9,6 +9,7 @@
 
 #include <linux/kernel.h>
 #include <linux/module.h>
+#include <linux/fs.h>
 #include <linux/console.h>
 #include <linux/vmalloc.h>
 #include <linux/workqueue.h>
@@ -18,9 +19,11 @@
 #include <linux/interrupt.h>
 #include <linux/mtd/mtd.h>
 #include <linux/kmsg_dump.h>
+#include <linux/proc_fs.h>
+#include <linux/uaccess.h>
 
 /* Maximum MTD partition size */
-#define MTDOOPS_MAX_MTD_SIZE (8 * 1024 * 1024)
+#define MTDOOPS_MAX_MTD_SIZE (16 * 1024 * 1024)
 
 #define MTDOOPS_KERNMSG_MAGIC 0x5d005d00
 #define MTDOOPS_HEADER_SIZE   8
@@ -54,6 +57,56 @@ static struct mtdoops_context {
 
 	void *oops_buf;
 } oops_cxt;
+
+#ifdef CONFIG_PROC_FS
+static ssize_t mtdoops_last_kmsg_read(struct file *file, char __user *buf,
+				      size_t count, loff_t *ppos)
+{
+	struct mtdoops_context *cxt = &oops_cxt;
+	struct mtd_info *mtd = cxt->mtd;
+	size_t retlen, len;
+	u32 hdr[2];
+	char *kmsg;
+	int page;
+	int ret;
+
+	if (!mtd || cxt->oops_pages <= 0)
+		return 0;
+
+	page = cxt->nextpage ? cxt->nextpage - 1 : cxt->oops_pages - 1;
+	ret = mtd_read(mtd, page * record_size, MTDOOPS_HEADER_SIZE,
+		       &retlen, (u_char *)hdr);
+	if (retlen != MTDOOPS_HEADER_SIZE ||
+	    (ret < 0 && !mtd_is_bitflip(ret)) ||
+	    hdr[1] != MTDOOPS_KERNMSG_MAGIC)
+		return 0;
+
+	len = record_size - MTDOOPS_HEADER_SIZE;
+	kmsg = vmalloc(len);
+	if (!kmsg)
+		return -ENOMEM;
+
+	ret = mtd_read(mtd, page * record_size + MTDOOPS_HEADER_SIZE,
+		       len, &retlen, kmsg);
+	if (ret < 0 && !mtd_is_bitflip(ret)) {
+		vfree(kmsg);
+		return ret;
+	}
+
+	len = retlen;
+	while (len && kmsg[len - 1] == (char)0xff)
+		len--;
+
+	ret = simple_read_from_buffer(buf, count, ppos, kmsg, len);
+	vfree(kmsg);
+	return ret;
+}
+
+static const struct proc_ops mtdoops_last_kmsg_fops = {
+	.proc_read = mtdoops_last_kmsg_read,
+	.proc_lseek = default_llseek,
+};
+#endif
 
 static void mark_page_used(struct mtdoops_context *cxt, int page)
 {
@@ -196,9 +249,13 @@ static void mtdoops_write(struct mtdoops_context *cxt, int panic)
 		ret = mtd_write(mtd, cxt->nextpage * record_size,
 				record_size, &retlen, cxt->oops_buf);
 
-	if (retlen != record_size || ret < 0)
+	if (retlen != record_size || ret < 0) {
 		printk(KERN_ERR "mtdoops: write failure at %ld (%td of %ld written), error %d\n",
 		       cxt->nextpage * record_size, retlen, record_size, ret);
+		return;
+	}
+	if (!panic)
+		mtd_sync(mtd);
 	mark_page_used(cxt, cxt->nextpage);
 	memset(cxt->oops_buf, 0xff, record_size);
 
@@ -399,6 +456,9 @@ static int __init mtdoops_init(void)
 	INIT_WORK(&cxt->work_write, mtdoops_workfunc_write);
 
 	register_mtd_user(&mtdoops_notifier);
+#ifdef CONFIG_PROC_FS
+	proc_create("last_kmsg", 0444, NULL, &mtdoops_last_kmsg_fops);
+#endif
 	return 0;
 }
 
@@ -407,6 +467,9 @@ static void __exit mtdoops_exit(void)
 	struct mtdoops_context *cxt = &oops_cxt;
 
 	unregister_mtd_user(&mtdoops_notifier);
+#ifdef CONFIG_PROC_FS
+	remove_proc_entry("last_kmsg", NULL);
+#endif
 	vfree(cxt->oops_buf);
 	vfree(cxt->oops_page_used);
 }
