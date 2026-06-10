@@ -306,7 +306,8 @@ static int brl_irq_enbale(struct goodix_ts_core *cd, bool enable)
 		ts_debug("Irq disabled");
 		return 0;
 	}
-	ts_info("warnning: irq deepth inbalance!");
+
+	ts_debug("Irq already %s", enable ? "enabled" : "disabled");
 	return 0;
 }
 
