@@ -387,7 +387,12 @@ static void fuse_dentry_canonical_path(const struct path *path, struct path *can
 
 #ifdef CONFIG_FUSE_BPF
 	struct fuse_err_ret fer;
+#endif
 
+	if (fm->fc->no_dentry_canonical_path)
+		goto default_path;
+
+#ifdef CONFIG_FUSE_BPF
 	fer = fuse_bpf_backing(inode, struct fuse_dummy_io,
 			       fuse_canonical_path_initialize,
 			       fuse_canonical_path_backing,
@@ -419,11 +424,16 @@ static void fuse_dentry_canonical_path(const struct path *path, struct path *can
 	free_page((unsigned long)path_name);
 	if (err > 0)
 		return;
+	if (err == -ENOSYS) {
+		fm->fc->no_dentry_canonical_path = 1;
+		goto default_path;
+	}
 	if (err < 0) {
 		canonical_path->dentry = ERR_PTR(err);
 		return;
 	}
 
+default_path:
 	canonical_path->dentry = path->dentry;
 	canonical_path->mnt = path->mnt;
 	path_get(canonical_path);
@@ -1044,11 +1054,19 @@ static int fuse_symlink(struct inode *dir, struct dentry *entry,
 	return create_new_entry(fm, &args, dir, entry, S_IFLNK);
 }
 
+void fuse_flush_time_update(struct inode *inode)
+{
+	int err = sync_inode_metadata(inode, 1);
+
+	mapping_set_error(inode->i_mapping, err);
+}
+
 void fuse_update_ctime(struct inode *inode)
 {
 	if (!IS_NOCMTIME(inode)) {
 		inode->i_ctime = current_time(inode);
 		mark_inode_dirty_sync(inode);
+		fuse_flush_time_update(inode);
 	}
 }
 
