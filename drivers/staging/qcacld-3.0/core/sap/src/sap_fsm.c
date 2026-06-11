@@ -1286,7 +1286,7 @@ QDF_STATUS sap_clear_session_param(mac_handle_t mac_handle,
 		QDF_MAX_NO_OF_MODE;
 	sap_clear_global_dfs_param(mac_handle, sapctx);
 	sap_free_roam_profile(&sapctx->csr_roamProfile);
-	sap_err("Set sapCtxList null for session %d", sapctx->sessionId);
+	sap_debug("Set sapCtxList null for session %d", sapctx->sessionId);
 	qdf_mem_zero(sapctx, sizeof(*sapctx));
 	sapctx->sessionId = WLAN_UMAC_VDEV_ID_MAX;
 
@@ -1459,6 +1459,11 @@ static bool sap_save_owe_pending_assoc_ind(struct sap_context *sap_ctx,
 {
 	struct owe_assoc_ind *assoc_ind;
 	QDF_STATUS status;
+
+	if (!sap_ctx->owe_pending_assoc_ind_list_init) {
+		sap_err("OWE pending assoc list is not initialized");
+		return false;
+	}
 
 	assoc_ind = qdf_mem_malloc(sizeof(*assoc_ind));
 	if (!assoc_ind)

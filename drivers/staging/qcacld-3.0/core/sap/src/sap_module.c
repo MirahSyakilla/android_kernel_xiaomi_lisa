@@ -233,6 +233,7 @@ struct sap_context *sap_create_ctx(void)
 static QDF_STATUS wlansap_owe_init(struct sap_context *sap_ctx)
 {
 	qdf_list_create(&sap_ctx->owe_pending_assoc_ind_list, 0);
+	sap_ctx->owe_pending_assoc_ind_list_init = true;
 
 	return QDF_STATUS_SUCCESS;
 }
@@ -249,6 +250,9 @@ static void wlansap_owe_cleanup(struct sap_context *sap_ctx)
 		sap_err("Invalid SAP context");
 		return;
 	}
+
+	if (!sap_ctx->owe_pending_assoc_ind_list_init)
+		return;
 
 	mac = sap_get_mac_context();
 	if (!mac) {
@@ -289,7 +293,11 @@ static void wlansap_owe_cleanup(struct sap_context *sap_ctx)
 
 static void wlansap_owe_deinit(struct sap_context *sap_ctx)
 {
+	if (!sap_ctx->owe_pending_assoc_ind_list_init)
+		return;
+
 	qdf_list_destroy(&sap_ctx->owe_pending_assoc_ind_list);
+	sap_ctx->owe_pending_assoc_ind_list_init = false;
 }
 
 QDF_STATUS sap_init_ctx(struct sap_context *sap_ctx,
@@ -2800,6 +2808,11 @@ QDF_STATUS wlansap_update_owe_info(struct sap_context *sap_ctx,
 	if (!sap_ctx) {
 		sap_err("Invalid SAP context");
 		return QDF_STATUS_E_FAULT;
+	}
+
+	if (!sap_ctx->owe_pending_assoc_ind_list_init) {
+		sap_err("OWE pending assoc list is not initialized");
+		return QDF_STATUS_E_INVAL;
 	}
 
 	mac = sap_get_mac_context();

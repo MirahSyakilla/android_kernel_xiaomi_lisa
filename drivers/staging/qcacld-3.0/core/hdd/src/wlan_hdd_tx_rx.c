@@ -3117,6 +3117,11 @@ void hdd_send_rps_ind(struct hdd_adapter *adapter)
 	}
 
 	hdd_ctxt = WLAN_HDD_GET_CTX(adapter);
+	if (!adapter->dev || !netif_device_present(adapter->dev)) {
+		hdd_debug("skip RPS enable for inactive netdev");
+		return;
+	}
+
 	rps_data.num_queues = NUM_TX_QUEUES;
 
 	hdd_debug("cpu_map_list '%s'", hdd_ctxt->config->cpu_map_list);
@@ -3185,9 +3190,15 @@ void hdd_send_rps_disable_ind(struct hdd_adapter *adapter)
 	}
 
 	hdd_ctxt = WLAN_HDD_GET_CTX(adapter);
+	if (!adapter->dev || !netif_device_present(adapter->dev)) {
+		cds_cfg->rps_enabled = false;
+		hdd_debug("skip RPS disable for inactive netdev");
+		return;
+	}
+
 	rps_data.num_queues = NUM_TX_QUEUES;
 
-	hdd_info("Set cpu_map_list 0");
+	hdd_debug("Set cpu_map_list 0");
 
 	qdf_mem_zero(&rps_data.cpu_map_list, sizeof(rps_data.cpu_map_list));
 

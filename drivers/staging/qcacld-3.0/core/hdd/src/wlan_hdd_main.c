@@ -2524,6 +2524,9 @@ int hdd_update_tgt_cfg(hdd_handle_t hdd_handle, struct wma_tgt_cfg *cfg)
 		goto pdev_close;
 	}
 
+	hdd_info("target band cap 0x%x ini band cap 0x%x dot11 mode %d",
+		 cfg->band_cap, band_capability, hdd_ctx->config->dot11Mode);
+
 	band_capability =
 		hdd_update_band_cap_from_dot11mode(hdd_ctx, band_capability);
 
@@ -2547,6 +2550,8 @@ int hdd_update_tgt_cfg(hdd_handle_t hdd_handle, struct wma_tgt_cfg *cfg)
 	else
 		band_capability = temp_band_cap;
 
+	hdd_info("effective band cap 0x%x", band_capability);
+
 	status = ucfg_mlme_set_band_capability(hdd_ctx->psoc, band_capability);
 	if (QDF_IS_STATUS_ERROR(status)) {
 		hdd_err("Failed to set MLME Band Capability");
@@ -2554,7 +2559,7 @@ int hdd_update_tgt_cfg(hdd_handle_t hdd_handle, struct wma_tgt_cfg *cfg)
 		goto pdev_close;
 	}
 
-	hdd_ctx->curr_band = band_capability;
+	hdd_ctx->curr_band = wlan_reg_band_bitmap_to_band_info(band_capability);
 	hdd_ctx->psoc->soc_nif.user_config.band_capability = hdd_ctx->curr_band;
 
 	status = wlan_hdd_update_wiphy_supported_band(hdd_ctx);
@@ -6940,7 +6945,6 @@ struct hdd_adapter *hdd_open_adapter(struct hdd_context *hdd_ctx, uint8_t sessio
 
 		hdd_nud_init_tracking(adapter);
 		hdd_mic_init_work(adapter);
-
 		qdf_mutex_create(&adapter->disconnection_status_lock);
 		hdd_periodic_sta_stats_mutex_create(adapter);
 
@@ -6975,6 +6979,8 @@ struct hdd_adapter *hdd_open_adapter(struct hdd_context *hdd_ctx, uint8_t sessio
 					WLAN_CONTROL_PATH);
 
 		hdd_mic_init_work(adapter);
+		qdf_mutex_create(&adapter->disconnection_status_lock);
+		hdd_periodic_sta_stats_mutex_create(adapter);
 
 		/*
 		 * Workqueue which gets scheduled in IPv4 notification
@@ -7017,6 +7023,8 @@ struct hdd_adapter *hdd_open_adapter(struct hdd_context *hdd_ctx, uint8_t sessio
 					WLAN_CONTROL_PATH);
 
 		hdd_mic_init_work(adapter);
+		qdf_mutex_create(&adapter->disconnection_status_lock);
+		hdd_periodic_sta_stats_mutex_create(adapter);
 
 		break;
 	default:
@@ -9162,6 +9170,33 @@ uint32_t hdd_get_operating_chan_freq(struct hdd_context *hdd_ctx,
 	}
 
 	return oper_chan_freq;
+}
+
+void hdd_cache_sta_scc_freq(struct hdd_context *hdd_ctx, uint32_t freq)
+{
+	if (!hdd_ctx || !freq)
+		return;
+
+	if (WLAN_REG_IS_24GHZ_CH_FREQ(freq) ||
+	    WLAN_REG_IS_5GHZ_CH_FREQ(freq) ||
+	    WLAN_REG_IS_6GHZ_CHAN_FREQ(freq))
+		hdd_ctx->last_sta_scc_freq = freq;
+}
+
+uint32_t hdd_get_sta_scc_freq(struct hdd_context *hdd_ctx)
+{
+	uint32_t freq;
+
+	if (!hdd_ctx)
+		return 0;
+
+	freq = hdd_get_operating_chan_freq(hdd_ctx, QDF_STA_MODE);
+	if (freq) {
+		hdd_cache_sta_scc_freq(hdd_ctx, freq);
+		return freq;
+	}
+
+	return hdd_ctx->last_sta_scc_freq;
 }
 
 static inline QDF_STATUS hdd_unregister_wext_all_adapters(struct hdd_context *
@@ -19479,4 +19514,3 @@ static const struct kernel_param_ops timer_multiplier_ops = {
 };
 
 module_param_cb(timer_multiplier, &timer_multiplier_ops, NULL, 0644);
-

@@ -4916,6 +4916,63 @@ hdd_check_and_disconnect_sta_on_invalid_channel(struct hdd_context *hdd_ctx,
 	wlan_hdd_disconnect(sta_adapter, eCSR_DISCONNECT_REASON_DEAUTH, reason);
 }
 
+static void
+hdd_sap_update_acs_scc_freq(struct sap_config *config, uint32_t freq)
+{
+	config->chan_freq = freq;
+	config->acs_cfg.pri_ch_freq = freq;
+	config->acs_cfg.ht_sec_ch_freq = 0;
+	config->sec_ch_freq = 0;
+
+	if (!config->acs_cfg.acs_mode)
+		return;
+
+	if (config->acs_cfg.freq_list && config->acs_cfg.ch_list_count) {
+		config->acs_cfg.freq_list[0] = freq;
+		config->acs_cfg.ch_list_count = 1;
+	}
+
+	if (config->acs_cfg.master_freq_list &&
+	    config->acs_cfg.master_ch_list_count) {
+		config->acs_cfg.master_freq_list[0] = freq;
+		config->acs_cfg.master_ch_list_count = 1;
+	}
+
+	config->acs_cfg.start_ch_freq = freq;
+	config->acs_cfg.end_ch_freq = freq;
+}
+
+static bool
+hdd_sap_retry_sta_scc_channel(struct hdd_context *hdd_ctx,
+			      struct hdd_adapter *adapter,
+			      struct sap_config *config,
+			      enum policy_mgr_con_mode mode)
+{
+	uint32_t sta_chan_freq;
+
+	if (adapter->device_mode != QDF_SAP_MODE || !config->acs_cfg.acs_mode)
+		return false;
+
+	sta_chan_freq = hdd_get_sta_scc_freq(hdd_ctx);
+	if (!sta_chan_freq)
+		return false;
+
+	if (wlan_hdd_validate_operation_channel(adapter, sta_chan_freq)) {
+		hdd_debug("STA SCC freq %u is not a valid SAP channel",
+			  sta_chan_freq);
+		return false;
+	}
+
+	if (!policy_mgr_allow_concurrency(hdd_ctx->psoc, mode, sta_chan_freq,
+					  HW_MODE_20_MHZ))
+		return false;
+
+	hdd_info("prefer STA SCC freq %u for ACS SAP start", sta_chan_freq);
+	hdd_sap_update_acs_scc_freq(config, sta_chan_freq);
+
+	return true;
+}
+
 #ifdef DISABLE_CHANNEL_LIST
 /**
  * wlan_hdd_get_wiphy_channel() - Get wiphy channel
@@ -5366,6 +5423,14 @@ int wlan_hdd_cfg80211_start_bss(struct hdd_adapter *adapter,
 			config->chan_freq = hdd_ctx->acs_policy.acs_chan_freq;
 		mode = hdd_ctx->acs_policy.acs_dfs_mode;
 		config->acs_dfs_mode = wlan_hdd_get_dfs_mode(mode);
+	}
+
+	if (check_for_concurrency) {
+		enum policy_mgr_con_mode mode;
+
+		mode = policy_mgr_convert_device_mode_to_qdf_type(
+				adapter->device_mode);
+		hdd_sap_retry_sta_scc_channel(hdd_ctx, adapter, config, mode);
 	}
 
 	policy_mgr_update_user_config_sap_chan(hdd_ctx->psoc,
@@ -5858,10 +5923,13 @@ int wlan_hdd_cfg80211_start_bss(struct hdd_adapter *adapter,
 	}
 
 	if (check_for_concurrency) {
-		if (!policy_mgr_allow_concurrency(hdd_ctx->psoc,
-				policy_mgr_convert_device_mode_to_qdf_type(
-					adapter->device_mode),
-					config->chan_freq, HW_MODE_20_MHZ)) {
+		enum policy_mgr_con_mode mode;
+
+		mode = policy_mgr_convert_device_mode_to_qdf_type(
+				adapter->device_mode);
+		if (!policy_mgr_allow_concurrency(hdd_ctx->psoc, mode,
+						  config->chan_freq,
+						  HW_MODE_20_MHZ)) {
 			mutex_unlock(&hdd_ctx->sap_lock);
 
 			hdd_err("This concurrency combination is not allowed");

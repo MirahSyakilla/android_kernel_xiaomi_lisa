@@ -2104,6 +2104,7 @@ struct hdd_context {
 	/* support for DP RX threads */
 	bool enable_dp_rx_threads;
 	bool napi_enable;
+	uint32_t last_sta_scc_freq;
 	struct acs_dfs_policy acs_policy;
 	uint16_t wmi_max_len;
 	struct suspend_resume_stats suspend_resume_stats;
@@ -2802,6 +2803,8 @@ void wlan_hdd_release_intf_addr(struct hdd_context *hdd_ctx,
  */
 uint32_t hdd_get_operating_chan_freq(struct hdd_context *hdd_ctx,
 				     enum QDF_OPMODE mode);
+void hdd_cache_sta_scc_freq(struct hdd_context *hdd_ctx, uint32_t freq);
+uint32_t hdd_get_sta_scc_freq(struct hdd_context *hdd_ctx);
 
 void hdd_set_conparam(int32_t con_param);
 enum QDF_GLOBAL_MODE hdd_get_conparam(void);

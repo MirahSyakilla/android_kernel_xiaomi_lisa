@@ -1245,6 +1245,8 @@ hdd_conn_save_connect_info(struct hdd_adapter *adapter,
 
 			sta_ctx->conn_info.chan_freq =
 				roam_info->u.pConnectedProfile->op_freq;
+			hdd_cache_sta_scc_freq(adapter->hdd_ctx,
+					       sta_ctx->conn_info.chan_freq);
 
 			/* Save the ssid for the connection */
 			qdf_mem_copy(&sta_ctx->conn_info.ssid.SSID,
@@ -4498,6 +4500,8 @@ static void hdd_roam_channel_switch_handler(struct hdd_adapter *adapter,
 	if (sta_ctx) {
 		sta_ctx->conn_info.chan_freq = roam_info->chan_info.mhz;
 		sta_ctx->conn_info.ch_width = roam_info->chan_info.ch_width;
+		hdd_cache_sta_scc_freq(hdd_ctx,
+				       sta_ctx->conn_info.chan_freq);
 	}
 
 	chan_change.chan_freq = roam_info->chan_info.mhz;

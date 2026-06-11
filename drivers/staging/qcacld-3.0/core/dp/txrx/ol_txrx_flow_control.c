@@ -833,7 +833,7 @@ static void ol_tx_flow_pool_vdev_unmap(struct ol_tx_flow_pool_t *pool,
 
 	vdev = (struct ol_txrx_vdev_t *)ol_txrx_get_vdev_from_vdev_id(vdev_id);
 	if (!vdev) {
-		ol_txrx_dbg("invalid vdev_id %d", vdev_id);
+		ol_txrx_dbg("vdev_id %d already unmapped", vdev_id);
 		return;
 	}
 
@@ -945,7 +945,7 @@ void ol_tx_flow_pool_unmap_handler(uint8_t flow_id, uint8_t flow_type,
 
 	pool = ol_tx_get_flow_pool(flow_pool_id);
 	if (!pool) {
-		ol_txrx_info("flow_pool not available flow_pool_id %d", type);
+		ol_txrx_dbg("flow_pool %d already unmapped", flow_pool_id);
 		return;
 	}
 
