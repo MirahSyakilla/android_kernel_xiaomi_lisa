@@ -63,6 +63,7 @@ modules.order
 /modules.builtin.modinfo
 /TODO.md
 /SUMMARY.md
+/AGENTS.md
 /out/
 KernelSU-Next
 
