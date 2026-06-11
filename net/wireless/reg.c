@@ -939,8 +939,9 @@ int reg_query_regdb_wmm(char *alpha2, int freq, struct ieee80211_reg_rule *rule)
 }
 EXPORT_SYMBOL(reg_query_regdb_wmm);
 
-static int regdb_query_country(const struct fwdb_header *db,
-			       const struct fwdb_country *country)
+static struct ieee80211_regdomain *
+regdb_regdomain_alloc(const struct fwdb_header *db,
+		      const struct fwdb_country *country)
 {
 	unsigned int ptr = be16_to_cpu(country->coll_ptr) << 2;
 	struct fwdb_collection *coll = (void *)((u8 *)db + ptr);
@@ -950,7 +951,7 @@ static int regdb_query_country(const struct fwdb_header *db,
 	regdom = kzalloc(struct_size(regdom, reg_rules, coll->n_rules),
 			 GFP_KERNEL);
 	if (!regdom)
-		return -ENOMEM;
+		return ERR_PTR(-ENOMEM);
 
 	regdom->n_reg_rules = coll->n_rules;
 	regdom->alpha2[0] = country->alpha2[0];
@@ -992,8 +993,50 @@ static int regdb_query_country(const struct fwdb_header *db,
 			set_wmm_rule(db, country, rule, rrule);
 	}
 
+	return regdom;
+}
+
+static int regdb_query_country(const struct fwdb_header *db,
+			       const struct fwdb_country *country)
+{
+	struct ieee80211_regdomain *regdom;
+
+	regdom = regdb_regdomain_alloc(db, country);
+	if (IS_ERR(regdom))
+		return PTR_ERR(regdom);
+
 	return reg_schedule_apply(regdom);
 }
+
+struct ieee80211_regdomain *reg_query_regdb_alpha2(const char *alpha2)
+{
+	const struct fwdb_header *hdr = regdb;
+	const struct fwdb_country *country;
+
+	if (!is_an_alpha2(alpha2))
+		return ERR_PTR(-EINVAL);
+
+	if (!regdb) {
+		int err = reg_reload_regdb();
+
+		if (err)
+			return ERR_PTR(err);
+	}
+
+	if (IS_ERR(regdb))
+		return ERR_CAST(regdb);
+
+	hdr = regdb;
+	country = &hdr->country[0];
+	while (country->coll_ptr) {
+		if (alpha2_equal(alpha2, country->alpha2))
+			return regdb_regdomain_alloc(regdb, country);
+		country++;
+	}
+
+	return ERR_PTR(-ENODATA);
+}
+EXPORT_SYMBOL(reg_query_regdb_alpha2);
 
 static int query_regdb(const char *alpha2)
 {

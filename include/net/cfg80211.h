@@ -5845,6 +5845,18 @@ bool regulatory_pre_cac_allowed(struct wiphy *wiphy);
 int reg_query_regdb_wmm(char *alpha2, int freq,
 			struct ieee80211_reg_rule *rule);
 
+/**
+ * reg_query_regdb_alpha2 - Query internal regulatory db for a country regdomain
+ * @alpha2: the ISO/IEC 3166 alpha2 country to be queried.
+ *
+ * Self-managed wireless drivers can use this function to query the signed
+ * internal regulatory database and copy the complete regulatory domain for a
+ * country. The caller owns the returned pointer and must free it with kfree().
+ *
+ * Return: valid regdomain pointer on success, ERR_PTR() on failure.
+ */
+struct ieee80211_regdomain *reg_query_regdb_alpha2(const char *alpha2);
+
 /*
  * callbacks for asynchronous cfg80211 methods, notification
  * functions and BSS handling helpers
