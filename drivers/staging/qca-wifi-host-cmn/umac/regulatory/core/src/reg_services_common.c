@@ -42,6 +42,24 @@
 #endif
 
 const struct chan_map *channel_map;
+
+static bool reg_is_valid_enabled_chan(const struct regulatory_channel *chan)
+{
+	if (!chan || !chan->center_freq ||
+	    chan->chan_num == INVALID_CHANNEL_NUM)
+		return false;
+
+	if (chan->state == CHANNEL_STATE_DISABLE ||
+	    chan->state == CHANNEL_STATE_INVALID)
+		return false;
+
+	if (chan->chan_flags & (REGULATORY_CHAN_DISABLED |
+				REGULATORY_CHAN_INVALID))
+		return false;
+
+	return true;
+}
+
 #ifdef CONFIG_CHAN_NUM_API
 static const struct bonded_channel bonded_chan_40mhz_list[] = {
 	{36, 40},
@@ -2748,9 +2766,7 @@ reg_get_band_from_cur_chan_list(struct wlan_objmgr_pdev *pdev,
 
 	if (BAND_2G_PRESENT(band_mask)) {
 		for (i = MIN_24GHZ_CHANNEL; i <= MAX_24GHZ_CHANNEL; i++) {
-			if ((cur_chan_list[i].state != CHANNEL_STATE_DISABLE) &&
-			    !(cur_chan_list[i].chan_flags &
-			      REGULATORY_CHAN_DISABLED)) {
+			if (reg_is_valid_enabled_chan(&cur_chan_list[i])) {
 				channel_list[num_channels] = cur_chan_list[i];
 				num_channels++;
 			}
@@ -2758,9 +2774,7 @@ reg_get_band_from_cur_chan_list(struct wlan_objmgr_pdev *pdev,
 	}
 	if (BAND_5G_PRESENT(band_mask)) {
 		for (i = BAND_5GHZ_START_CHANNEL; i <= MAX_5GHZ_CHANNEL; i++) {
-			if ((cur_chan_list[i].state != CHANNEL_STATE_DISABLE) &&
-			    !(cur_chan_list[i].chan_flags &
-			      REGULATORY_CHAN_DISABLED)) {
+			if (reg_is_valid_enabled_chan(&cur_chan_list[i])) {
 				channel_list[num_channels] = cur_chan_list[i];
 				num_channels++;
 			}
@@ -2768,9 +2782,7 @@ reg_get_band_from_cur_chan_list(struct wlan_objmgr_pdev *pdev,
 	}
 	if (BAND_6G_PRESENT(band_mask)) {
 		for (i = MIN_6GHZ_CHANNEL; i <= MAX_6GHZ_CHANNEL; i++) {
-			if ((cur_chan_list[i].state != CHANNEL_STATE_DISABLE) &&
-			    !(cur_chan_list[i].chan_flags &
-			      REGULATORY_CHAN_DISABLED)) {
+			if (reg_is_valid_enabled_chan(&cur_chan_list[i])) {
 				channel_list[num_channels] = cur_chan_list[i];
 				num_channels++;
 			}
@@ -3233,8 +3245,7 @@ QDF_STATUS reg_get_channel_list_with_power_for_freq(struct wlan_objmgr_pdev
 	reg_channels = pdev_priv_obj->cur_chan_list;
 
 	for (i = 0, count = 0; i < NUM_CHANNELS; i++) {
-		if (reg_channels[i].state &&
-		    !(reg_channels[i].chan_flags & REGULATORY_CHAN_DISABLED)) {
+		if (reg_is_valid_enabled_chan(&reg_channels[i])) {
 			ch_list[count].center_freq =
 				reg_channels[i].center_freq;
 			ch_list[count].chan_num = reg_channels[i].chan_num;
@@ -3279,12 +3290,9 @@ reg_is_freq_present_in_cur_chan_list(struct wlan_objmgr_pdev *pdev,
 	cur_chan_list = pdev_priv_obj->cur_chan_list;
 
 	for (chan_enum = 0; chan_enum < NUM_CHANNELS; chan_enum++)
-		if (cur_chan_list[chan_enum].center_freq == freq)
-			if ((cur_chan_list[chan_enum].state !=
-			     CHANNEL_STATE_DISABLE) &&
-			    !(cur_chan_list[chan_enum].chan_flags &
-			      REGULATORY_CHAN_DISABLED))
-				return true;
+		if (cur_chan_list[chan_enum].center_freq == freq &&
+		    reg_is_valid_enabled_chan(&cur_chan_list[chan_enum]))
+			return true;
 
 	reg_debug_rl("Channel center frequency %d not found", freq);
 
@@ -3304,9 +3312,9 @@ reg_is_freq_present_in_cur_chan_list(struct wlan_objmgr_pdev *pdev,
 static bool
 is_freq_present_in_resp_list(uint32_t pcl_ch,
 			     struct get_usable_chan_res_params *res_msg,
-			     int count)
+			     uint32_t count)
 {
-	int i;
+	uint32_t i;
 
 	for (i = 0; i < count; i++) {
 		if (res_msg[i].freq == pcl_ch)
@@ -3332,11 +3340,12 @@ reg_update_usable_chan_resp(struct wlan_objmgr_pdev *pdev,
 			    struct get_usable_chan_res_params *res_msg,
 			    uint32_t *pcl_ch, uint32_t len,
 			    uint32_t iface_mode_mask,
-			    uint32_t band_mask, int *count)
+			    uint32_t band_mask, uint32_t *count)
 {
-	int i;
+	uint32_t i;
 	struct ch_params ch_params = {0};
-	int index = *count;
+	uint32_t index = *count;
+	enum reg_wifi_band band;
 
 	for (i = 0; i < len && index < NUM_CHANNELS; i++) {
 		/* In case usable channels are required for multiple filter
@@ -3344,10 +3353,17 @@ reg_update_usable_chan_resp(struct wlan_objmgr_pdev *pdev,
 		 * frequency duplication, only mode mask is updated for
 		 * existing freqency.
 		 */
+		if (!pcl_ch[i])
+			continue;
+
 		if (is_freq_present_in_resp_list(pcl_ch[i], res_msg, *count))
 			continue;
 
-		if (!(band_mask & 1 << wlan_reg_freq_to_band(pcl_ch[i])))
+		band = wlan_reg_freq_to_band(pcl_ch[i]);
+		if (band == REG_BAND_UNKNOWN || !(band_mask & BIT(band)))
+			continue;
+
+		if (!reg_is_freq_present_in_cur_chan_list(pdev, pcl_ch[i]))
 			continue;
 
 		ch_params.ch_width = CH_WIDTH_MAX;
@@ -3452,7 +3468,7 @@ static QDF_STATUS
 reg_get_usable_channel_con_filter(struct wlan_objmgr_pdev *pdev,
 				  struct get_usable_chan_req_params req_msg,
 				  struct get_usable_chan_res_params *res_msg,
-				  int *count)
+				  uint32_t *count)
 {
 	QDF_STATUS status = QDF_STATUS_SUCCESS;
 	uint32_t iface_mode_mask = req_msg.iface_mode_mask;
@@ -3506,11 +3522,22 @@ reg_get_usable_channel_con_filter(struct wlan_objmgr_pdev *pdev,
  */
 static void
 reg_remove_freq(struct get_usable_chan_res_params *res_msg,
-		int index)
+		uint32_t *count, uint32_t index)
 {
+	uint32_t last;
+
+	if (!count || index >= *count)
+		return;
+
 	reg_debug("removing freq %d", res_msg[index].freq);
-	qdf_mem_zero(&res_msg[index],
-		     sizeof(struct get_usable_chan_res_params));
+
+	last = *count - 1;
+	if (index < last)
+		qdf_mem_move(&res_msg[index], &res_msg[index + 1],
+			     (last - index) * sizeof(*res_msg));
+
+	qdf_mem_zero(&res_msg[last], sizeof(*res_msg));
+	(*count)--;
 }
 
 /**
@@ -3547,8 +3574,8 @@ reg_skip_invalid_chan_freq(struct wlan_objmgr_pdev *pdev,
 		return QDF_STATUS_E_FAILURE;
 	}
 
-	ucfg_mlme_get_etsi_srd_chan_in_master_mode(psoc,
-						   &enable_srd_chan);
+	status = ucfg_mlme_get_etsi_srd_chan_in_master_mode(psoc,
+							    &enable_srd_chan);
 	if (QDF_IS_STATUS_ERROR(status)) {
 		reg_err("failed to get srd chan info");
 		return QDF_STATUS_E_FAILURE;
@@ -3572,24 +3599,41 @@ reg_skip_invalid_chan_freq(struct wlan_objmgr_pdev *pdev,
 		} else {
 			break;
 		}
-		for (chan_enum = 0; chan_enum < *no_usable_channels;
-		     chan_enum++) {
-			if (iface_mode_mask & (1 << IFTYPE_NAN)) {
+
+		chan_enum = 0;
+		while (chan_enum < *no_usable_channels) {
+			if (!res_msg[chan_enum].freq ||
+			    !reg_is_freq_present_in_cur_chan_list(
+					pdev, res_msg[chan_enum].freq)) {
+				reg_remove_freq(res_msg,
+						no_usable_channels,
+						chan_enum);
+				continue;
+			}
+
+			if (iface_mode == (1 << IFTYPE_NAN)) {
 				if (!wlan_is_nan_allowed_on_freq(pdev,
-				     res_msg[chan_enum].freq))
+					res_msg[chan_enum].freq))
 					res_msg[chan_enum].iface_mode_mask &=
 						~(iface_mode);
-				if (!res_msg[chan_enum].iface_mode_mask)
-					reg_remove_freq(res_msg, chan_enum);
+				if (!res_msg[chan_enum].iface_mode_mask) {
+					reg_remove_freq(res_msg,
+							no_usable_channels,
+							chan_enum);
+					continue;
+				}
 			} else {
 				if (wlan_reg_is_freq_indoor(
 					pdev, res_msg[chan_enum].freq) &&
 					!include_indoor_channel) {
 					res_msg[chan_enum].iface_mode_mask &=
 							~(iface_mode);
-					if (!res_msg[chan_enum].iface_mode_mask)
+					if (!res_msg[chan_enum].iface_mode_mask) {
 						reg_remove_freq(res_msg,
+								no_usable_channels,
 								chan_enum);
+						continue;
+					}
 				}
 
 				if (!(enable_srd_chan & srd_mask) &&
@@ -3597,9 +3641,12 @@ reg_skip_invalid_chan_freq(struct wlan_objmgr_pdev *pdev,
 					pdev, res_msg[chan_enum].freq)) {
 					res_msg[chan_enum].iface_mode_mask &=
 						~(iface_mode);
-					if (!res_msg[chan_enum].iface_mode_mask)
+					if (!res_msg[chan_enum].iface_mode_mask) {
 						reg_remove_freq(res_msg,
+								no_usable_channels,
 								chan_enum);
+						continue;
+					}
 				}
 
 				if (!dfs_master_capable &&
@@ -3607,11 +3654,15 @@ reg_skip_invalid_chan_freq(struct wlan_objmgr_pdev *pdev,
 				    res_msg[chan_enum].freq)) {
 					res_msg[chan_enum].iface_mode_mask &=
 						~(iface_mode);
-					if (!res_msg[chan_enum].iface_mode_mask)
+					if (!res_msg[chan_enum].iface_mode_mask) {
 						reg_remove_freq(res_msg,
+								no_usable_channels,
 								chan_enum);
+						continue;
+					}
 				}
 			}
+			chan_enum++;
 		}
 
 		iface_mode_mask &= ~iface_mode;
@@ -3635,7 +3686,7 @@ reg_get_usable_channel_no_filter(struct wlan_objmgr_pdev *pdev,
 				 struct get_usable_chan_req_params req_msg,
 				 struct get_usable_chan_res_params *res_msg,
 				 struct regulatory_channel *chan_list,
-				 int *count)
+				 uint32_t *count)
 {
 	QDF_STATUS status = QDF_STATUS_SUCCESS;
 
@@ -3660,14 +3711,15 @@ reg_get_usable_channel_coex_filter(struct wlan_objmgr_pdev *pdev,
 				   struct get_usable_chan_req_params req_msg,
 				   struct get_usable_chan_res_params *res_msg,
 				   struct regulatory_channel *chan_list,
-				   int *count)
+				   uint32_t *count)
 {
 	struct wlan_regulatory_psoc_priv_obj *psoc_priv_obj;
-	enum channel_enum chan_enum;
-	uint32_t i = 0;
+	uint32_t chan_idx, i = 0;
 	struct ch_avoid_freq_type freq_range;
 	struct wlan_objmgr_psoc *psoc;
 	QDF_STATUS status = QDF_STATUS_SUCCESS;
+
+	(void)chan_list;
 
 	psoc = wlan_pdev_get_psoc(pdev);
 	if (!psoc) {
@@ -3680,21 +3732,33 @@ reg_get_usable_channel_coex_filter(struct wlan_objmgr_pdev *pdev,
 		reg_alert("psoc reg component is NULL");
 		return QDF_STATUS_E_FAILURE;
 	}
-	for (chan_enum = 0; chan_enum < *count; chan_enum++) {
+	chan_idx = 0;
+	while (chan_idx < *count) {
+		if (!res_msg[chan_idx].freq ||
+		    !reg_is_freq_present_in_cur_chan_list(pdev,
+							 res_msg[chan_idx].freq)) {
+			reg_remove_freq(res_msg, count, chan_idx);
+			continue;
+		}
+
 		for (i = 0; i <
 		    psoc_priv_obj->avoid_freq_list.ch_avoid_range_cnt; i++) {
 			freq_range =
 			psoc_priv_obj->avoid_freq_list.avoid_freq_range[i];
 
-			if (freq_range.start_freq <=
-			    chan_list[chan_enum].center_freq &&
+			if (res_msg[chan_idx].freq &&
+			    freq_range.start_freq <=
+			    res_msg[chan_idx].freq &&
 			    freq_range.end_freq >=
-			    chan_list[chan_enum].center_freq) {
+			    res_msg[chan_idx].freq) {
 				reg_debug("avoid freq %d",
-					  chan_list[chan_enum].center_freq);
-				reg_remove_freq(res_msg, chan_enum);
+					  res_msg[chan_idx].freq);
+				reg_remove_freq(res_msg, count, chan_idx);
+				break;
 			}
 		}
+		if (i == psoc_priv_obj->avoid_freq_list.ch_avoid_range_cnt)
+			chan_idx++;
 	}
 	if (req_msg.iface_mode_mask & 1 << IFTYPE_AP ||
 	    req_msg.iface_mode_mask & 1 << IFTYPE_P2P_GO ||
@@ -3741,38 +3805,44 @@ reg_add_usable_channel_to_resp(struct wlan_objmgr_pdev *pdev,
 			       struct get_usable_chan_res_params *res_msg,
 			       uint32_t iface_mode_mask,
 			       struct regulatory_channel *chan_list,
-			       int *count)
+			       uint32_t *count)
 {
 	enum channel_enum chan_enum;
 	struct ch_params ch_params = {0};
 	QDF_STATUS status = QDF_STATUS_SUCCESS;
 	uint32_t mode_mask = 0;
+	uint32_t out_idx = 0;
 
 	mode_mask = reg_calculate_mode_mask(iface_mode_mask);
 
 	for (chan_enum = 0; chan_enum < *count &&
 	     chan_enum < NUM_CHANNELS; chan_enum++) {
+		if (!reg_is_valid_enabled_chan(&chan_list[chan_enum]))
+			continue;
+
 		ch_params.ch_width = CH_WIDTH_MAX;
 		reg_set_channel_params_for_freq(
 				pdev,
 				chan_list[chan_enum].center_freq,
 				chan_list[chan_enum].max_bw, &ch_params);
 
-		res_msg[chan_enum].freq = chan_list[chan_enum].center_freq;
-		res_msg[chan_enum].iface_mode_mask = mode_mask;
-		if (!res_msg[chan_enum].iface_mode_mask) {
+		res_msg[out_idx].freq = chan_list[chan_enum].center_freq;
+		res_msg[out_idx].iface_mode_mask = mode_mask;
+		if (!res_msg[out_idx].iface_mode_mask) {
 			reg_err("invalid iface mask");
 			return QDF_STATUS_E_FAILURE;
 		}
-		res_msg[chan_enum].bw = ch_params.ch_width;
-		res_msg[chan_enum].state = chan_list[chan_enum].state;
+		res_msg[out_idx].bw = ch_params.ch_width;
+		res_msg[out_idx].state = chan_list[chan_enum].state;
 		if (ch_params.center_freq_seg0)
-			res_msg[chan_enum].seg0_freq =
+			res_msg[out_idx].seg0_freq =
 					ch_params.center_freq_seg0;
 		if (ch_params.center_freq_seg1)
-			res_msg[chan_enum].seg1_freq =
+			res_msg[out_idx].seg1_freq =
 					ch_params.center_freq_seg1;
+		out_idx++;
 	}
+	*count = out_idx;
 
 	return status;
 }

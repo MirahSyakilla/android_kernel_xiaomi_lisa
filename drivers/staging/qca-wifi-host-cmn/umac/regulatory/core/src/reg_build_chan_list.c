@@ -597,7 +597,8 @@ reg_modify_chan_list_for_freq_range(struct regulatory_channel *chan_list,
 				    qdf_freq_t low_freq_2g,
 				    qdf_freq_t high_freq_2g,
 				    qdf_freq_t low_freq_5g,
-				    qdf_freq_t high_freq_5g)
+				    qdf_freq_t high_freq_5g,
+				    bool preserve_populated_6g)
 {
 	uint32_t low_limit_2g = NUM_CHANNELS;
 	uint32_t high_limit_2g = NUM_CHANNELS;
@@ -624,6 +625,16 @@ reg_modify_chan_list_for_freq_range(struct regulatory_channel *chan_list,
 		     (low_limit_5g != NUM_CHANNELS) &&
 		     (high_limit_5g != NUM_CHANNELS))
 			chan_in_range = true;
+
+#ifdef CONFIG_BAND_6GHZ
+		if (preserve_populated_6g &&
+		    chan_enum >= MIN_6GHZ_CHANNEL &&
+		    chan_enum <= MAX_6GHZ_CHANNEL &&
+		    chan_list[chan_enum].state != CHANNEL_STATE_DISABLE &&
+		    !(chan_list[chan_enum].chan_flags &
+		      REGULATORY_CHAN_DISABLED))
+			chan_in_range = true;
+#endif
 
 		if (!chan_in_range) {
 			chan_list[chan_enum].chan_flags |=
@@ -1079,7 +1090,8 @@ reg_append_mas_chan_list_for_6g_lpi(struct wlan_regulatory_pdev_priv_obj
 	struct regulatory_channel *master_chan_list_6g_client_lpi;
 	uint8_t i, j;
 
-	if (!pdev_priv_obj->reg_rules.num_of_6g_ap_reg_rules[REG_INDOOR_AP]) {
+	if (!pdev_priv_obj->reg_rules.num_of_6g_ap_reg_rules[REG_INDOOR_AP] &&
+	    !pdev_priv_obj->is_6g_channel_list_populated) {
 		reg_debug("No LPI reg rules");
 		return;
 	}
@@ -1117,7 +1129,8 @@ reg_append_mas_chan_list_for_6g_vlp(struct wlan_regulatory_pdev_priv_obj
 	struct regulatory_channel *master_chan_list_6g_client_vlp;
 	uint8_t i, j;
 
-	if (!pdev_priv_obj->reg_rules.num_of_6g_ap_reg_rules[REG_VERY_LOW_POWER_AP]) {
+	if (!pdev_priv_obj->reg_rules.num_of_6g_ap_reg_rules[REG_VERY_LOW_POWER_AP] &&
+	    !pdev_priv_obj->is_6g_channel_list_populated) {
 		reg_debug("No VLP reg rules");
 		return;
 	}
@@ -1184,11 +1197,19 @@ reg_populate_secondary_cur_chan_list(struct wlan_regulatory_pdev_priv_obj
 			     (NUM_CHANNELS - NUM_6GHZ_CHANNELS) *
 			     sizeof(struct regulatory_channel));
 
-		qdf_mem_copy(&pdev_priv_obj->
-		     secondary_cur_chan_list[MIN_6GHZ_CHANNEL],
-		     pdev_priv_obj->mas_chan_list_6g_ap
-		     [pdev_priv_obj->reg_cur_6g_ap_pwr_type],
-		     NUM_6GHZ_CHANNELS * sizeof(struct regulatory_channel));
+		if (pdev_priv_obj->is_6g_channel_list_populated)
+			qdf_mem_copy(&pdev_priv_obj->
+			     secondary_cur_chan_list[MIN_6GHZ_CHANNEL],
+			     &pdev_priv_obj->cur_chan_list[MIN_6GHZ_CHANNEL],
+			     NUM_6GHZ_CHANNELS *
+			     sizeof(struct regulatory_channel));
+		else
+			qdf_mem_copy(&pdev_priv_obj->
+			     secondary_cur_chan_list[MIN_6GHZ_CHANNEL],
+			     pdev_priv_obj->mas_chan_list_6g_ap
+			     [pdev_priv_obj->reg_cur_6g_ap_pwr_type],
+			     NUM_6GHZ_CHANNELS *
+			     sizeof(struct regulatory_channel));
 	} else {
 		qdf_mem_copy(pdev_priv_obj->secondary_cur_chan_list,
 			     pdev_priv_obj->cur_chan_list,
@@ -1260,6 +1281,12 @@ reg_populate_secondary_cur_chan_list(struct wlan_regulatory_pdev_priv_obj
 void reg_compute_pdev_current_chan_list(struct wlan_regulatory_pdev_priv_obj
 					*pdev_priv_obj)
 {
+	bool preserve_populated_6g = false;
+
+#ifdef CONFIG_BAND_6GHZ
+	preserve_populated_6g = pdev_priv_obj->is_6g_channel_list_populated;
+#endif
+
 	reg_copy_6g_cur_mas_chan_list_to_cmn(pdev_priv_obj);
 
 	qdf_mem_copy(pdev_priv_obj->cur_chan_list, pdev_priv_obj->mas_chan_list,
@@ -1269,7 +1296,8 @@ void reg_compute_pdev_current_chan_list(struct wlan_regulatory_pdev_priv_obj
 					    pdev_priv_obj->range_2g_low,
 					    pdev_priv_obj->range_2g_high,
 					    pdev_priv_obj->range_5g_low,
-					    pdev_priv_obj->range_5g_high);
+					    pdev_priv_obj->range_5g_high,
+					    preserve_populated_6g);
 
 	reg_modify_chan_list_for_band(pdev_priv_obj->cur_chan_list,
 				      pdev_priv_obj->band_capability);

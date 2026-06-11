@@ -601,7 +601,10 @@ populate_dot11f_country(struct mac_context *mac,
 	for (chan_enum = 0; chan_enum < chan_num; chan_enum++) {
 		cur_chan = &sec_cur_chan_list[chan_enum];
 
-		if (cur_chan->chan_flags & REGULATORY_CHAN_DISABLED)
+		if (!cur_chan->center_freq ||
+		    cur_chan->chan_num == INVALID_CHANNEL_NUM ||
+		    (cur_chan->chan_flags & (REGULATORY_CHAN_DISABLED |
+					     REGULATORY_CHAN_INVALID)))
 			continue;
 
 		if (wlan_reg_is_6ghz_chan_freq(cur_chan->center_freq) &&

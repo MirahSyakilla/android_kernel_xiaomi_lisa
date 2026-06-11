@@ -1929,6 +1929,17 @@ wlan_reg_decide_6g_ap_pwr_type(struct wlan_objmgr_pdev *pdev);
 QDF_STATUS
 wlan_reg_set_ap_pwr_and_update_chan_list(struct wlan_objmgr_pdev *pdev,
 					 enum reg_6g_ap_type ap_pwr_type);
+
+/**
+ * wlan_reg_apply_6ghz_channel_list() - Update 6 GHz regulatory channel lists
+ * @pdev: pdev ptr
+ * @chan_list: full regulatory channel list containing 6 GHz entries
+ *
+ * Return: QDF_STATUS
+ */
+QDF_STATUS
+wlan_reg_apply_6ghz_channel_list(struct wlan_objmgr_pdev *pdev,
+				 struct regulatory_channel *chan_list);
 #else
 static inline QDF_STATUS
 wlan_reg_get_cur_6g_ap_pwr_type(struct wlan_objmgr_pdev *pdev,
@@ -2015,6 +2026,13 @@ wlan_reg_decide_6g_ap_pwr_type(struct wlan_objmgr_pdev *pdev)
 static inline QDF_STATUS
 wlan_reg_set_ap_pwr_and_update_chan_list(struct wlan_objmgr_pdev *pdev,
 					 enum reg_6g_ap_type ap_pwr_type)
+{
+	return QDF_STATUS_E_NOSUPPORT;
+}
+
+static inline QDF_STATUS
+wlan_reg_apply_6ghz_channel_list(struct wlan_objmgr_pdev *pdev,
+				 struct regulatory_channel *chan_list)
 {
 	return QDF_STATUS_E_NOSUPPORT;
 }

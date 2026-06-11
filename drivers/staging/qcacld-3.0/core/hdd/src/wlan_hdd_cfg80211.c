@@ -429,9 +429,9 @@ static void hdd_init_6ghz(struct hdd_context *hdd_ctx)
 	struct wiphy *wiphy = hdd_ctx->wiphy;
 	struct ieee80211_channel *chlist = hdd_channels_6_ghz;
 	uint32_t num = ARRAY_SIZE(hdd_channels_6_ghz);
-	uint16_t base_freq;
 	QDF_STATUS status;
 	uint32_t band_capability;
+	uint32_t chan_enum;
 
 	hdd_enter();
 
@@ -447,17 +447,17 @@ static void hdd_init_6ghz(struct hdd_context *hdd_ctx)
 	}
 
 	qdf_mem_zero(chlist, sizeof(*chlist) * num);
-	base_freq = wlan_reg_min_6ghz_chan_freq();
 
-	for (i = 0; i < num; i++)
+	for (i = 0, chan_enum = MIN_6GHZ_CHANNEL;
+	     i < num && chan_enum <= MAX_6GHZ_CHANNEL; i++, chan_enum++)
 		HDD_SET_6GHZCHAN(chlist[i],
-				 base_freq + i * 20,
-				 wlan_reg_freq_to_chan(hdd_ctx->pdev,
-						       base_freq + i * 20),
-				 IEEE80211_CHAN_DISABLED);
+				 wlan_reg_ch_to_freq(chan_enum),
+				 wlan_reg_ch_num(chan_enum),
+				 0);
 	wiphy->bands[HDD_NL80211_BAND_6GHZ] = &wlan_hdd_band_6_ghz;
 	wiphy->bands[HDD_NL80211_BAND_6GHZ]->channels = chlist;
 	wiphy->bands[HDD_NL80211_BAND_6GHZ]->n_channels = num;
+	hdd_info("initialized %u 6 GHz wiphy channels", num);
 
 	hdd_exit();
 }
@@ -7625,6 +7625,7 @@ static int hdd_config_phy_mode(struct hdd_adapter *adapter,
 	eCsrPhyMode phymode;
 	uint8_t supported_band;
 	uint32_t bonding_mode;
+	bool host_6g_supported;
 	int ret = 0;
 
 	if (!psoc) {
@@ -7638,8 +7639,15 @@ static int hdd_config_phy_mode(struct hdd_adapter *adapter,
 	if (ret < 0)
 		return ret;
 
+	host_6g_supported = wlan_reg_is_6ghz_supported(psoc);
+#ifdef CONFIG_BAND_6GHZ
+	if (!host_6g_supported && hdd_ctx->wiphy &&
+	    hdd_ctx->wiphy->bands[HDD_NL80211_BAND_6GHZ])
+		host_6g_supported = true;
+#endif
+
 	ret = hdd_vendor_mode_to_band(vendor_phy_mode, &supported_band,
-				      wlan_reg_is_6ghz_supported(psoc));
+				      host_6g_supported);
 	if (ret < 0)
 		return ret;
 
@@ -13073,8 +13081,7 @@ const struct nla_policy setband_policy[QCA_WLAN_VENDOR_ATTR_MAX + 1] = {
 };
 
 static uint32_t
-wlan_vendor_bitmap_to_reg_wifi_band_bitmap(struct wlan_objmgr_psoc *psoc,
-					   uint32_t vendor_bitmap)
+wlan_vendor_bitmap_to_reg_wifi_band_bitmap(uint32_t vendor_bitmap)
 {
 	uint32_t reg_bitmap = 0;
 
@@ -13086,11 +13093,6 @@ wlan_vendor_bitmap_to_reg_wifi_band_bitmap(struct wlan_objmgr_psoc *psoc,
 		reg_bitmap |= BIT(REG_BAND_5G);
 	if (vendor_bitmap & QCA_SETBAND_6G)
 		reg_bitmap |= BIT(REG_BAND_6G);
-
-	if (!wlan_reg_is_6ghz_supported(psoc)) {
-		hdd_debug("Driver doesn't support 6ghz");
-		reg_bitmap = (reg_bitmap & (~BIT(REG_BAND_6G)));
-	}
 
 	return reg_bitmap;
 }
@@ -13134,8 +13136,7 @@ static int __wlan_hdd_cfg80211_setband(struct wiphy *wiphy,
 	if (tb[QCA_WLAN_VENDOR_ATTR_SETBAND_MASK]) {
 		band_mask = nla_get_u32(tb[QCA_WLAN_VENDOR_ATTR_SETBAND_MASK]);
 		reg_wifi_band_bitmap =
-			wlan_vendor_bitmap_to_reg_wifi_band_bitmap(hdd_ctx->psoc,
-								   band_mask);
+			wlan_vendor_bitmap_to_reg_wifi_band_bitmap(band_mask);
 		hdd_debug("[SET BAND] set band mask:%d", reg_wifi_band_bitmap);
 	} else if (tb[QCA_WLAN_VENDOR_ATTR_SETBAND_VALUE]) {
 		band_val = nla_get_u32(tb[QCA_WLAN_VENDOR_ATTR_SETBAND_VALUE]);
@@ -15534,7 +15535,7 @@ hdd_convert_nl80211_to_reg_band_mask(enum nl80211_band band)
 	if (band & 1 << NL80211_BAND_6GHZ)
 		reg_band |= 1 << REG_BAND_6G;
 	if (band & 1 << NL80211_BAND_60GHZ)
-		hdd_err("band: %d not supported", NL80211_BAND_60GHZ);
+		hdd_debug("60 GHz band is not supported");
 
 	return reg_band;
 }
@@ -22017,6 +22018,41 @@ static inline void hdd_dump_connect_req(struct hdd_adapter *adapter,
 			       req->crypto.ciphers_pairwise[i]);
 }
 
+static uint32_t
+hdd_get_preferred_sta_scc_freq(struct hdd_adapter *adapter,
+			       struct cfg80211_connect_params *req,
+			       uint32_t requested_freq,
+			       bool *scc_preferred)
+{
+	struct hdd_context *hdd_ctx = WLAN_HDD_GET_CTX(adapter);
+	uint32_t sap_freq;
+
+	*scc_preferred = false;
+
+	if (!hdd_ctx || adapter->device_mode != QDF_STA_MODE || req->bssid)
+		return requested_freq;
+
+	sap_freq = hdd_get_operating_chan_freq(hdd_ctx, QDF_SAP_MODE);
+	if (!sap_freq)
+		return requested_freq;
+
+	if (requested_freq == sap_freq)
+		return requested_freq;
+
+	if (wlan_hdd_validate_operation_channel(adapter, sap_freq))
+		return requested_freq;
+
+	if (!policy_mgr_allow_concurrency(hdd_ctx->psoc, PM_STA_MODE, sap_freq,
+					  HW_MODE_20_MHZ))
+		return requested_freq;
+
+	hdd_info("prefer SAP SCC freq %u for STA connect instead of %u",
+		 sap_freq, requested_freq);
+	*scc_preferred = true;
+
+	return sap_freq;
+}
+
 /**
  * __wlan_hdd_cfg80211_connect() - cfg80211 connect api
  * @wiphy: Pointer to wiphy
@@ -22043,6 +22079,7 @@ static int __wlan_hdd_cfg80211_connect(struct wiphy *wiphy,
 	struct hdd_adapter *adapter = WLAN_HDD_GET_PRIV_PTR(ndev);
 	struct hdd_context *hdd_ctx;
 	uint32_t ch_freq_hint = 0;
+	bool scc_preferred = false;
 
 	hdd_enter();
 
@@ -22160,6 +22197,14 @@ static int __wlan_hdd_cfg80211_connect(struct wiphy *wiphy,
 
 	if (req->channel_hint)
 		ch_freq_hint = req->channel_hint->center_freq;
+
+	ch_freq = hdd_get_preferred_sta_scc_freq(adapter, req, ch_freq,
+						 &scc_preferred);
+	if (ch_freq) {
+		ch_freq_hint = ch_freq;
+		if (scc_preferred)
+			bssid_hint = NULL;
+	}
 
 	wlan_hdd_check_ht20_ht40_ind(hdd_ctx, adapter, req);
 

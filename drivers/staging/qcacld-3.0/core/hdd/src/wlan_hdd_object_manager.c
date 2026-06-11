@@ -156,10 +156,8 @@ int hdd_objmgr_create_and_store_pdev(struct hdd_context *hdd_ctx)
 	reg_cap_ptr->low_5ghz_chan = LOW_5GHZ_FREQ;
 	reg_cap_ptr->high_5ghz_chan = HIGH_5GHZ_FREQ;
 
-	if (!wlan_reg_is_6ghz_supported(psoc)) {
-		hdd_debug("disabling 6ghz channels");
-		reg_cap_ptr->high_5ghz_chan = HIGH_5GHZ_FREQ_NO_6GHZ;
-	}
+	if (!wlan_reg_is_6ghz_supported(psoc))
+		hdd_info("keeping compiled 6 GHz regcap range for host regdb fallback");
 
 	pdev = wlan_objmgr_pdev_obj_create(psoc, priv);
 	if (!pdev) {
@@ -293,4 +291,3 @@ int hdd_objmgr_set_peer_mlme_state(struct wlan_objmgr_vdev *vdev,
 	wlan_objmgr_peer_release_ref(peer, WLAN_OSIF_ID);
 	return 0;
 }
-

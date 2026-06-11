@@ -4981,28 +4981,52 @@ wma_update_target_vht_cap(struct target_psoc_info *tgt_hdl,
  * Return: QDF_STATUS
  */
 static QDF_STATUS wma_update_supported_bands(
-			WLAN_BAND_CAPABILITY supported_bands,
-			WMI_PHY_CAPABILITY *new_supported_bands)
+				WLAN_BAND_CAPABILITY supported_bands,
+				WMI_PHY_CAPABILITY *new_supported_bands)
 {
 	QDF_STATUS status = QDF_STATUS_SUCCESS;
+	WLAN_BAND_CAPABILITY known_bands;
 
 	if (!new_supported_bands) {
 		wma_err("NULL new supported band variable");
 		return QDF_STATUS_E_FAILURE;
 	}
-	switch (supported_bands) {
-	case WLAN_2G_CAPABILITY:
+
+	known_bands = WLAN_2G_CAPABILITY | WLAN_5G_CAPABILITY;
+
+	if (supported_bands & WLAN_2G_CAPABILITY)
 		*new_supported_bands |= WMI_11G_CAPABILITY;
-		break;
-	case WLAN_5G_CAPABILITY:
+
+	if (supported_bands & WLAN_5G_CAPABILITY)
 		*new_supported_bands |= WMI_11A_CAPABILITY;
-		break;
-	default:
-		wma_err("wrong supported band");
+
+	if (!(supported_bands & known_bands)) {
+		wma_err("wrong supported band 0x%x", supported_bands);
 		status = QDF_STATUS_E_FAILURE;
-		break;
+	} else if (supported_bands & ~known_bands) {
+		wma_debug("ignore unknown supported band bits 0x%x",
+			  supported_bands & ~known_bands);
 	}
+
 	return status;
+}
+
+static void
+wma_preserve_11ax_phy_capability(tp_wma_handle wma_handle,
+				 WMI_PHY_CAPABILITY *supported_band)
+{
+#ifdef WLAN_FEATURE_11AX
+	if (!wma_handle || !supported_band)
+		return;
+
+	if (!wmi_service_enabled(wma_handle->wmi_handle, wmi_service_11ax))
+		return;
+
+	if (*supported_band == WMI_11AG_CAPABILITY) {
+		wma_info("preserve 11ax phy capability from MAC band map");
+		*supported_band = WMI_11AX_CAPABILITY;
+	}
+#endif
 }
 
 /**
@@ -5331,6 +5355,16 @@ static void wma_update_hdd_band_cap(WMI_PHY_CAPABILITY supported_band,
 				    struct wma_tgt_cfg *tgt_cfg,
 				    struct wlan_objmgr_psoc *psoc)
 {
+	bool enable_6ghz;
+
+	enable_6ghz = wlan_reg_is_6ghz_supported(psoc);
+#ifdef CONFIG_BAND_6GHZ
+	if (!enable_6ghz && tgt_cfg->services.en_11ax) {
+		wma_info("enable host 6 GHz band capability for 11ax target");
+		enable_6ghz = true;
+	}
+#endif
+
 	switch (supported_band) {
 	case WMI_11G_CAPABILITY:
 	case WMI_11NG_CAPABILITY:
@@ -5345,7 +5379,7 @@ static void wma_update_hdd_band_cap(WMI_PHY_CAPABILITY supported_band,
 	case WMI_11NAG_CAPABILITY:
 	case WMI_11AX_CAPABILITY:
 		tgt_cfg->band_cap = (BIT(REG_BAND_2G) | BIT(REG_BAND_5G));
-		if (wlan_reg_is_6ghz_supported(psoc))
+		if (enable_6ghz)
 			tgt_cfg->band_cap |= BIT(REG_BAND_6G);
 		break;
 	default:
@@ -6762,6 +6796,8 @@ static QDF_STATUS wma_update_hw_mode_list(t_wma_handle *wma_handle,
 				       mac1_ss_bw_info, i, dbs_mode,
 				       sbs_mode);
 	}
+
+	wma_preserve_11ax_phy_capability(wma_handle, &new_supported_band);
 
 	/* overwrite phy_capability which we got from service ready event */
 	if (!supported_band_update_failure) {

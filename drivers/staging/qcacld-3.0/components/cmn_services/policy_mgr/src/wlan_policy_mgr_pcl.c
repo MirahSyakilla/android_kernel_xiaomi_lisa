@@ -245,16 +245,22 @@ policy_mgr_update_valid_ch_freq_list(struct policy_mgr_psoc_priv_obj *pm_ctx,
 
 	for (i = 0; i < NUM_CHANNELS; i++) {
 		ch_freq = reg_ch_list[i].center_freq;
+		if (!ch_freq || reg_ch_list[i].chan_num == INVALID_CHANNEL_NUM ||
+		    (reg_ch_list[i].chan_flags & (REGULATORY_CHAN_DISABLED |
+						  REGULATORY_CHAN_INVALID)))
+			continue;
+
 		if (is_client)
 			state = wlan_reg_get_channel_state_for_freq(
-							pm_ctx->pdev, ch_freq);
+								pm_ctx->pdev, ch_freq);
 		else
 			state =
 			wlan_reg_get_channel_state_from_secondary_list_for_freq(
 							pm_ctx->pdev, ch_freq);
 
 		if (state != CHANNEL_STATE_DISABLE &&
-		    state != CHANNEL_STATE_INVALID) {
+		    state != CHANNEL_STATE_INVALID &&
+		    j < NUM_CHANNELS) {
 			pm_ctx->valid_ch_freq_list[j] =
 				reg_ch_list[i].center_freq;
 			j++;

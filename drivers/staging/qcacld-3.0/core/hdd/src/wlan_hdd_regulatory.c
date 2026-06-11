@@ -29,9 +29,11 @@
 #include <wlan_osif_priv.h>
 #include "wlan_hdd_regulatory.h"
 #include <wlan_reg_ucfg_api.h>
+#include <wlan_reg_services_api.h>
 #include "cds_regdomain.h"
 #include "cds_utils.h"
 #include "pld_common.h"
+#include <linux/slab.h>
 #include <net/cfg80211.h>
 #include "wlan_policy_mgr_ucfg.h"
 #include "sap_api.h"
@@ -1072,6 +1074,10 @@ void hdd_reg_notifier(struct wiphy *wiphy,
 #endif
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 4, 0))
+static void
+hdd_reg_fill_drv_rule(struct ieee80211_reg_rule *regd_rule,
+		      const struct cur_reg_rule *drv_rule);
+
 static void fill_wiphy_channel(struct ieee80211_channel *wiphy_chan,
 			       struct regulatory_channel *cur_chan)
 {
@@ -1103,6 +1109,461 @@ static void fill_wiphy_channel(struct ieee80211_channel *wiphy_chan,
 
 	wiphy_chan->orig_flags = wiphy_chan->flags;
 }
+
+#if defined(CONFIG_BAND_6GHZ) && (defined(CFG80211_6GHZ_BAND_SUPPORTED) || \
+	(KERNEL_VERSION(5, 4, 0) <= LINUX_VERSION_CODE))
+static bool hdd_reg_rule_has_6ghz(struct reg_rule_info *reg_rules)
+{
+	uint8_t i;
+
+	if (!reg_rules)
+		return false;
+
+	for (i = 0; i < reg_rules->num_of_reg_rules; i++)
+		if (reg_rules->reg_rules[i].start_freq < 7125 &&
+		    reg_rules->reg_rules[i].end_freq > 5925)
+			return true;
+
+	for (i = 0; i < REG_CURRENT_MAX_AP_TYPE; i++)
+		if (reg_rules->num_of_6g_ap_reg_rules[i])
+			return true;
+
+	return false;
+}
+
+static bool hdd_reg_regdomain_has_6ghz(const struct ieee80211_regdomain *regd)
+{
+	uint32_t i;
+
+	if (!regd)
+		return false;
+
+	for (i = 0; i < regd->n_reg_rules; i++)
+		if (regd->reg_rules[i].freq_range.start_freq_khz <
+		    MHZ_TO_KHZ(7125) &&
+		    regd->reg_rules[i].freq_range.end_freq_khz >
+		    MHZ_TO_KHZ(5925))
+			return true;
+
+	return false;
+}
+
+static bool
+hdd_reg_chan_is_valid_enabled(const struct regulatory_channel *chan)
+{
+	if (!chan || !chan->center_freq ||
+	    chan->chan_num == INVALID_CHANNEL_NUM)
+		return false;
+
+	if (chan->state == CHANNEL_STATE_DISABLE ||
+	    chan->state == CHANNEL_STATE_INVALID)
+		return false;
+
+	if (chan->chan_flags & (REGULATORY_CHAN_DISABLED |
+				REGULATORY_CHAN_INVALID))
+		return false;
+
+	return true;
+}
+
+static struct ieee80211_regdomain *
+hdd_reg_get_fallback_regdb_6ghz(struct hdd_context *hdd_ctx)
+{
+	struct ieee80211_regdomain *regd;
+
+	if (!hdd_ctx || !hdd_ctx->reg.alpha2[0] || !hdd_ctx->reg.alpha2[1])
+		return NULL;
+
+	regd = reg_query_regdb_alpha2(hdd_ctx->reg.alpha2);
+	if (IS_ERR(regd))
+		return NULL;
+
+	if (!hdd_reg_regdomain_has_6ghz(regd)) {
+		kfree(regd);
+		return NULL;
+	}
+
+	return regd;
+}
+
+static bool
+hdd_reg_needs_regdb_6ghz_fixup(struct hdd_context *hdd_ctx)
+{
+	struct regulatory_channel *cur_chan_list;
+	struct reg_rule_info reg_rules;
+	QDF_STATUS status;
+	enum channel_enum chan_enum;
+	bool has_enabled_6ghz = false;
+
+	if (!hdd_ctx)
+		return false;
+
+	cur_chan_list = qdf_mem_malloc(sizeof(*cur_chan_list) * NUM_CHANNELS);
+	if (cur_chan_list) {
+		status = ucfg_reg_get_current_chan_list(hdd_ctx->pdev,
+							cur_chan_list);
+		if (QDF_IS_STATUS_SUCCESS(status)) {
+			for (chan_enum = MIN_6GHZ_CHANNEL;
+			     chan_enum <= MAX_6GHZ_CHANNEL; chan_enum++) {
+				if (hdd_reg_chan_is_valid_enabled(
+						&cur_chan_list[chan_enum])) {
+					has_enabled_6ghz = true;
+					break;
+				}
+			}
+		}
+		qdf_mem_free(cur_chan_list);
+	}
+
+	status = ucfg_reg_get_regd_rules(hdd_ctx->pdev, &reg_rules);
+	if (QDF_IS_STATUS_ERROR(status))
+		return !has_enabled_6ghz;
+
+	return !hdd_reg_rule_has_6ghz(&reg_rules) || !has_enabled_6ghz;
+}
+
+static uint32_t
+hdd_reg_rule_to_drv_chan_flags(uint32_t nl_flags, uint32_t max_bw_khz)
+{
+	uint32_t chan_flags = 0;
+
+	if (nl_flags & NL80211_RRF_NO_IR_ALL)
+		chan_flags |= REGULATORY_CHAN_NO_IR;
+	if (nl_flags & NL80211_RRF_DFS)
+		chan_flags |= REGULATORY_CHAN_RADAR;
+	if (nl_flags & NL80211_RRF_NO_OUTDOOR)
+		chan_flags |= REGULATORY_CHAN_INDOOR_ONLY;
+	if (nl_flags & NL80211_RRF_NO_OFDM)
+		chan_flags |= REGULATORY_CHAN_NO_OFDM;
+	if (nl_flags & NL80211_RRF_NO_80MHZ)
+		chan_flags |= REGULATORY_CHAN_NO_80MHZ;
+	if (nl_flags & NL80211_RRF_NO_160MHZ)
+		chan_flags |= REGULATORY_CHAN_NO_160MHZ;
+
+	if (max_bw_khz < MHZ_TO_KHZ(160))
+		chan_flags |= REGULATORY_CHAN_NO_160MHZ;
+	if (max_bw_khz < MHZ_TO_KHZ(80))
+		chan_flags |= REGULATORY_CHAN_NO_80MHZ;
+	if (max_bw_khz < MHZ_TO_KHZ(40))
+		chan_flags |= REGULATORY_CHAN_NO_HT40;
+
+	return chan_flags;
+}
+
+static uint32_t
+hdd_reg_rule_max_bw_khz(const struct ieee80211_reg_rule *reg_rule)
+{
+	uint32_t max_bw_khz = reg_rule->freq_range.max_bandwidth_khz;
+
+	if (reg_rule->flags & NL80211_RRF_NO_160MHZ)
+		max_bw_khz = min_t(uint32_t, max_bw_khz, MHZ_TO_KHZ(80));
+	if (reg_rule->flags & NL80211_RRF_NO_80MHZ)
+		max_bw_khz = min_t(uint32_t, max_bw_khz, MHZ_TO_KHZ(40));
+	if ((reg_rule->flags & NL80211_RRF_NO_HT40MINUS) &&
+	    (reg_rule->flags & NL80211_RRF_NO_HT40PLUS))
+		max_bw_khz = min_t(uint32_t, max_bw_khz, MHZ_TO_KHZ(20));
+
+	return min_t(uint32_t, max_bw_khz, MHZ_TO_KHZ(160));
+}
+
+static bool
+hdd_reg_does_bw_fit(const struct ieee80211_freq_range *freq_range,
+		    uint32_t center_freq_khz, uint32_t bw_khz)
+{
+	uint32_t start_freq_khz = center_freq_khz - (bw_khz / 2);
+	uint32_t end_freq_khz = center_freq_khz + (bw_khz / 2);
+
+	return start_freq_khz >= freq_range->start_freq_khz &&
+	       end_freq_khz <= freq_range->end_freq_khz;
+}
+
+static const struct ieee80211_reg_rule *
+hdd_reg_get_regdb_6ghz_rule(const struct ieee80211_regdomain *regd,
+			    qdf_freq_t freq)
+{
+	uint32_t i, freq_khz = MHZ_TO_KHZ(freq);
+
+	if (!freq)
+		return NULL;
+
+	for (i = 0; i < regd->n_reg_rules; i++) {
+		const struct ieee80211_reg_rule *reg_rule = &regd->reg_rules[i];
+		const struct ieee80211_freq_range *freq_range =
+						&reg_rule->freq_range;
+
+		if (freq_range->start_freq_khz >= MHZ_TO_KHZ(7125) ||
+		    freq_range->end_freq_khz <= MHZ_TO_KHZ(5925))
+			continue;
+
+		if (hdd_reg_does_bw_fit(freq_range, freq_khz,
+					MHZ_TO_KHZ(20)))
+			return reg_rule;
+	}
+
+	return NULL;
+}
+
+static void
+hdd_reg_apply_regdb_6ghz_rule(struct regulatory_channel *cur_chan,
+			      const struct ieee80211_reg_rule *reg_rule)
+{
+	uint32_t max_bw_khz = hdd_reg_rule_max_bw_khz(reg_rule);
+	uint32_t chan_flags;
+
+	chan_flags = hdd_reg_rule_to_drv_chan_flags(reg_rule->flags,
+						    max_bw_khz);
+
+	cur_chan->state = CHANNEL_STATE_ENABLE;
+	if (chan_flags & (REGULATORY_CHAN_NO_IR | REGULATORY_CHAN_RADAR))
+		cur_chan->state = CHANNEL_STATE_DFS;
+	cur_chan->chan_flags &= ~(REGULATORY_CHAN_DISABLED |
+				  REGULATORY_CHAN_INVALID |
+				  REGULATORY_CHAN_NO_IR |
+				  REGULATORY_CHAN_RADAR |
+				  REGULATORY_CHAN_INDOOR_ONLY |
+				  REGULATORY_CHAN_NO_OFDM |
+				  REGULATORY_CHAN_NO_HT40 |
+				  REGULATORY_CHAN_NO_80MHZ |
+				  REGULATORY_CHAN_NO_160MHZ);
+	cur_chan->chan_flags |= chan_flags;
+	cur_chan->tx_power = MBM_TO_DBM(reg_rule->power_rule.max_eirp);
+	cur_chan->ant_gain = MBI_TO_DBI(reg_rule->power_rule.max_antenna_gain);
+	cur_chan->min_bw = 20;
+	cur_chan->max_bw = KHZ_TO_MHZ(max_bw_khz);
+	cur_chan->psd_flag = false;
+	cur_chan->psd_eirp = 0;
+}
+
+static void
+hdd_reg_disable_6ghz_channels(struct regulatory_channel *chan_list)
+{
+	enum channel_enum chan_enum;
+
+	if (!chan_list)
+		return;
+
+	for (chan_enum = MIN_6GHZ_CHANNEL; chan_enum <= MAX_6GHZ_CHANNEL;
+	     chan_enum++) {
+		chan_list[chan_enum].state = CHANNEL_STATE_DISABLE;
+		chan_list[chan_enum].chan_flags |= REGULATORY_CHAN_DISABLED |
+						    REGULATORY_CHAN_INVALID;
+		chan_list[chan_enum].chan_flags &= ~(REGULATORY_CHAN_NO_IR |
+						     REGULATORY_CHAN_RADAR |
+						     REGULATORY_CHAN_INDOOR_ONLY);
+	}
+}
+
+static void
+hdd_reg_apply_regdb_6ghz_rule_to_list(struct regulatory_channel *chan_list,
+				      enum channel_enum chan_enum,
+				      const struct ieee80211_reg_rule *reg_rule)
+{
+	if (!chan_list)
+		return;
+
+	chan_list[chan_enum].center_freq = wlan_reg_ch_to_freq(chan_enum);
+	chan_list[chan_enum].chan_num = wlan_reg_ch_num(chan_enum);
+	hdd_reg_apply_regdb_6ghz_rule(&chan_list[chan_enum], reg_rule);
+}
+
+static void
+hdd_reg_apply_regdb_6ghz_rule_to_wiphy(struct wiphy *wiphy,
+				       enum channel_enum chan_enum,
+				       const struct ieee80211_reg_rule *reg_rule)
+{
+	struct ieee80211_supported_band *sband;
+	struct ieee80211_channel *wiphy_chan;
+	qdf_freq_t freq;
+	uint32_t i;
+	struct regulatory_channel reg_chan = {0};
+
+	if (!wiphy || !reg_rule)
+		return;
+
+	sband = wiphy->bands[NL80211_BAND_6GHZ];
+	if (!sband)
+		return;
+
+	freq = wlan_reg_ch_to_freq(chan_enum);
+	for (i = 0; i < sband->n_channels; i++) {
+		wiphy_chan = &sband->channels[i];
+		if (wiphy_chan->center_freq != freq)
+			continue;
+
+		reg_chan.center_freq = freq;
+		reg_chan.chan_num = wlan_reg_ch_num(chan_enum);
+		hdd_reg_apply_regdb_6ghz_rule(&reg_chan, reg_rule);
+		fill_wiphy_channel(wiphy_chan, &reg_chan);
+		break;
+	}
+}
+
+static void
+hdd_reg_fixup_regdb_6ghz_channels(struct hdd_context *hdd_ctx,
+				  struct regulatory_channel *chan_list)
+{
+	const struct ieee80211_reg_rule *reg_rule;
+	struct ieee80211_regdomain *regd;
+	enum channel_enum chan_enum;
+	uint32_t enabled = 0;
+
+	if (!chan_list || !hdd_reg_needs_regdb_6ghz_fixup(hdd_ctx))
+		return;
+
+	hdd_reg_disable_6ghz_channels(chan_list);
+
+	regd = hdd_reg_get_fallback_regdb_6ghz(hdd_ctx);
+	if (!regd) {
+		wlan_reg_apply_6ghz_channel_list(hdd_ctx->pdev, chan_list);
+		return;
+	}
+
+	for (chan_enum = MIN_6GHZ_CHANNEL; chan_enum <= MAX_6GHZ_CHANNEL;
+	     chan_enum++) {
+		reg_rule = hdd_reg_get_regdb_6ghz_rule(regd,
+					wlan_reg_ch_to_freq(chan_enum));
+		if (!reg_rule)
+			continue;
+
+		hdd_reg_apply_regdb_6ghz_rule_to_list(chan_list, chan_enum,
+						      reg_rule);
+		hdd_reg_apply_regdb_6ghz_rule_to_wiphy(hdd_ctx->wiphy,
+						       chan_enum, reg_rule);
+		enabled++;
+	}
+
+	wlan_reg_apply_6ghz_channel_list(hdd_ctx->pdev, chan_list);
+
+	if (enabled)
+		hdd_info("added %u 6 GHz channels from regulatory.db for %c%c",
+			 enabled, regd->alpha2[0], regd->alpha2[1]);
+
+	kfree(regd);
+}
+
+static uint32_t
+hdd_reg_count_wiphy_6ghz_rules(struct hdd_context *hdd_ctx,
+			       struct reg_rule_info *reg_rules)
+{
+	enum reg_6g_ap_type ap_pwr_type = REG_INDOOR_AP;
+	QDF_STATUS status;
+
+	status = ucfg_reg_get_cur_6g_ap_pwr_type(hdd_ctx->pdev,
+						 &ap_pwr_type);
+	if (QDF_IS_STATUS_ERROR(status) ||
+	    ap_pwr_type >= REG_CURRENT_MAX_AP_TYPE)
+		return 0;
+
+	return reg_rules->num_of_6g_ap_reg_rules[ap_pwr_type];
+}
+
+static uint32_t
+hdd_reg_count_regdb_6ghz_rules(struct ieee80211_regdomain *regd)
+{
+	uint32_t count = 0, i;
+
+	if (!regd)
+		return 0;
+
+	for (i = 0; i < regd->n_reg_rules; i++)
+		if (regd->reg_rules[i].freq_range.start_freq_khz <
+		    MHZ_TO_KHZ(7125) &&
+		    regd->reg_rules[i].freq_range.end_freq_khz >
+		    MHZ_TO_KHZ(5925))
+			count++;
+
+	return count;
+}
+
+static void
+hdd_reg_fill_regdb_6ghz_rules(struct ieee80211_reg_rule *regd_rules,
+			      struct ieee80211_regdomain *regd,
+			      uint32_t *rule_idx)
+{
+	uint32_t i;
+
+	if (!regd)
+		return;
+
+	for (i = 0; i < regd->n_reg_rules; i++) {
+		if (regd->reg_rules[i].freq_range.start_freq_khz >=
+		    MHZ_TO_KHZ(7125) ||
+		    regd->reg_rules[i].freq_range.end_freq_khz <=
+		    MHZ_TO_KHZ(5925))
+			continue;
+
+		regd_rules[(*rule_idx)++] = regd->reg_rules[i];
+	}
+}
+
+static void
+hdd_reg_fill_wiphy_6ghz_rules(struct ieee80211_reg_rule *regd_rules,
+			      struct hdd_context *hdd_ctx,
+			      struct reg_rule_info *reg_rules,
+			      uint32_t *rule_idx)
+{
+	enum reg_6g_ap_type ap_pwr_type = REG_INDOOR_AP;
+	QDF_STATUS status;
+	uint8_t i;
+
+	status = ucfg_reg_get_cur_6g_ap_pwr_type(hdd_ctx->pdev,
+						 &ap_pwr_type);
+	if (QDF_IS_STATUS_ERROR(status) ||
+	    ap_pwr_type >= REG_CURRENT_MAX_AP_TYPE)
+		return;
+
+	for (i = 0; i < reg_rules->num_of_6g_ap_reg_rules[ap_pwr_type]; i++) {
+		hdd_reg_fill_drv_rule(&regd_rules[*rule_idx],
+				&reg_rules->reg_rules_6g_ap[ap_pwr_type][i]);
+		(*rule_idx)++;
+	}
+}
+#else
+static bool hdd_reg_rule_has_6ghz(struct reg_rule_info *reg_rules)
+{
+	return false;
+}
+
+static struct ieee80211_regdomain *
+hdd_reg_get_fallback_regdb_6ghz(struct hdd_context *hdd_ctx)
+{
+	return NULL;
+}
+
+static void
+hdd_reg_fixup_regdb_6ghz_channels(struct hdd_context *hdd_ctx,
+				  struct regulatory_channel *chan_list)
+{
+}
+
+static uint32_t
+hdd_reg_count_wiphy_6ghz_rules(struct hdd_context *hdd_ctx,
+			       struct reg_rule_info *reg_rules)
+{
+	return 0;
+}
+
+static uint32_t
+hdd_reg_count_regdb_6ghz_rules(struct ieee80211_regdomain *regd)
+{
+	return 0;
+}
+
+static void
+hdd_reg_fill_regdb_6ghz_rules(struct ieee80211_reg_rule *regd_rules,
+			      struct ieee80211_regdomain *regd,
+			      uint32_t *rule_idx)
+{
+}
+
+static void
+hdd_reg_fill_wiphy_6ghz_rules(struct ieee80211_reg_rule *regd_rules,
+			      struct hdd_context *hdd_ctx,
+			      struct reg_rule_info *reg_rules,
+			      uint32_t *rule_idx)
+{
+}
+#endif
 
 static void fill_wiphy_band_channels(struct wiphy *wiphy,
 				     struct regulatory_channel *cur_chan_list,
@@ -1241,6 +1702,19 @@ static void map_nl_reg_rule_flags(uint16_t drv_reg_rule_flag,
 	*regd_rule_flag |= NL80211_RRF_AUTO_BW;
 }
 
+static void
+hdd_reg_fill_drv_rule(struct ieee80211_reg_rule *regd_rule,
+		      const struct cur_reg_rule *drv_rule)
+{
+	regd_rule->freq_range.start_freq_khz = drv_rule->start_freq * 1000;
+	regd_rule->freq_range.end_freq_khz = drv_rule->end_freq * 1000;
+	regd_rule->freq_range.max_bandwidth_khz = drv_rule->max_bw * 1000;
+	regd_rule->power_rule.max_antenna_gain = drv_rule->ant_gain * 100;
+	regd_rule->power_rule.max_eirp = drv_rule->reg_power * 100;
+	regd_rule->flags = 0;
+	map_nl_reg_rule_flags(drv_rule->flags, &regd_rule->flags);
+}
+
 /**
  * dfs_reg_to_nl80211_dfs_regions() - convert dfs_reg to nl80211_dfs_regions
  * @dfs_region: DFS region
@@ -1287,11 +1761,13 @@ static inline void hdd_set_dfs_pri_multiplier(struct hdd_context *hdd_ctx,
 void hdd_send_wiphy_regd_sync_event(struct hdd_context *hdd_ctx)
 {
 	struct ieee80211_regdomain *regd;
+	struct ieee80211_regdomain *regdb_regd = NULL;
 	struct ieee80211_reg_rule *regd_rules;
 	struct reg_rule_info reg_rules_struct;
 	struct reg_rule_info *reg_rules;
 	QDF_STATUS  status;
 	uint8_t i;
+	uint32_t rule_idx, rule_count, regdb_6ghz_rules, drv_6ghz_rules;
 
 	if (!hdd_ctx) {
 		hdd_err("hdd_ctx is NULL");
@@ -1310,12 +1786,21 @@ void hdd_send_wiphy_regd_sync_event(struct hdd_context *hdd_ctx)
 		return;
 	}
 
-	regd = qdf_mem_malloc((reg_rules->num_of_reg_rules *
-				sizeof(*regd_rules) + sizeof(*regd)));
-	if (!regd)
-		return;
+	drv_6ghz_rules = hdd_reg_count_wiphy_6ghz_rules(hdd_ctx, reg_rules);
+	if (!hdd_reg_rule_has_6ghz(reg_rules))
+		regdb_regd = hdd_reg_get_fallback_regdb_6ghz(hdd_ctx);
+	regdb_6ghz_rules = hdd_reg_count_regdb_6ghz_rules(regdb_regd);
+	rule_count = reg_rules->num_of_reg_rules + drv_6ghz_rules +
+		     regdb_6ghz_rules;
 
-	regd->n_reg_rules = reg_rules->num_of_reg_rules;
+	regd = qdf_mem_malloc((rule_count * sizeof(*regd_rules)) +
+			      sizeof(*regd));
+	if (!regd) {
+		kfree(regdb_regd);
+		return;
+	}
+
+	regd->n_reg_rules = rule_count;
 	qdf_mem_copy(regd->alpha2, reg_rules->alpha2, REG_ALPHA2_LEN + 1);
 	regd->dfs_region =
 		dfs_reg_to_nl80211_dfs_regions(reg_rules->dfs_region);
@@ -1325,31 +1810,28 @@ void hdd_send_wiphy_regd_sync_event(struct hdd_context *hdd_ctx)
 	regd_rules = regd->reg_rules;
 	hdd_debug("Regulatory Domain %s", regd->alpha2);
 	hdd_debug("start freq\tend freq\t@ max_bw\tant_gain\tpwr\tflags");
+	rule_idx = 0;
 	for (i = 0; i < reg_rules->num_of_reg_rules; i++) {
-		regd_rules[i].freq_range.start_freq_khz =
-			reg_rules->reg_rules[i].start_freq * 1000;
-		regd_rules[i].freq_range.end_freq_khz =
-			reg_rules->reg_rules[i].end_freq * 1000;
-		regd_rules[i].freq_range.max_bandwidth_khz =
-			reg_rules->reg_rules[i].max_bw * 1000;
-		regd_rules[i].power_rule.max_antenna_gain =
-			reg_rules->reg_rules[i].ant_gain * 100;
-		regd_rules[i].power_rule.max_eirp =
-			reg_rules->reg_rules[i].reg_power * 100;
-		map_nl_reg_rule_flags(reg_rules->reg_rules[i].flags,
-				      &regd_rules[i].flags);
+		hdd_reg_fill_drv_rule(&regd_rules[rule_idx],
+				      &reg_rules->reg_rules[i]);
 		hdd_debug("%d KHz\t%d KHz\t@ %d KHz\t%d\t\t%d\t%d",
-			  regd_rules[i].freq_range.start_freq_khz,
-			  regd_rules[i].freq_range.end_freq_khz,
-			  regd_rules[i].freq_range.max_bandwidth_khz,
-			  regd_rules[i].power_rule.max_antenna_gain,
-			  regd_rules[i].power_rule.max_eirp,
-			  regd_rules[i].flags);
+			  regd_rules[rule_idx].freq_range.start_freq_khz,
+			  regd_rules[rule_idx].freq_range.end_freq_khz,
+			  regd_rules[rule_idx].freq_range.max_bandwidth_khz,
+			  regd_rules[rule_idx].power_rule.max_antenna_gain,
+			  regd_rules[rule_idx].power_rule.max_eirp,
+			  regd_rules[rule_idx].flags);
+		rule_idx++;
 	}
+
+	hdd_reg_fill_wiphy_6ghz_rules(regd_rules, hdd_ctx, reg_rules,
+				      &rule_idx);
+	hdd_reg_fill_regdb_6ghz_rules(regd_rules, regdb_regd, &rule_idx);
 
 	regulatory_set_wiphy_regd(hdd_ctx->wiphy, regd);
 
 	hdd_debug("regd sync event sent with reg rules info");
+	kfree(regdb_regd);
 	qdf_mem_free(regd);
 }
 #endif
@@ -1390,7 +1872,7 @@ static void hdd_regulatory_chanlist_dump(struct regulatory_channel *chan_list)
 	hdd_debug("start (freq MHz, tx power dBm):");
 	for (i = 0; i < NUM_CHANNELS; i++) {
 		chan = &chan_list[i];
-		if ((chan->chan_flags & REGULATORY_CHAN_DISABLED))
+		if (!hdd_reg_chan_is_valid_enabled(chan))
 			continue;
 		count++;
 		ret = scnprintf(info + len, sizeof(info) - len, "%d %d ",
@@ -1692,6 +2174,8 @@ static void hdd_regulatory_dyn_cbk(struct wlan_objmgr_psoc *psoc,
 	fill_wiphy_6ghz_band_channels(wiphy, chan_list);
 	cc_src = ucfg_reg_get_cc_and_src(hdd_ctx->psoc, alpha2);
 	qdf_mem_copy(hdd_ctx->reg.alpha2, alpha2, REG_ALPHA2_LEN + 1);
+	hdd_reg_fixup_regdb_6ghz_channels(hdd_ctx, chan_list);
+	fill_wiphy_6ghz_band_channels(wiphy, chan_list);
 	sme_set_cc_src(hdd_ctx->mac_handle, cc_src);
 
 	/* Check the kernel version for upstream commit aced43ce780dc5 that
@@ -1776,9 +2260,10 @@ int hdd_regulatory_init(struct hdd_context *hdd_ctx, struct wiphy *wiphy)
 					 NL80211_BAND_2GHZ);
 		fill_wiphy_band_channels(wiphy, cur_chan_list,
 					 NL80211_BAND_5GHZ);
-		fill_wiphy_6ghz_band_channels(wiphy, cur_chan_list);
 		cc_src = ucfg_reg_get_cc_and_src(hdd_ctx->psoc, alpha2);
 		qdf_mem_copy(hdd_ctx->reg.alpha2, alpha2, REG_ALPHA2_LEN + 1);
+		hdd_reg_fixup_regdb_6ghz_channels(hdd_ctx, cur_chan_list);
+		fill_wiphy_6ghz_band_channels(wiphy, cur_chan_list);
 		sme_set_cc_src(hdd_ctx->mac_handle, cc_src);
 	} else {
 		hdd_ctx->reg_offload = false;

@@ -935,6 +935,43 @@ QDF_STATUS reg_set_ap_pwr_and_update_chan_list(struct wlan_objmgr_pdev *pdev,
 
 	return QDF_STATUS_SUCCESS;
 }
+
+QDF_STATUS reg_apply_6ghz_channel_list(struct wlan_objmgr_pdev *pdev,
+				       struct regulatory_channel *chan_list)
+{
+	struct wlan_regulatory_pdev_priv_obj *pdev_priv_obj;
+	uint32_t size = NUM_6GHZ_CHANNELS * sizeof(struct regulatory_channel);
+	uint8_t ap_type, client_type;
+
+	if (!chan_list)
+		return QDF_STATUS_E_INVAL;
+
+	pdev_priv_obj = reg_get_pdev_obj(pdev);
+	if (!IS_VALID_PDEV_REG_OBJ(pdev_priv_obj)) {
+		reg_err("pdev reg component is NULL");
+		return QDF_STATUS_E_INVAL;
+	}
+
+	qdf_mem_copy(&pdev_priv_obj->mas_chan_list[MIN_6GHZ_CHANNEL],
+		     &chan_list[MIN_6GHZ_CHANNEL], size);
+
+	for (ap_type = 0; ap_type < REG_CURRENT_MAX_AP_TYPE; ap_type++) {
+		qdf_mem_copy(pdev_priv_obj->mas_chan_list_6g_ap[ap_type],
+			     &chan_list[MIN_6GHZ_CHANNEL], size);
+
+		for (client_type = 0; client_type < REG_MAX_CLIENT_TYPE;
+		     client_type++)
+			qdf_mem_copy(pdev_priv_obj->mas_chan_list_6g_client
+				     [ap_type][client_type],
+				     &chan_list[MIN_6GHZ_CHANNEL], size);
+	}
+
+	pdev_priv_obj->is_6g_channel_list_populated = true;
+	pdev_priv_obj->band_capability |= BIT(REG_BAND_6G);
+	reg_compute_pdev_current_chan_list(pdev_priv_obj);
+
+	return QDF_STATUS_SUCCESS;
+}
 #endif /* CONFIG_BAND_6GHZ */
 
 #endif /* CONFIG_REG_CLIENT */
