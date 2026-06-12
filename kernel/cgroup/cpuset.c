@@ -3187,11 +3187,32 @@ static void cpuset_bind(struct cgroup_subsys_state *root_css)
  */
 static void cpuset_fork(struct task_struct *task)
 {
+	struct cpuset *cs;
+	cpumask_var_t cpus;
+
 	if (task_css_is_root(task, cpuset_cgrp_id))
 		return;
 
-	set_cpus_allowed_ptr(task, current->cpus_ptr);
-	task->mems_allowed = current->mems_allowed;
+	if (task_css(task, cpuset_cgrp_id) == task_css(current, cpuset_cgrp_id)) {
+		set_cpus_allowed_ptr(task, current->cpus_ptr);
+		task->mems_allowed = current->mems_allowed;
+		return;
+	}
+
+	cs = task_cs(task);
+	if (!zalloc_cpumask_var(&cpus, GFP_KERNEL)) {
+		set_cpus_allowed_ptr(task, current->cpus_ptr);
+		task->mems_allowed = current->mems_allowed;
+		return;
+	}
+
+	mutex_lock(&cpuset_mutex);
+	guarantee_online_cpus(cs, cpus);
+	set_cpus_allowed_ptr(task, cpus);
+	guarantee_online_mems(cs, &task->mems_allowed);
+	mutex_unlock(&cpuset_mutex);
+
+	free_cpumask_var(cpus);
 }
 
 struct cgroup_subsys cpuset_cgrp_subsys = {

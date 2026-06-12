@@ -493,6 +493,60 @@ static int cgroup_pidlist_show(struct seq_file *s, void *v)
 	return 0;
 }
 
+#if defined(CONFIG_CPUSETS) || defined(CONFIG_CGROUP_SCHED)
+static bool cgroup1_android_low_power_group(struct cgroup *cgrp)
+{
+	unsigned int mask = 0;
+
+	if (!cgrp || !cgrp->kn)
+		return false;
+
+	if (strcmp(cgrp->kn->name, "l-background") &&
+	    strcmp(cgrp->kn->name, "h-background"))
+		return false;
+
+#ifdef CONFIG_CPUSETS
+	mask |= 1 << cpuset_cgrp_id;
+#endif
+#ifdef CONFIG_CGROUP_SCHED
+	mask |= 1 << cpu_cgrp_id;
+#endif
+
+	return cgrp->root->subsys_mask & mask;
+}
+
+static bool cgroup1_android_top_app_group(struct cgroup *cgrp)
+{
+	return cgrp && cgrp->kn && !strcmp(cgrp->kn->name, "top-app");
+}
+
+static struct cgroup *cgroup1_android_top_app_target(struct cgroup *dst_cgrp,
+						     struct task_struct *task)
+{
+	struct task_struct *leader = task->group_leader;
+	struct cgroup *leader_cgrp;
+
+	if (!cgroup1_android_low_power_group(dst_cgrp))
+		return NULL;
+
+	spin_lock_irq(&css_set_lock);
+	leader_cgrp = task_cgroup_from_root(leader, dst_cgrp->root);
+	if (cgroup1_android_top_app_group(leader_cgrp))
+		cgroup_get(leader_cgrp);
+	else
+		leader_cgrp = NULL;
+	spin_unlock_irq(&css_set_lock);
+
+	return leader_cgrp;
+}
+#else
+static struct cgroup *cgroup1_android_top_app_target(struct cgroup *dst_cgrp,
+						     struct task_struct *task)
+{
+	return NULL;
+}
+#endif
+
 static ssize_t __cgroup1_procs_write(struct kernfs_open_file *of,
 				     char *buf, size_t nbytes, loff_t off,
 				     bool threadgroup)
@@ -502,6 +556,7 @@ static ssize_t __cgroup1_procs_write(struct kernfs_open_file *of,
 	const struct cred *cred, *tcred;
 	ssize_t ret;
 	bool locked;
+	struct cgroup *target_cgrp = NULL;
 
 	cgrp = cgroup_kn_lock_live(of->kn, false);
 	if (!cgrp)
@@ -528,8 +583,13 @@ static ssize_t __cgroup1_procs_write(struct kernfs_open_file *of,
 	if (ret)
 		goto out_finish;
 
-	ret = cgroup_attach_task(cgrp, task, threadgroup);
+	if (!threadgroup)
+		target_cgrp = cgroup1_android_top_app_target(cgrp, task);
+
+	ret = cgroup_attach_task(target_cgrp ?: cgrp, task, threadgroup);
 	trace_android_vh_cgroup_set_task(ret, task);
+	if (target_cgrp)
+		cgroup_put(target_cgrp);
 
 out_finish:
 	cgroup_procs_write_finish(task, locked);

@@ -1461,6 +1461,104 @@ struct cgroup *task_cgroup_from_root(struct task_struct *task,
 	return cset_cgroup_from_root(task_css_set(task), root);
 }
 
+#if defined(CONFIG_CPUSETS) || defined(CONFIG_CGROUP_SCHED)
+static bool cgroup_android_low_power_group(struct cgroup *cgrp)
+{
+	unsigned int mask = 0;
+
+	if (!cgrp || !cgrp->kn)
+		return false;
+
+	if (strcmp(cgrp->kn->name, "l-background") &&
+	    strcmp(cgrp->kn->name, "h-background"))
+		return false;
+
+#ifdef CONFIG_CPUSETS
+	mask |= 1 << cpuset_cgrp_id;
+#endif
+#ifdef CONFIG_CGROUP_SCHED
+	mask |= 1 << cpu_cgrp_id;
+#endif
+
+	return cgrp->root->subsys_mask & mask;
+}
+
+static bool cgroup_android_top_app_group(struct cgroup *cgrp)
+{
+	return cgrp && cgrp->kn && !strcmp(cgrp->kn->name, "top-app");
+}
+
+static struct cgroup *cgroup_android_top_app_target_locked(
+				struct cgroup_root *root,
+				struct task_struct *task)
+{
+	struct cgroup *task_cgrp;
+	struct cgroup *leader_cgrp;
+
+	lockdep_assert_held(&cgroup_mutex);
+	lockdep_assert_held(&css_set_lock);
+
+	task_cgrp = task_cgroup_from_root(task, root);
+	if (!cgroup_android_low_power_group(task_cgrp))
+		return NULL;
+
+	leader_cgrp = task_cgroup_from_root(task->group_leader, root);
+	if (!cgroup_android_top_app_group(leader_cgrp))
+		return NULL;
+
+	return leader_cgrp;
+}
+
+static struct css_set *cgroup_android_top_app_css_set(struct task_struct *task)
+{
+	struct cgroup_root *root;
+	struct cgroup *target;
+	struct css_set *from;
+	struct css_set *to = NULL;
+
+	if (task == task->group_leader)
+		return NULL;
+
+	if (!mutex_trylock(&cgroup_mutex))
+		return NULL;
+
+	spin_lock_irq(&css_set_lock);
+	from = task_css_set(task);
+	get_css_set(from);
+	spin_unlock_irq(&css_set_lock);
+
+	for_each_root(root) {
+		spin_lock_irq(&css_set_lock);
+		target = cgroup_android_top_app_target_locked(root, task);
+		spin_unlock_irq(&css_set_lock);
+
+		if (!target)
+			continue;
+
+		if (to) {
+			struct css_set *next = find_css_set(to, target);
+
+			put_css_set(to);
+			to = next;
+		} else {
+			to = find_css_set(from, target);
+		}
+		if (!to)
+			break;
+	}
+
+	put_css_set(from);
+	mutex_unlock(&cgroup_mutex);
+
+	return to;
+}
+#else
+static struct css_set *cgroup_android_top_app_css_set(struct task_struct *task)
+{
+	return NULL;
+}
+#endif
+
 /*
  * A task must hold cgroup_mutex to modify cgroups.
  *
@@ -6326,14 +6424,20 @@ void cgroup_post_fork(struct task_struct *child)
 	 */
 	if (use_task_css_set_links) {
 		struct css_set *cset;
+		struct css_set *top_app_cset = NULL;
+
+		if (child != child->group_leader)
+			top_app_cset = cgroup_android_top_app_css_set(current);
 
 		spin_lock_irq(&css_set_lock);
-		cset = task_css_set(current);
+		cset = top_app_cset ?: task_css_set(current);
 		if (list_empty(&child->cg_list)) {
 			get_css_set(cset);
 			cset->nr_tasks++;
 			css_set_move_task(child, NULL, cset, false);
 		}
+		if (top_app_cset)
+			put_css_set(top_app_cset);
 
 		/*
 		 * If the cgroup has to be frozen, the new task has too.
