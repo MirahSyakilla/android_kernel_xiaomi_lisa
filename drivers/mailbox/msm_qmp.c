@@ -746,6 +746,7 @@ static int qmp_mbox_remove(struct platform_device *pdev)
 	cleanup_workqueue(mdev);
 
 	list_for_each_entry(mbox, &mdev->mboxes, list) {
+		cancel_delayed_work_sync(&mbox->dwork);
 		mbox_controller_unregister(&mbox->ctrl);
 		kfree(mbox->rx_pkt.data);
 	}
@@ -875,12 +876,6 @@ static int qmp_mbox_init(struct device_node *n, struct qmp_device *mdev)
 	mbox->ctrl.txdone_poll = false;
 	mbox->ctrl.of_xlate = qmp_mbox_of_xlate;
 
-	rc = mbox_controller_register(&mbox->ctrl);
-	if (rc) {
-		pr_err("%s: failed to register mbox controller %d\n", __func__,
-				rc);
-		return rc;
-	}
 	spin_lock_init(&mbox->tx_lock);
 	mutex_init(&mbox->state_lock);
 	mbox->local_state = LINK_DISCONNECTED;
@@ -890,6 +885,13 @@ static int qmp_mbox_init(struct device_node *n, struct qmp_device *mdev)
 	mbox->num_assigned = 0;
 	INIT_DELAYED_WORK(&mbox->dwork, qmp_notify_timeout);
 	mbox->suspend_flag = false;
+
+	rc = mbox_controller_register(&mbox->ctrl);
+	if (rc) {
+		pr_err("%s: failed to register mbox controller %d\n", __func__,
+				rc);
+		return rc;
+	}
 
 	mdev_add_mbox(mdev, mbox);
 	return 0;
@@ -1046,6 +1048,7 @@ static int qmp_mbox_restore(struct device *dev)
 	struct qmp_mbox *mbox;
 
 	list_for_each_entry(mbox, &mdev->mboxes, list) {
+		cancel_delayed_work_sync(&mbox->dwork);
 		mbox->local_state = LINK_DISCONNECTED;
 		init_completion(&mbox->link_complete);
 		init_completion(&mbox->ch_complete);

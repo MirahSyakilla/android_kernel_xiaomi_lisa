@@ -50,7 +50,7 @@ static int add_to_rbuf(struct mbox_chan *chan, void *mssg)
 	return idx;
 }
 
-static void msg_submit(struct mbox_chan *chan)
+static int __msg_submit(struct mbox_chan *chan)
 {
 	unsigned count, idx;
 	unsigned long flags;
@@ -82,12 +82,123 @@ static void msg_submit(struct mbox_chan *chan)
 exit:
 	spin_unlock_irqrestore(&chan->lock, flags);
 
+	return err;
+}
+
+static int msg_submit(struct mbox_chan *chan)
+{
+	unsigned long flags;
+	int err;
+
+	err = __msg_submit(chan);
+
 	if (!err && (chan->txdone_method & TXDONE_BY_POLL)) {
 		/* kick start the timer immediately to avoid delays */
 		spin_lock_irqsave(&chan->mbox->poll_hrt_lock, flags);
 		hrtimer_start(&chan->mbox->poll_hrt, 0, HRTIMER_MODE_REL);
 		spin_unlock_irqrestore(&chan->mbox->poll_hrt_lock, flags);
 	}
+
+	return err;
+}
+
+static bool msg_pending(struct mbox_chan *chan, void *mssg)
+{
+	unsigned count, idx;
+	unsigned long flags;
+	bool pending = false;
+
+	spin_lock_irqsave(&chan->lock, flags);
+
+	if (chan->active_req == mssg) {
+		pending = true;
+		goto out;
+	}
+
+	count = chan->msg_count;
+	idx = chan->msg_free;
+	if (idx >= count)
+		idx -= count;
+	else
+		idx += MBOX_TX_QUEUE_LEN - count;
+
+	while (count--) {
+		if (chan->msg_data[idx] == mssg) {
+			pending = true;
+			break;
+		}
+
+		if (idx == MBOX_TX_QUEUE_LEN - 1)
+			idx = 0;
+		else
+			idx++;
+	}
+out:
+	spin_unlock_irqrestore(&chan->lock, flags);
+
+	return pending;
+}
+
+static bool msg_active(struct mbox_chan *chan, void *mssg)
+{
+	unsigned long flags;
+	bool active;
+
+	spin_lock_irqsave(&chan->lock, flags);
+	active = chan->active_req == mssg;
+	spin_unlock_irqrestore(&chan->lock, flags);
+
+	return active;
+}
+
+static bool msg_remove(struct mbox_chan *chan, void *mssg)
+{
+	unsigned count, idx, pos;
+	unsigned long flags;
+	bool removed = false;
+
+	spin_lock_irqsave(&chan->lock, flags);
+
+	count = chan->msg_count;
+	idx = chan->msg_free;
+	if (idx >= count)
+		idx -= count;
+	else
+		idx += MBOX_TX_QUEUE_LEN - count;
+
+	for (pos = 0; pos < count; pos++) {
+		if (chan->msg_data[idx] == mssg) {
+			removed = true;
+			break;
+		}
+
+		if (idx == MBOX_TX_QUEUE_LEN - 1)
+			idx = 0;
+		else
+			idx++;
+	}
+
+	if (removed) {
+		while (pos < count - 1) {
+			unsigned next = idx == MBOX_TX_QUEUE_LEN - 1 ? 0 : idx + 1;
+
+			chan->msg_data[idx] = chan->msg_data[next];
+			idx = next;
+			pos++;
+		}
+
+		if (chan->msg_free == 0)
+			chan->msg_free = MBOX_TX_QUEUE_LEN - 1;
+		else
+			chan->msg_free--;
+
+		chan->msg_data[chan->msg_free] = NULL;
+		chan->msg_count--;
+	}
+
+	spin_unlock_irqrestore(&chan->lock, flags);
+
+	return removed;
 }
 
 static void tx_tick(struct mbox_chan *chan, int r)
@@ -269,18 +380,30 @@ int mbox_send_message(struct mbox_chan *chan, void *mssg)
 	msg_submit(chan);
 
 	if (chan->cl->tx_block) {
-		unsigned long wait;
-		int ret;
+		unsigned long wait, deadline;
 
 		if (!chan->cl->tx_tout) /* wait forever */
 			wait = msecs_to_jiffies(3600000);
 		else
 			wait = msecs_to_jiffies(chan->cl->tx_tout);
 
-		ret = wait_for_completion_timeout(&chan->tx_complete, wait);
-		if (ret == 0) {
-			t = -ETIME;
-			tx_tick(chan, t);
+		deadline = jiffies + wait;
+
+		for (;;) {
+			if (!msg_pending(chan, mssg))
+				break;
+
+			if (time_after_eq(jiffies, deadline)) {
+				t = -ETIME;
+				if (msg_active(chan, mssg))
+					tx_tick(chan, t);
+				else
+					msg_remove(chan, mssg);
+				break;
+			}
+
+			wait_for_completion_timeout(&chan->tx_complete,
+						    deadline - jiffies);
 		}
 	}
 
