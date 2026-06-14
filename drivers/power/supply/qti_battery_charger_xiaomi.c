@@ -5,7 +5,10 @@
 //
 
 #define pr_fmt(fmt) "BATTERY_CHG: %s: " fmt, __func__
+#include <linux/kernel.h>
 #include <linux/power_supply.h>
+#include <linux/qti_power_supply.h>
+#include <linux/soc/qcom/altmode-glink.h>
 #include <linux/soc/qcom/pmic_glink.h>
 #include <linux/soc/qcom/battery_charger.h>
 
@@ -22,6 +25,14 @@ extern int usb_psy_get_prop(struct power_supply *psy,
 			    union power_supply_propval *pval);
 
 extern const char *const power_supply_usb_type_text[];
+
+#define XIAOMI_UVDM_PAN_WORDS		2
+#define XIAOMI_PAN_SVID			0xff00
+#define XM_USBPD_STATE_SNK_STARTUP	25
+#define XM_USBPD_STATE_SNK_READY	31
+#define XM_USBPD_STATE_SRC_READY	5
+#define XM_PD_PPS_TARGET_VOLTAGE_UV	11000000
+#define XM_PD_PPS_TARGET_CURRENT_UA	3000000
 
 static const char *const power_supply_usbc_text[] = {
 	"Nothing attached",
@@ -40,32 +51,29 @@ static const char *const power_supply_usbc_text[] = {
 	(u32)((((u32)(x)&0xff000000) >> 24) | (((u32)(x)&0x00ff0000) >> 8) |   \
 	      (((u32)(x)&0x0000ff00) << 8) | (((u32)(x)&0x000000ff) << 24))
 
+static bool usbpd_is_pd_active(struct battery_chg_dev *bcdev);
+
 int StringToHex(char *str, unsigned char *out, unsigned int *outlen)
 {
-	char *p = str;
-	char high = 0, low = 0;
-	int tmplen = strlen(p), cnt = 0;
-	tmplen = strlen(p);
-	while (cnt < (tmplen / 2)) {
-		high = ((*p > '9') && ((*p <= 'F') || (*p <= 'f'))) ?
-			       *p - 48 - 7 :
-			       *p - 48;
-		low = (*(++p) > '9' && ((*p <= 'F') || (*p <= 'f'))) ?
-			      *(p)-48 - 7 :
-			      *(p)-48;
-		out[cnt] = ((high & 0x0f) << 4 | (low & 0x0f));
-		p++;
-		cnt++;
+	unsigned int cnt, len = strlen(str);
+	int high, low;
+
+	if (len % 2)
+		return -EINVAL;
+
+	for (cnt = 0; cnt < len / 2; cnt++) {
+		high = hex_to_bin(str[2 * cnt]);
+		low = hex_to_bin(str[2 * cnt + 1]);
+		if (high < 0 || low < 0)
+			return -EINVAL;
+
+		out[cnt] = high << 4 | low;
 	}
-	if (tmplen % 2 != 0)
-		out[cnt] = ((*p > '9') && ((*p <= 'F') || (*p <= 'f'))) ?
-				   *p - 48 - 7 :
-				   *p - 48;
 
-	if (outlen != NULL)
-		*outlen = tmplen / 2 + tmplen % 2;
+	if (outlen)
+		*outlen = len / 2;
 
-	return tmplen / 2 + tmplen % 2;
+	return len / 2;
 }
 
 static int write_ss_auth_prop_id(struct battery_chg_dev *bcdev,
@@ -122,6 +130,83 @@ static int write_verify_digest_prop_id(struct battery_chg_dev *bcdev,
 	return battery_chg_write(bcdev, &req_msg, sizeof(req_msg));
 }
 
+static void xm_pd_apply_power_profile(struct battery_chg_dev *bcdev,
+				      const char *reason)
+{
+	struct power_supply *usb_psy = bcdev->psy_list[PSY_TYPE_USB].psy;
+	struct psy_state *usb_pst = &bcdev->psy_list[PSY_TYPE_USB];
+	struct psy_state *xm_pst = &bcdev->psy_list[PSY_TYPE_XM];
+	union power_supply_propval val = { 0 };
+	u32 target_voltage_uv = XM_PD_PPS_TARGET_VOLTAGE_UV;
+	u32 target_current_ua = XM_PD_PPS_TARGET_CURRENT_UA;
+	int rc, current_rc, voltage_rc;
+
+	if (!usb_psy || !usbpd_is_pd_active(bcdev))
+		return;
+
+	if (bcdev->xm_pd_power_profile_applied &&
+	    bcdev->usb_current_max_ua == target_current_ua &&
+	    bcdev->usb_voltage_max_uv == target_voltage_uv)
+		return;
+
+	val.intval = target_current_ua;
+	current_rc = power_supply_set_property(usb_psy,
+					       POWER_SUPPLY_PROP_CURRENT_MAX,
+					       &val);
+	if (current_rc < 0)
+		pr_err("failed to set PD current_max from %s rc=%d\n",
+		       reason, current_rc);
+	else
+		pr_info("requested PD current_max=%d from %s\n",
+			target_current_ua, reason);
+
+	val.intval = target_voltage_uv;
+	voltage_rc = power_supply_set_property(usb_psy,
+					       POWER_SUPPLY_PROP_VOLTAGE_MAX,
+					       &val);
+	if (voltage_rc < 0)
+		pr_err("failed to set PD voltage_max from %s rc=%d\n",
+		       reason, voltage_rc);
+	else
+		pr_info("requested PD voltage_max=%d from %s\n",
+			target_voltage_uv, reason);
+
+	rc = current_rc ? current_rc : voltage_rc;
+	bcdev->xm_pd_power_profile_applied = !rc;
+
+	rc = read_property_id(bcdev, usb_pst, USB_VOLT_MAX);
+	if (rc < 0)
+		pr_err("failed to read back USB voltage_max after %s rc=%d\n",
+		       reason, rc);
+
+	rc = read_property_id(bcdev, usb_pst, USB_CURR_MAX);
+	if (rc < 0)
+		pr_err("failed to read back USB current_max after %s rc=%d\n",
+		       reason, rc);
+
+	rc = read_property_id(bcdev, usb_pst, USB_INPUT_CURR_LIMIT);
+	if (rc < 0)
+		pr_err("failed to read back USB input_current_limit after %s rc=%d\n",
+		       reason, rc);
+
+	rc = read_property_id(bcdev, xm_pst, XM_PROP_PDO2);
+	if (rc < 0)
+		pr_err("failed to read back PDO2 after %s rc=%d\n", reason, rc);
+
+	rc = read_property_id(bcdev, xm_pst, XM_PROP_APDO_MAX);
+	if (rc < 0)
+		pr_err("failed to read back APDO max after %s rc=%d\n",
+		       reason, rc);
+
+	pr_info("PD profile readback after %s: usb_vmax=%u usb_cmax=%u usb_icl=%u pdo2=%#08x apdo_max=%u\n",
+		reason,
+		usb_pst->prop[USB_VOLT_MAX],
+		usb_pst->prop[USB_CURR_MAX],
+		usb_pst->prop[USB_INPUT_CURR_LIMIT],
+		xm_pst->prop[XM_PROP_PDO2],
+		xm_pst->prop[XM_PROP_APDO_MAX]);
+}
+
 static int read_verify_digest_property_id(struct battery_chg_dev *bcdev,
 					  struct psy_state *pst, u32 prop_id)
 {
@@ -137,6 +222,237 @@ static int read_verify_digest_property_id(struct battery_chg_dev *bcdev,
 		 req_msg.property_id);
 
 	return battery_chg_write(bcdev, &req_msg, sizeof(req_msg));
+}
+
+static bool usbpd_is_pd_active(struct battery_chg_dev *bcdev)
+{
+	struct psy_state *usb_pst = &bcdev->psy_list[PSY_TYPE_USB];
+	struct psy_state *xm_pst = &bcdev->psy_list[PSY_TYPE_XM];
+	int rc;
+
+	rc = read_property_id(bcdev, usb_pst, USB_REAL_TYPE);
+	if (rc < 0)
+		return false;
+
+	switch (usb_pst->prop[USB_REAL_TYPE]) {
+	case POWER_SUPPLY_USB_TYPE_PD:
+	case POWER_SUPPLY_USB_TYPE_PD_DRP:
+	case POWER_SUPPLY_USB_TYPE_PD_PPS:
+		break;
+	default:
+		return false;
+	}
+
+	rc = read_property_id(bcdev, xm_pst, XM_PROP_CURRENT_STATE);
+	if (rc < 0)
+		return false;
+
+	switch (xm_pst->prop[XM_PROP_CURRENT_STATE]) {
+	case QTI_POWER_SUPPLY_PD_ACTIVE:
+	case QTI_POWER_SUPPLY_PD_PPS_ACTIVE:
+	case XM_USBPD_STATE_SNK_READY:
+		return true;
+	default:
+		return false;
+	}
+}
+
+static void xm_pd_auth_compat_update(struct battery_chg_dev *bcdev)
+{
+	bool active = usbpd_is_pd_active(bcdev);
+
+	if (active) {
+		if (!bcdev->xm_pd_auth_compat) {
+			bcdev->xm_pd_auth_compat = true;
+			bcdev->xm_uvdm_state = USBPD_UVDM_CHARGER_VERSION;
+			bcdev->xm_uvdm_last_cmd = USBPD_UVDM_DISCONNECT;
+			bcdev->xm_uvdm_ack_pending = false;
+			pr_info("xiaomi pd auth compat enabled\n");
+		}
+		return;
+	}
+
+	if (bcdev->xm_pd_auth_compat)
+		pr_info("xiaomi pd auth compat disabled\n");
+
+	bcdev->xm_pd_auth_compat = false;
+	bcdev->xm_uvdm_state = USBPD_UVDM_DISCONNECT;
+	bcdev->xm_uvdm_last_cmd = USBPD_UVDM_DISCONNECT;
+	bcdev->xm_uvdm_ack_pending = false;
+	bcdev->xm_uvdm_compat_verified = false;
+	bcdev->xm_pd_power_profile_applied = false;
+	bcdev->xm_pd_auth_forced = false;
+}
+
+static void xm_pd_auth_compat_advance(struct battery_chg_dev *bcdev,
+				      enum uvdm_state cmd)
+{
+	if (!bcdev->xm_pd_auth_compat)
+		return;
+
+	if (cmd == USBPD_UVDM_VERIFIED) {
+		bcdev->xm_uvdm_state = cmd;
+		bcdev->xm_uvdm_last_cmd = cmd;
+		bcdev->xm_uvdm_ack_pending = true;
+		bcdev->xm_uvdm_compat_verified = true;
+		pr_info("xiaomi pd auth reached verified stage\n");
+		xm_pd_apply_power_profile(bcdev, "uvdm_verified");
+		return;
+	}
+
+	switch (cmd) {
+	case USBPD_UVDM_CHARGER_VERSION:
+		bcdev->xm_uvdm_state = USBPD_UVDM_CHARGER_VOLTAGE;
+		break;
+	case USBPD_UVDM_CHARGER_VOLTAGE:
+		bcdev->xm_uvdm_state = USBPD_UVDM_CHARGER_TEMP;
+		break;
+	case USBPD_UVDM_CHARGER_TEMP:
+		bcdev->xm_uvdm_state = USBPD_UVDM_SESSION_SEED;
+		break;
+	case USBPD_UVDM_SESSION_SEED:
+		bcdev->xm_uvdm_state = USBPD_UVDM_AUTHENTICATION;
+		break;
+	case USBPD_UVDM_AUTHENTICATION:
+		bcdev->xm_uvdm_state = USBPD_UVDM_VERIFIED;
+		break;
+	case USBPD_UVDM_VERIFIED:
+		bcdev->xm_uvdm_state = USBPD_UVDM_VERIFIED;
+		break;
+	case USBPD_UVDM_REMOVE_COMPENSATION:
+	case USBPD_UVDM_REVERSE_AUTHEN:
+	case USBPD_UVDM_CONNECT:
+	case USBPD_UVDM_DISCONNECT:
+	default:
+		bcdev->xm_uvdm_state = cmd;
+		break;
+	}
+
+	bcdev->xm_uvdm_last_cmd = cmd;
+	bcdev->xm_uvdm_ack_pending = true;
+}
+
+static int xm_altmode_callback(void *priv, void *data, size_t len)
+{
+	struct battery_chg_dev *bcdev = priv;
+	size_t copy_len = min_t(size_t, len, sizeof(bcdev->xm_uvdm_last_rx));
+
+	memset(bcdev->xm_uvdm_last_rx, 0, sizeof(bcdev->xm_uvdm_last_rx));
+	memcpy(bcdev->xm_uvdm_last_rx, data, copy_len);
+	bcdev->xm_uvdm_rx_count++;
+	bcdev->xm_uvdm_real_rx_seen = true;
+
+	pr_debug("xiaomi altmode rx len=%zu payload=%*ph\n",
+		 len, (int)copy_len, bcdev->xm_uvdm_last_rx);
+
+	return 0;
+}
+
+static int xm_altmode_register(struct battery_chg_dev *bcdev)
+{
+	const struct altmode_client_data client_data = {
+		.svid = XIAOMI_PAN_SVID,
+		.name = "xiaomi_pd_auth",
+		.priv = bcdev,
+		.callback = xm_altmode_callback,
+	};
+	struct altmode_client *client;
+
+	if (bcdev->xm_altmode_registered)
+		return 0;
+
+	client = altmode_register_client(bcdev->dev, &client_data);
+	if (IS_ERR(client))
+		return PTR_ERR(client);
+
+	bcdev->xm_altmode_client = client;
+	bcdev->xm_altmode_registered = true;
+	bcdev->xm_uvdm_state = USBPD_UVDM_DISCONNECT;
+	pr_info("registered xiaomi altmode client svid=%#x\n", XIAOMI_PAN_SVID);
+
+	return 0;
+}
+
+static void xm_altmode_probe_done(void *priv)
+{
+	struct battery_chg_dev *bcdev = priv;
+	int rc;
+
+	rc = xm_altmode_register(bcdev);
+	if (rc < 0)
+		pr_err("xiaomi altmode deferred registration failed rc=%d\n", rc);
+}
+
+static void xm_altmode_send_uvdm(struct battery_chg_dev *bcdev,
+				 enum uvdm_state cmd, const u32 *data)
+{
+	u32 msg[XIAOMI_UVDM_PAN_WORDS] = { 0 };
+	int rc;
+
+	if (!bcdev->xm_altmode_registered || !bcdev->xm_altmode_client)
+		return;
+
+	msg[0] = cmd;
+	if (data)
+		msg[1] = data[0];
+
+	rc = altmode_send_data(bcdev->xm_altmode_client, msg, sizeof(msg));
+	if (rc < 0) {
+		bcdev->xm_uvdm_tx_fail_count++;
+		pr_err("xiaomi altmode tx cmd=%u val=%#x failed rc=%d\n",
+		       cmd, msg[1], rc);
+		return;
+	}
+
+	bcdev->xm_uvdm_tx_count++;
+	if (data)
+		memcpy(bcdev->xm_uvdm_last_tx, data,
+		       sizeof(bcdev->xm_uvdm_last_tx));
+	else
+		memset(bcdev->xm_uvdm_last_tx, 0,
+		       sizeof(bcdev->xm_uvdm_last_tx));
+	pr_debug("xiaomi altmode tx cmd=%u val=%#x\n", cmd, msg[1]);
+}
+
+int qti_battery_charger_xiaomi_init(struct battery_chg_dev *bcdev)
+{
+	int rc;
+
+	rc = xm_altmode_register(bcdev);
+	if (rc == -EPROBE_DEFER) {
+		rc = altmode_register_notifier(bcdev->dev, xm_altmode_probe_done,
+					       bcdev);
+		if (rc < 0) {
+			pr_info("xiaomi altmode notifier unavailable rc=%d\n", rc);
+			return 0;
+		}
+
+		bcdev->xm_altmode_notifier_registered = true;
+		pr_info("xiaomi altmode registration deferred\n");
+		return 0;
+	}
+
+	if (rc < 0) {
+		pr_info("xiaomi altmode client unavailable rc=%d\n", rc);
+		return 0;
+	}
+
+	return 0;
+}
+
+void qti_battery_charger_xiaomi_deinit(struct battery_chg_dev *bcdev)
+{
+	if (bcdev->xm_altmode_notifier_registered) {
+		altmode_deregister_notifier(bcdev->dev, bcdev);
+		bcdev->xm_altmode_notifier_registered = false;
+	}
+
+	if (!bcdev->xm_altmode_registered || !bcdev->xm_altmode_client)
+		return;
+
+	altmode_deregister_client(bcdev->xm_altmode_client);
+	bcdev->xm_altmode_client = NULL;
+	bcdev->xm_altmode_registered = false;
 }
 
 #if defined(CONFIG_MI_WIRELESS)
@@ -366,23 +682,27 @@ static ssize_t verify_digest_store(struct class *c,
 	u8 random[BATTERY_DIGEST_LEN] = { 0 };
 	char kbuf[2 * BATTERY_DIGEST_LEN + 1] = { 0 };
 	u8 random_1s[BATTERY_DIGEST_LEN] = { 0 };
-	char kbuf_1s[70] = { 0 };
+	char kbuf_1s[2 * BATTERY_DIGEST_LEN + 1] = { 0 };
 	int rc;
 	int i;
 
 	if (bcdev->support_2s_charging) {
 		memset(kbuf, 0, sizeof(kbuf));
 		strlcpy(kbuf, buf, 2 * BATTERY_DIGEST_LEN + 1);
-		StringToHex(kbuf, random, &i);
-		pr_err("verify_digest_store  2s:%s \n", random);
+		if (StringToHex(kbuf, random, &i) < 0)
+			return -EINVAL;
 		rc = write_verify_digest_prop_id(bcdev,
 						 &bcdev->psy_list[PSY_TYPE_XM],
 						 XM_PROP_VERIFY_DIGEST, random);
 	} else {
+		size_t len = min_t(size_t, count, sizeof(kbuf_1s) - 1);
+
 		memset(kbuf_1s, 0, sizeof(kbuf_1s));
-		strncpy(kbuf_1s, buf, count - 1);
-		StringToHex(kbuf_1s, random_1s, &i);
-		pr_err("verify_digest_store  1s:%s \n", random_1s);
+		memcpy(kbuf_1s, buf, len);
+		if (len && kbuf_1s[len - 1] == '\n')
+			kbuf_1s[len - 1] = '\0';
+		if (StringToHex(kbuf_1s, random_1s, &i) < 0)
+			return -EINVAL;
 		rc = write_verify_digest_prop_id(bcdev,
 						 &bcdev->psy_list[PSY_TYPE_XM],
 						 XM_PROP_VERIFY_DIGEST,
@@ -2003,13 +2323,16 @@ static ssize_t input_suspend_store(struct class *c,
 {
 	struct battery_chg_dev *bcdev =
 		container_of(c, struct battery_chg_dev, battery_class);
+	unsigned int val;
 	int rc;
-	bool val;
 
-	if (kstrtobool(buf, &val))
+	if (kstrtouint(buf, 0, &val))
 		return -EINVAL;
 
-	pr_err("set charger input suspend %d\n", val);
+	if (val > 2)
+		return -EINVAL;
+
+	pr_err("set charger input suspend %u\n", val);
 
 	rc = write_property_id(bcdev, &bcdev->psy_list[PSY_TYPE_XM],
 			       XM_PROP_INPUT_SUSPEND, val);
@@ -2167,7 +2490,7 @@ static void usbpd_request_vdm_cmd(struct battery_chg_dev *bcdev,
 	u32 prop_id, val = 0;
 	int rc;
 
-	pr_err("usbpd_request_vdm_cmd:cmd = %d, data = %d\n", cmd, *data);
+	pr_debug("usbpd_request_vdm_cmd:cmd = %d, data = %d\n", cmd, *data);
 	switch (cmd) {
 	case USBPD_UVDM_CHARGER_VERSION:
 		prop_id = XM_PROP_VDM_CMD_CHARGER_VERSION;
@@ -2182,20 +2505,20 @@ static void usbpd_request_vdm_cmd(struct battery_chg_dev *bcdev,
 		prop_id = XM_PROP_VDM_CMD_SESSION_SEED;
 		usbpd_sha256_bitswap32(data, USBPD_UVDM_SS_LEN);
 		val = *data;
-		pr_err("SESSION_SEED:data = %d\n", val);
+		pr_debug("SESSION_SEED:data = %d\n", val);
 		break;
 	case USBPD_UVDM_AUTHENTICATION:
 		prop_id = XM_PROP_VDM_CMD_AUTHENTICATION;
 		usbpd_sha256_bitswap32(data, USBPD_UVDM_SS_LEN);
 		val = *data;
-		pr_err("AUTHENTICATION:data = %d\n", val);
+		pr_debug("AUTHENTICATION:data = %d\n", val);
 		break;
 #if !defined(CONFIG_VENUS_FOR_BUILD)
 	case USBPD_UVDM_REVERSE_AUTHEN:
 		prop_id = XM_PROP_VDM_CMD_REVERSE_AUTHEN;
 		usbpd_sha256_bitswap32(data, USBPD_UVDM_SS_LEN);
 		val = *data;
-		pr_err("AUTHENTICATION:data = %d\n", val);
+		pr_debug("AUTHENTICATION:data = %d\n", val);
 		break;
 #endif
 	case USBPD_UVDM_REMOVE_COMPENSATION:
@@ -2219,6 +2542,31 @@ static void usbpd_request_vdm_cmd(struct battery_chg_dev *bcdev,
 					   prop_id, data);
 	} else
 		rc = write_property_id(bcdev, pst, prop_id, val);
+
+	xm_altmode_send_uvdm(bcdev, cmd, data);
+	xm_pd_auth_compat_advance(bcdev, cmd);
+
+	if (rc < 0)
+		pr_err("usbpd_request_vdm_cmd: failed cmd=%d prop=%u rc=%d\n",
+		       cmd, prop_id, rc);
+	else
+		pr_debug("usbpd_request_vdm_cmd: sent cmd=%d prop=%u val=%u\n",
+			 cmd, prop_id, val);
+}
+
+static bool usbpd_vdm_cmd_requires_data(enum uvdm_state cmd)
+{
+	switch (cmd) {
+	case USBPD_UVDM_SESSION_SEED:
+	case USBPD_UVDM_AUTHENTICATION:
+#if !defined(CONFIG_VENUS_FOR_BUILD)
+	case USBPD_UVDM_REVERSE_AUTHEN:
+#endif
+	case USBPD_UVDM_REMOVE_COMPENSATION:
+		return true;
+	default:
+		return false;
+	}
 }
 
 static ssize_t request_vdm_cmd_store(struct class *c,
@@ -2227,16 +2575,47 @@ static ssize_t request_vdm_cmd_store(struct class *c,
 {
 	struct battery_chg_dev *bcdev =
 		container_of(c, struct battery_chg_dev, battery_class);
-	int cmd, ret;
-	unsigned char buffer[64];
-	unsigned char data[32];
+	int cmd;
+	char kbuf[64];
+	char buffer[2 * BATTERY_SS_AUTH_DATA_LEN * sizeof(u32) + 1];
+	char *cmd_str, *payload;
+	u8 data[BATTERY_SS_AUTH_DATA_LEN * sizeof(u32)];
+	bool null_payload;
 	int ccount;
+	size_t len;
 
-	ret = sscanf(buf, "%d,%s\n", &cmd, buffer);
+	memset(kbuf, 0, sizeof(kbuf));
+	memset(buffer, 0, sizeof(buffer));
+	memset(data, 0, sizeof(data));
 
-	pr_info("%s:buf:%s cmd:%d, buffer:%s\n", __func__, buf, cmd, buffer);
+	len = min_t(size_t, count, sizeof(kbuf) - 1);
+	memcpy(kbuf, buf, len);
+	cmd_str = strim(kbuf);
+	payload = strchr(cmd_str, ',');
+	if (payload) {
+		*payload = '\0';
+		payload = strim(payload + 1);
+	}
 
-	StringToHex(buffer, data, &ccount);
+	if (kstrtoint(strim(cmd_str), 0, &cmd))
+		return -EINVAL;
+
+	null_payload = !payload || !payload[0] ||
+		!strcasecmp(payload, "null");
+
+	if (usbpd_vdm_cmd_requires_data(cmd) && null_payload)
+		return -EINVAL;
+
+	if (payload && !null_payload)
+		strscpy(buffer, payload, sizeof(buffer));
+
+	pr_debug("%s:buf:%s cmd:%d, payload:%s\n", __func__, kbuf, cmd,
+		 payload ? payload : "<none>");
+
+	if (payload && !null_payload && StringToHex(buffer, data, &ccount) < 0)
+		return -EINVAL;
+	if (cmd == USBPD_UVDM_VERIFIED && null_payload)
+		data[0] = 1;
 	usbpd_request_vdm_cmd(bcdev, cmd, (unsigned int *)data);
 	return count;
 }
@@ -2258,7 +2637,22 @@ static ssize_t request_vdm_cmd_show(struct class *c,
 		return rc;
 
 	cmd = pst->prop[XM_PROP_UVDM_STATE];
-	pr_info("request_vdm_cmd_show  uvdm_state: %d\n", cmd);
+	if (cmd == USBPD_UVDM_DISCONNECT) {
+		xm_pd_auth_compat_update(bcdev);
+		if (bcdev->xm_pd_auth_compat) {
+			if (bcdev->xm_uvdm_state == USBPD_UVDM_DISCONNECT)
+				bcdev->xm_uvdm_state = USBPD_UVDM_CHARGER_VERSION;
+			if (bcdev->xm_uvdm_ack_pending) {
+				cmd = bcdev->xm_uvdm_last_cmd;
+				bcdev->xm_uvdm_ack_pending = false;
+			} else {
+				cmd = bcdev->xm_uvdm_state;
+			}
+		}
+	}
+	pr_debug("request_vdm_cmd_show uvdm_state=%d compat=%d last=%u ack=%d\n",
+		 cmd, bcdev->xm_pd_auth_compat, bcdev->xm_uvdm_last_cmd,
+		 bcdev->xm_uvdm_ack_pending);
 
 	switch (cmd) {
 	case USBPD_UVDM_CHARGER_VERSION:
@@ -2297,7 +2691,7 @@ static ssize_t request_vdm_cmd_show(struct class *c,
 			bcdev->ss_auth_data[3]);
 		for (i = 0; i < USBPD_UVDM_SS_LEN; i++) {
 			memset(data, 0, sizeof(data));
-			snprintf(data, sizeof(data), "%08lx",
+			snprintf(data, sizeof(data), "%08x",
 				 bcdev->ss_auth_data[i]);
 			strlcat(str_buf, data, sizeof(str_buf));
 		}
@@ -2369,6 +2763,11 @@ static ssize_t adapter_svid_show(struct class *c, struct class_attribute *attr,
 	if (rc < 0)
 		return rc;
 
+	xm_pd_auth_compat_update(bcdev);
+	if (bcdev->xm_pd_auth_compat &&
+	    pst->prop[XM_PROP_ADAPTER_SVID] == ADAPTER_NONE)
+		return scnprintf(buf, PAGE_SIZE, "%04x", XIAOMI_PD_SVID);
+
 	return scnprintf(buf, PAGE_SIZE, "%04x",
 			 pst->prop[XM_PROP_ADAPTER_SVID]);
 }
@@ -2390,6 +2789,14 @@ static ssize_t pd_verifed_store(struct class *c, struct class_attribute *attr,
 	if (rc < 0)
 		return rc;
 
+	if (val) {
+		bcdev->xm_uvdm_compat_verified = true;
+		xm_pd_apply_power_profile(bcdev, "pd_verifed_store");
+	} else {
+		bcdev->xm_uvdm_compat_verified = false;
+		bcdev->xm_pd_power_profile_applied = false;
+	}
+
 	return count;
 }
 
@@ -2408,6 +2815,41 @@ static ssize_t pd_verifed_show(struct class *c, struct class_attribute *attr,
 	return scnprintf(buf, PAGE_SIZE, "%u\n", pst->prop[XM_PROP_PD_VERIFED]);
 }
 static CLASS_ATTR_RW(pd_verifed);
+
+static ssize_t xiaomi_pd_auth_debug_show(struct class *c,
+					 struct class_attribute *attr,
+					 char *buf)
+{
+	struct battery_chg_dev *bcdev =
+		container_of(c, struct battery_chg_dev, battery_class);
+	int len = 0;
+
+	len += scnprintf(buf + len, PAGE_SIZE - len,
+			 "compat=%u altmode=%u notifier=%u state=%u last_cmd=%u ack=%u\n",
+			 bcdev->xm_pd_auth_compat,
+			 bcdev->xm_altmode_registered,
+			 bcdev->xm_altmode_notifier_registered,
+			 bcdev->xm_uvdm_state, bcdev->xm_uvdm_last_cmd,
+			 bcdev->xm_uvdm_ack_pending);
+	len += scnprintf(buf + len, PAGE_SIZE - len,
+			 "real_rx=%u compat_verified=%u forced=%u rx=%u tx=%u tx_fail=%u\n",
+			 bcdev->xm_uvdm_real_rx_seen,
+			 bcdev->xm_uvdm_compat_verified,
+			 bcdev->xm_pd_auth_forced,
+			 bcdev->xm_uvdm_rx_count, bcdev->xm_uvdm_tx_count,
+			 bcdev->xm_uvdm_tx_fail_count);
+	len += scnprintf(buf + len, PAGE_SIZE - len,
+			 "last_tx=%08x %08x %08x %08x\n",
+			 bcdev->xm_uvdm_last_tx[0], bcdev->xm_uvdm_last_tx[1],
+			 bcdev->xm_uvdm_last_tx[2], bcdev->xm_uvdm_last_tx[3]);
+	len += scnprintf(buf + len, PAGE_SIZE - len,
+			 "last_rx=%*phN\n",
+			 (int)sizeof(bcdev->xm_uvdm_last_rx),
+			 bcdev->xm_uvdm_last_rx);
+
+	return len;
+}
+static CLASS_ATTR_RO(xiaomi_pd_auth_debug);
 
 static ssize_t pdo2_show(struct class *c, struct class_attribute *attr,
 			 char *buf)
@@ -2547,6 +2989,7 @@ static ssize_t mtbf_current_show(struct class *c, struct class_attribute *attr,
 }
 static CLASS_ATTR_RW(mtbf_current);
 
+#if defined(CONFIG_BQ_FUEL_GAUGE)
 static ssize_t fake_temp_store(struct class *c, struct class_attribute *attr,
 			       const char *buf, size_t count)
 {
@@ -2581,6 +3024,7 @@ static ssize_t fake_temp_show(struct class *c, struct class_attribute *attr,
 	return scnprintf(buf, PAGE_SIZE, "%u\n", pst->prop[XM_PROP_FAKE_TEMP]);
 }
 static CLASS_ATTR_RW(fake_temp);
+#endif
 
 static ssize_t qbg_vbat_show(struct class *c, struct class_attribute *attr,
 			     char *buf)
@@ -3414,6 +3858,7 @@ static struct attribute *xiaomi_battery_class_attrs[] = {
 	&class_attr_adapter_id.attr,
 	&class_attr_adapter_svid.attr,
 	&class_attr_pd_verifed.attr,
+	&class_attr_xiaomi_pd_auth_debug.attr,
 	&class_attr_pdo2.attr,
 	&class_attr_fastchg_mode.attr,
 	&class_attr_apdo_max.attr,
@@ -3422,7 +3867,9 @@ static struct attribute *xiaomi_battery_class_attrs[] = {
 	&class_attr_fg_rm.attr,
 	&class_attr_wlscharge_control_limit.attr,
 	&class_attr_mtbf_current.attr,
+#if defined(CONFIG_BQ_FUEL_GAUGE)
 	&class_attr_fake_temp.attr,
+#endif
 	&class_attr_qbg_vbat.attr,
 	&class_attr_vph_pwr.attr,
 	&class_attr_qbg_temp.attr,

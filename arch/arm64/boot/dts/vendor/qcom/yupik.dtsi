@@ -3801,6 +3801,7 @@
 
 		battery_charger: qcom,battery_charger {
 			compatible = "qcom,battery-charger";
+			qcom,altmode-dev = <&altmode 0>;
 		};
 
 		qcom,ucsi {

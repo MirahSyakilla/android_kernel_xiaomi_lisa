@@ -18,6 +18,7 @@
 #define ADAPTER_XIAOMI_PD_50W     0xe
 #define ADAPTER_XIAOMI_PD_60W     0xf
 #define ADAPTER_XIAOMI_PD_100W    0x10
+#define XIAOMI_PD_SVID		   0x2717
 
 /* opcode for battery charger */
 #define BC_XM_STATUS_GET		0x50
@@ -271,7 +272,9 @@ enum xm_property_id {
 	XM_PROP_FG_RM,
 	XM_PROP_WLSCHARGE_CONTROL_LIMIT,
 	XM_PROP_MTBF_CURRENT,
+#if defined(CONFIG_BQ_FUEL_GAUGE)
 	XM_PROP_FAKE_TEMP,
+#endif
 	XM_PROP_QBG_VBAT,
 	XM_PROP_QBG_VPH_PWR,
 	XM_PROP_QBG_TEMP,
@@ -458,6 +461,8 @@ struct psy_state {
 	u32			opcode_set;
 };
 
+struct altmode_client;
+
 struct battery_chg_dev {
 	struct device			*dev;
 	struct class			battery_class;
@@ -495,6 +500,8 @@ struct battery_chg_dev {
 	u32				restrict_fcc_ua;
 	u32				last_fcc_ua;
 	u32				usb_icl_ua;
+	u32				usb_current_max_ua;
+	u32				usb_voltage_max_uv;
 	u32				reverse_chg_flag;
 	u32				hw_version_build;
 	bool				restrict_chg_en;
@@ -503,6 +510,25 @@ struct battery_chg_dev {
 	bool				support_2s_charging;
 	struct delayed_work		xm_prop_change_work;
 	struct delayed_work		charger_debug_info_print_work;
+	struct altmode_client		*xm_altmode_client;
+	bool				xm_altmode_registered;
+	bool				xm_altmode_notifier_registered;
+	bool				xm_pd_auth_compat;
+	bool				xm_uvdm_ack_pending;
+	bool				xm_uvdm_real_rx_seen;
+	bool				xm_uvdm_compat_verified;
+	bool				xm_pd_power_profile_applied;
+	bool				xm_pd_auth_forced;
+	u32				xm_uvdm_state;
+	u32				xm_uvdm_last_cmd;
+	u32				xm_uvdm_rx_count;
+	u32				xm_uvdm_tx_count;
+	u32				xm_uvdm_tx_fail_count;
+	u32				xm_uvdm_last_tx[USBPD_UVDM_SS_LEN];
+	u8				xm_uvdm_last_rx[16];
 	/* To track the driver initialization status */
 	bool				initialized;
 };
+
+int qti_battery_charger_xiaomi_init(struct battery_chg_dev *bcdev);
+void qti_battery_charger_xiaomi_deinit(struct battery_chg_dev *bcdev);

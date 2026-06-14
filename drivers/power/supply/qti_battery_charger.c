@@ -118,6 +118,8 @@ static int battery_chg_fw_write(struct battery_chg_dev *bcdev, void *data,
 int battery_chg_write(struct battery_chg_dev *bcdev, void *data,
 				int len)
 {
+	struct pmic_glink_hdr *hdr = data;
+	u32 prop_id = 0;
 	int rc;
 
 	/*
@@ -140,15 +142,19 @@ int battery_chg_write(struct battery_chg_dev *bcdev, void *data,
 		rc = wait_for_completion_timeout(&bcdev->ack,
 					msecs_to_jiffies(BC_WAIT_TIME_MS));
 		if (!rc) {
-			pr_err("Error, timed out sending message\n");
+			if (len >= sizeof(struct battery_charger_req_msg))
+				prop_id = ((struct battery_charger_req_msg *)data)->property_id;
+			pr_err("Error, timed out sending opcode %#x prop_id %u\n",
+			       hdr->opcode, prop_id);
 			mutex_unlock(&bcdev->rw_lock);
+			return -ETIMEDOUT;
 		}
 
 		rc = 0;
 	}
 	mutex_unlock(&bcdev->rw_lock);
 
-	return 0;
+	return rc;
 }
 
 int write_property_id(struct battery_chg_dev *bcdev,
@@ -225,6 +231,11 @@ static void battery_chg_state_cb(void *priv, enum pmic_glink_state state)
 	struct battery_chg_dev *bcdev = priv;
 
 	pr_debug("state: %d\n", state);
+
+	if (!bcdev->initialized) {
+		pr_warn("Driver not initialized, pmic_glink state %d\n", state);
+		return;
+	}
 
 	atomic_set(&bcdev->state, state);
 	if (state == PMIC_GLINK_STATE_UP)
@@ -419,7 +430,10 @@ static void handle_message(struct battery_chg_dev *bcdev, void *data,
 
 		break;
 	case BC_SET_NOTIFY_REQ:
-		/* Always ACK response for notify request */
+	case BC_SHIP_MODE_REQ_SET:
+	case BC_SHUTDOWN_REQ_SET:
+	case BC_SHUTDOWN_NOTIFY:
+		/* Always ACK response for notify, ship mode or shutdown request */
 		ack_set = true;
 		break;
 	case BC_WLS_FW_CHECK_UPDATE:
@@ -489,9 +503,15 @@ static void battery_chg_update_usb_type_work(struct work_struct *work)
 	}
 
 	/* Reset usb_icl_ua whenever USB adapter type changes */
-	if (pst->prop[USB_ADAP_TYPE] != POWER_SUPPLY_USB_TYPE_SDP &&
-	    pst->prop[USB_ADAP_TYPE] != POWER_SUPPLY_USB_TYPE_PD)
+	switch (pst->prop[USB_ADAP_TYPE]) {
+	case POWER_SUPPLY_USB_TYPE_SDP:
+	case POWER_SUPPLY_USB_TYPE_CDP:
+	case POWER_SUPPLY_USB_TYPE_PD:
+		break;
+	default:
 		bcdev->usb_icl_ua = 0;
+		break;
+	}
 
 	pr_debug("usb_adap_type: %u\n", pst->prop[USB_ADAP_TYPE]);
 
@@ -615,6 +635,10 @@ static int wls_psy_get_prop(struct power_supply *psy,
 	int prop_id, rc;
 
 	pval->intval = -ENODATA;
+	if (prop == POWER_SUPPLY_PROP_SCOPE) {
+		pval->intval = POWER_SUPPLY_SCOPE_SYSTEM;
+		return 0;
+	}
 
 	prop_id = get_property_id(pst, prop);
 	if (prop_id < 0)
@@ -697,10 +721,17 @@ static int usb_psy_set_icl(struct battery_chg_dev *bcdev, u32 prop_id, int val)
 		return rc;
 	}
 
-	/* Allow this only for SDP or USB_PD and not for other charger types */
-	if (pst->prop[USB_ADAP_TYPE] != POWER_SUPPLY_USB_TYPE_SDP &&
-	    pst->prop[USB_ADAP_TYPE] != POWER_SUPPLY_USB_TYPE_PD)
+	/* Allow this only for SDP, CDP or USB_PD and not for other charger types */
+	switch (pst->prop[USB_ADAP_TYPE]) {
+	case POWER_SUPPLY_USB_TYPE_SDP:
+	case POWER_SUPPLY_USB_TYPE_CDP:
+	case POWER_SUPPLY_USB_TYPE_PD:
+	case POWER_SUPPLY_USB_TYPE_PD_DRP:
+	case POWER_SUPPLY_USB_TYPE_PD_PPS:
+		break;
+	default:
 		return -EINVAL;
+	}
 
 	/*
 	 * Input current limit (ICL) can be set by different clients. E.g. USB
@@ -720,6 +751,95 @@ static int usb_psy_set_icl(struct battery_chg_dev *bcdev, u32 prop_id, int val)
 		pr_debug("Set ICL to %u\n", temp);
 		bcdev->usb_icl_ua = temp;
 	}
+
+	return rc;
+}
+
+static int usb_psy_set_current_max(struct battery_chg_dev *bcdev,
+				   u32 prop_id, int val)
+{
+	struct psy_state *pst = &bcdev->psy_list[PSY_TYPE_USB];
+	u32 temp;
+	int rc;
+
+	rc = read_property_id(bcdev, pst, USB_ADAP_TYPE);
+	if (rc < 0) {
+		pr_err("Failed to read prop USB_ADAP_TYPE, rc=%d\n", rc);
+		return rc;
+	}
+
+	switch (pst->prop[USB_ADAP_TYPE]) {
+	case POWER_SUPPLY_USB_TYPE_PD:
+	case POWER_SUPPLY_USB_TYPE_PD_DRP:
+	case POWER_SUPPLY_USB_TYPE_PD_PPS:
+		break;
+	default:
+		return -EINVAL;
+	}
+
+	if (val <= 0)
+		return -EINVAL;
+
+	temp = val;
+	rc = write_property_id(bcdev, pst, prop_id, temp);
+	if (rc < 0) {
+		pr_err("Failed to set USB current_max (%u uA), rc=%d\n",
+		       temp, rc);
+		return rc;
+	}
+
+	bcdev->usb_current_max_ua = temp;
+	pr_debug("Set USB current_max to %u\n", temp);
+
+	return 0;
+}
+
+#define USB_PD_VOLTAGE_5V_UV	5000000
+#define USB_PD_VOLTAGE_9V_UV	9000000
+#define USB_PD_VOLTAGE_11V_UV	11000000
+#define USB_PD_VOLTAGE_12V_UV	12000000
+#define USB_PD_VOLTAGE_15V_UV	15000000
+#define USB_PD_VOLTAGE_20V_UV	20000000
+
+static int usb_psy_set_voltage_max(struct battery_chg_dev *bcdev,
+				   u32 prop_id, int val)
+{
+	struct psy_state *pst = &bcdev->psy_list[PSY_TYPE_USB];
+	int rc;
+
+	rc = read_property_id(bcdev, pst, USB_ADAP_TYPE);
+	if (rc < 0) {
+		pr_err("Failed to read prop USB_ADAP_TYPE, rc=%d\n", rc);
+		return rc;
+	}
+
+	switch (pst->prop[USB_ADAP_TYPE]) {
+	case POWER_SUPPLY_USB_TYPE_PD:
+	case POWER_SUPPLY_USB_TYPE_PD_DRP:
+	case POWER_SUPPLY_USB_TYPE_PD_PPS:
+		break;
+	default:
+		return -EINVAL;
+	}
+
+	switch (val) {
+	case USB_PD_VOLTAGE_5V_UV:
+	case USB_PD_VOLTAGE_9V_UV:
+	case USB_PD_VOLTAGE_11V_UV:
+	case USB_PD_VOLTAGE_12V_UV:
+	case USB_PD_VOLTAGE_15V_UV:
+	case USB_PD_VOLTAGE_20V_UV:
+		break;
+	default:
+		return -EINVAL;
+	}
+
+	rc = write_property_id(bcdev, pst, prop_id, val);
+	if (rc < 0)
+		pr_err("Failed to set USB voltage_max (%d uV), rc=%d\n",
+		       val, rc);
+	else
+		bcdev->usb_voltage_max_uv = val;
 
 	return rc;
 }
@@ -853,6 +973,11 @@ int usb_psy_get_prop(struct power_supply *psy,
 	int prop_id, rc;
 
 	pval->intval = -ENODATA;
+	if (prop == POWER_SUPPLY_PROP_SCOPE) {
+		pval->intval = POWER_SUPPLY_SCOPE_SYSTEM;
+		return 0;
+	}
+
 	if (prop == POWER_SUPPLY_PROP_QUICK_CHARGE_TYPE)
 	{
 		pval->intval = get_quick_charge_type(bcdev);
@@ -887,11 +1012,17 @@ static int usb_psy_set_prop(struct power_supply *psy,
 		return prop_id;
 
 	switch (prop) {
+	case POWER_SUPPLY_PROP_VOLTAGE_MAX:
+		rc = usb_psy_set_voltage_max(bcdev, prop_id, pval->intval);
+		break;
+	case POWER_SUPPLY_PROP_CURRENT_MAX:
+		rc = usb_psy_set_current_max(bcdev, prop_id, pval->intval);
+		break;
 	case POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT:
 		rc = usb_psy_set_icl(bcdev, prop_id, pval->intval);
 		break;
 	default:
-		break;
+		return -EINVAL;
 	}
 
 	return rc;
@@ -901,6 +1032,8 @@ static int usb_psy_prop_is_writeable(struct power_supply *psy,
 		enum power_supply_property prop)
 {
 	switch (prop) {
+	case POWER_SUPPLY_PROP_VOLTAGE_MAX:
+	case POWER_SUPPLY_PROP_CURRENT_MAX:
 	case POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT:
 		return 1;
 	default:
@@ -920,6 +1053,7 @@ static enum power_supply_property usb_props[] = {
 	POWER_SUPPLY_PROP_USB_TYPE,
 	POWER_SUPPLY_PROP_TEMP,
 	POWER_SUPPLY_PROP_QUICK_CHARGE_TYPE,
+	POWER_SUPPLY_PROP_SCOPE,
 };
 
 static enum power_supply_usb_type usb_psy_supported_types[] = {
@@ -1021,6 +1155,10 @@ static int battery_psy_get_prop(struct power_supply *psy,
 	int prop_id, rc;
 
 	pval->intval = -ENODATA;
+	if (prop == POWER_SUPPLY_PROP_SCOPE) {
+		pval->intval = POWER_SUPPLY_SCOPE_SYSTEM;
+		return 0;
+	}
 
 	/*
 	 * The prop id of TIME_TO_FULL_NOW and TIME_TO_FULL_AVG is same.
@@ -1265,6 +1403,22 @@ static void battery_chg_subsys_up_work(struct work_struct *work)
 		if (rc < 0)
 			pr_err("Failed to set ICL(%u uA), rc=%d\n",
 				bcdev->usb_icl_ua, rc);
+	}
+
+	if (bcdev->usb_current_max_ua) {
+		rc = usb_psy_set_current_max(bcdev, USB_CURR_MAX,
+				bcdev->usb_current_max_ua);
+		if (rc < 0)
+			pr_err("Failed to set USB current_max(%u uA), rc=%d\n",
+				bcdev->usb_current_max_ua, rc);
+	}
+
+	if (bcdev->usb_voltage_max_uv) {
+		rc = usb_psy_set_voltage_max(bcdev, USB_VOLT_MAX,
+				bcdev->usb_voltage_max_uv);
+		if (rc < 0)
+			pr_err("Failed to set USB voltage_max(%u uV), rc=%d\n",
+				bcdev->usb_voltage_max_uv, rc);
 	}
 }
 
@@ -2187,6 +2341,10 @@ static int battery_chg_probe(struct platform_device *pdev)
 	}
 
 	battery_chg_add_debugfs(bcdev);
+	rc = qti_battery_charger_xiaomi_init(bcdev);
+	if (rc < 0)
+		goto error_class;
+
 	battery_chg_notify_enable(bcdev);
 	device_init_wakeup(bcdev->dev, true);
 	schedule_work(&bcdev->usb_type_work);
@@ -2206,14 +2364,21 @@ static int battery_chg_probe(struct platform_device *pdev)
 
 	dev_err(dev, "battery_chg_probe done\n");
 	return 0;
+error_class:
+	qti_battery_charger_xiaomi_deinit(bcdev);
+	class_unregister(&bcdev->battery_class);
 error:
 	bcdev->initialized = false;
 	complete(&bcdev->ack);
+	cancel_work_sync(&bcdev->subsys_up_work);
+	cancel_work_sync(&bcdev->usb_type_work);
+	cancel_work_sync(&bcdev->fb_notifier_work);
 	pmic_glink_unregister_client(bcdev->client);
 #if !defined(CONFIG_RENOIR_FOR_BUILD)
 	mi_disp_unregister_client(&bcdev->fb_notifier);
 #endif
 	unregister_reboot_notifier(&bcdev->reboot_notifier);
+	unregister_reboot_notifier(&bcdev->shutdown_notifier);
 	return rc;
 }
 
@@ -2223,12 +2388,19 @@ static int battery_chg_remove(struct platform_device *pdev)
 	int rc;
 
 	device_init_wakeup(bcdev->dev, false);
+	cancel_work_sync(&bcdev->subsys_up_work);
+	cancel_work_sync(&bcdev->usb_type_work);
+	cancel_work_sync(&bcdev->fb_notifier_work);
+	cancel_delayed_work_sync(&bcdev->xm_prop_change_work);
+	cancel_delayed_work_sync(&bcdev->charger_debug_info_print_work);
+	qti_battery_charger_xiaomi_deinit(bcdev);
 	debugfs_remove_recursive(bcdev->debugfs_dir);
 	class_unregister(&bcdev->battery_class);
 #if !defined(CONFIG_RENOIR_FOR_BUILD)
 	mi_disp_unregister_client(&bcdev->fb_notifier);
 #endif
 	unregister_reboot_notifier(&bcdev->reboot_notifier);
+	unregister_reboot_notifier(&bcdev->shutdown_notifier);
 	rc = pmic_glink_unregister_client(bcdev->client);
 	if (rc < 0) {
 		pr_err("Error unregistering from pmic_glink, rc=%d\n", rc);

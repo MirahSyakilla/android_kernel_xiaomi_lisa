@@ -9,9 +9,13 @@
 #include <linux/completion.h>
 #include <linux/property.h>
 #include <linux/device.h>
+#include <linux/debugfs.h>
 #include <linux/module.h>
 #include <linux/delay.h>
+#include <linux/seq_file.h>
 #include <linux/slab.h>
+#include <linux/uaccess.h>
+#include <linux/usb/pd.h>
 #include <linux/usb/typec_dp.h>
 
 #include "ucsi.h"
@@ -651,6 +655,312 @@ static int ucsi_reset_connector(struct ucsi_connector *con, bool hard)
 	return ucsi_send_command(con->ucsi, command, NULL, 0);
 }
 
+static int ucsi_get_pdos(struct ucsi_connector *con, bool partner,
+			 u32 *pdos, int offset, int num_pdos)
+{
+	u64 command;
+
+	if (num_pdos < 1 || num_pdos > UCSI_MAX_PDOS)
+		return -EINVAL;
+
+	command = UCSI_COMMAND(UCSI_GET_PDOS);
+	command |= UCSI_CONNECTOR_NUMBER(con->num);
+	command |= UCSI_GET_PDOS_PARTNER_PDO(partner);
+	command |= UCSI_GET_PDOS_PDO_OFFSET(offset);
+	command |= UCSI_GET_PDOS_NUM_PDOS(num_pdos - 1);
+	command |= UCSI_GET_PDOS_SRC_PDOS;
+
+	return ucsi_send_command(con->ucsi, command, pdos + offset,
+				 num_pdos * sizeof(u32));
+}
+
+#ifdef CONFIG_DEBUG_FS
+static const char *ucsi_pdo_type_name(u32 pdo)
+{
+	switch (pdo_type(pdo)) {
+	case PDO_TYPE_FIXED:
+		return "fixed";
+	case PDO_TYPE_BATT:
+		return "battery";
+	case PDO_TYPE_VAR:
+		return "variable";
+	case PDO_TYPE_APDO:
+		return "apdo";
+	default:
+		return "unknown";
+	}
+}
+
+static void ucsi_debugfs_print_pdo(struct seq_file *s, int index, u32 pdo)
+{
+	seq_printf(s, "pdo%d: 0x%08x type=%s", index + 1, pdo,
+		   ucsi_pdo_type_name(pdo));
+
+	switch (pdo_type(pdo)) {
+	case PDO_TYPE_FIXED:
+		seq_printf(s, " %dmV %dmA", pdo_fixed_voltage(pdo),
+			   pdo_max_current(pdo));
+		break;
+	case PDO_TYPE_BATT:
+		seq_printf(s, " %dmV-%dmV %dmW", pdo_min_voltage(pdo),
+			   pdo_max_voltage(pdo), pdo_max_power(pdo));
+		break;
+	case PDO_TYPE_VAR:
+		seq_printf(s, " %dmV-%dmV %dmA", pdo_min_voltage(pdo),
+			   pdo_max_voltage(pdo), pdo_max_current(pdo));
+		break;
+	case PDO_TYPE_APDO:
+		if (pdo_apdo_type(pdo) == APDO_TYPE_PPS)
+			seq_printf(s, " pps %dmV-%dmV %dmA",
+				   pdo_pps_apdo_min_voltage(pdo),
+				   pdo_pps_apdo_max_voltage(pdo),
+				   pdo_pps_apdo_max_current(pdo));
+		break;
+	default:
+		break;
+	}
+
+	seq_putc(s, '\n');
+}
+
+static int ucsi_debugfs_status_show(struct seq_file *s, void *unused)
+{
+	struct ucsi_connector *con = s->private;
+	struct ucsi_connector_status status;
+	u32 pdos[PDO_MAX_OBJECTS] = { };
+	u64 command;
+	u32 rdo;
+	u32 pdo = 0;
+	unsigned int pos;
+	bool have_pdo = false;
+	int ret;
+	int total;
+
+	mutex_lock(&con->lock);
+
+	command = UCSI_GET_CONNECTOR_STATUS | UCSI_CONNECTOR_NUMBER(con->num);
+	ret = ucsi_send_command(con->ucsi, command, &con->status,
+				sizeof(con->status));
+	status = con->status;
+	if (ret < 0)
+		goto out_unlock;
+
+	rdo = status.request_data_obj;
+	pos = rdo_index(rdo);
+
+	if (pos) {
+		ret = ucsi_get_pdos(con, true, pdos, 0, UCSI_MAX_PDOS);
+		if (ret >= 0) {
+			total = ret / sizeof(u32);
+			if (total == UCSI_MAX_PDOS) {
+				ret = ucsi_get_pdos(con, true, pdos,
+						    UCSI_MAX_PDOS,
+						    PDO_MAX_OBJECTS -
+						    UCSI_MAX_PDOS);
+				if (ret >= 0)
+					total += ret / sizeof(u32);
+			}
+
+			if (ret >= 0 && pos <= total) {
+				pdo = pdos[pos - 1];
+				have_pdo = true;
+			}
+		}
+	}
+
+out_unlock:
+	mutex_unlock(&con->lock);
+
+	if (ret < 0)
+		return ret;
+
+	seq_printf(s, "change: 0x%04x\n", status.change);
+	seq_printf(s, "flags: 0x%04x\n", status.flags);
+	seq_printf(s, "connected: %u\n",
+		   !!(status.flags & UCSI_CONSTAT_CONNECTED));
+	seq_printf(s, "power_opmode: %u\n",
+		   UCSI_CONSTAT_PWR_OPMODE(status.flags));
+	seq_printf(s, "power_role: %s\n",
+		   status.flags & UCSI_CONSTAT_PWR_DIR ? "source" : "sink");
+	seq_printf(s, "partner_flags: 0x%x\n",
+		   UCSI_CONSTAT_PARTNER_FLAGS(status.flags));
+	seq_printf(s, "partner_type: %u\n",
+		   UCSI_CONSTAT_PARTNER_TYPE(status.flags));
+	seq_printf(s, "request_data_obj: 0x%08x\n", rdo);
+	seq_printf(s, "rdo_object_position: %u\n", pos);
+	if (have_pdo) {
+		seq_printf(s, "selected_pdo: 0x%08x\n", pdo);
+		ucsi_debugfs_print_pdo(s, pos - 1, pdo);
+
+		if (pdo_type(pdo) == PDO_TYPE_APDO &&
+		    pdo_apdo_type(pdo) == APDO_TYPE_PPS) {
+			seq_printf(s, "rdo_pps_voltage_mv: %u\n",
+				   ((rdo >> RDO_PROG_VOLT_SHIFT) &
+				    RDO_PROG_VOLT_MASK) *
+				   RDO_PROG_VOLT_MV_STEP);
+			seq_printf(s, "rdo_pps_current_ma: %u\n",
+				   ((rdo >> RDO_PROG_CURR_SHIFT) &
+				    RDO_PROG_CURR_MASK) *
+				   RDO_PROG_CURR_MA_STEP);
+		} else {
+			seq_printf(s, "rdo_fixed_op_current_ma: %u\n",
+				   rdo_op_current(rdo));
+			seq_printf(s, "rdo_fixed_max_current_ma: %u\n",
+				   rdo_max_current(rdo));
+		}
+	} else {
+		seq_printf(s, "selected_pdo: unavailable\n");
+	}
+	seq_printf(s, "bc_status: %u\n",
+		   UCSI_CONSTAT_BC_STATUS(status.pwr_status));
+	seq_printf(s, "provider_cap_limit: %u\n",
+		   UCSI_CONSTAT_PROVIDER_CAP_LIMIT(status.pwr_status));
+
+	return 0;
+}
+
+static int ucsi_debugfs_status_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, ucsi_debugfs_status_show, inode->i_private);
+}
+
+static const struct file_operations ucsi_debugfs_status_fops = {
+	.owner = THIS_MODULE,
+	.open = ucsi_debugfs_status_open,
+	.read = seq_read,
+	.llseek = seq_lseek,
+	.release = single_release,
+};
+
+static int ucsi_debugfs_source_pdos_show(struct seq_file *s, void *unused)
+{
+	struct ucsi_connector *con = s->private;
+	u32 pdos[PDO_MAX_OBJECTS] = { };
+	int total = 0;
+	int ret;
+	int i;
+
+	mutex_lock(&con->lock);
+
+	ret = ucsi_get_pdos(con, true, pdos, 0, UCSI_MAX_PDOS);
+	if (ret < 0)
+		goto out_unlock;
+
+	total = ret / sizeof(u32);
+	if (total == UCSI_MAX_PDOS) {
+		ret = ucsi_get_pdos(con, true, pdos, UCSI_MAX_PDOS,
+				    PDO_MAX_OBJECTS - UCSI_MAX_PDOS);
+		if (ret < 0)
+			goto out_unlock;
+
+		total += ret / sizeof(u32);
+	}
+
+out_unlock:
+	mutex_unlock(&con->lock);
+
+	if (ret < 0) {
+		seq_printf(s, "error: %d\n", ret);
+		return 0;
+	}
+
+	seq_printf(s, "count: %d\n", total);
+	for (i = 0; i < total; i++)
+		ucsi_debugfs_print_pdo(s, i, pdos[i]);
+
+	return 0;
+}
+
+static int ucsi_debugfs_source_pdos_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, ucsi_debugfs_source_pdos_show,
+			   inode->i_private);
+}
+
+static const struct file_operations ucsi_debugfs_source_pdos_fops = {
+	.owner = THIS_MODULE,
+	.open = ucsi_debugfs_source_pdos_open,
+	.read = seq_read,
+	.llseek = seq_lseek,
+	.release = single_release,
+};
+
+static ssize_t ucsi_debugfs_connector_reset_write(struct file *file,
+						  const char __user *ubuf,
+						  size_t count, loff_t *ppos)
+{
+	struct ucsi_connector *con = file->private_data;
+	char buf[16];
+	bool hard;
+	int ret;
+
+	if (!count)
+		return 0;
+
+	if (count >= sizeof(buf))
+		return -EINVAL;
+
+	if (copy_from_user(buf, ubuf, count))
+		return -EFAULT;
+
+	buf[count] = '\0';
+
+	if (sysfs_streq(buf, "hard") || sysfs_streq(buf, "1"))
+		hard = true;
+	else if (sysfs_streq(buf, "soft") || sysfs_streq(buf, "0"))
+		hard = false;
+	else
+		return -EINVAL;
+
+	mutex_lock(&con->lock);
+	ret = ucsi_reset_connector(con, hard);
+	mutex_unlock(&con->lock);
+	if (ret < 0)
+		return ret;
+
+	return count;
+}
+
+static const struct file_operations ucsi_debugfs_connector_reset_fops = {
+	.owner = THIS_MODULE,
+	.open = simple_open,
+	.write = ucsi_debugfs_connector_reset_write,
+	.llseek = no_llseek,
+};
+
+static void ucsi_debugfs_register(struct ucsi *ucsi)
+{
+	struct dentry *dir;
+	int i;
+
+	dir = debugfs_create_dir(dev_name(ucsi->dev), NULL);
+	if (IS_ERR_OR_NULL(dir))
+		return;
+
+	ucsi->debugfs_dir = dir;
+
+	for (i = 0; i < ucsi->cap.num_connectors; i++) {
+		struct ucsi_connector *con = &ucsi->connector[i];
+		struct dentry *port_dir;
+		char name[16];
+
+		snprintf(name, sizeof(name), "port%d", con->num);
+		port_dir = debugfs_create_dir(name, dir);
+		if (IS_ERR_OR_NULL(port_dir))
+			continue;
+
+		debugfs_create_file("status", 0400, port_dir, con,
+				    &ucsi_debugfs_status_fops);
+		debugfs_create_file("source_pdos", 0400, port_dir, con,
+				    &ucsi_debugfs_source_pdos_fops);
+		debugfs_create_file("connector_reset", 0200, port_dir, con,
+				    &ucsi_debugfs_connector_reset_fops);
+	}
+}
+#else
+static void ucsi_debugfs_register(struct ucsi *ucsi) { }
+#endif
+
 static int ucsi_reset_ppm(struct ucsi *ucsi)
 {
 	u64 command = UCSI_PPM_RESET;
@@ -1000,6 +1310,8 @@ int ucsi_init(struct ucsi *ucsi)
 	if (ret < 0)
 		goto err_unregister;
 
+	ucsi_debugfs_register(ucsi);
+
 	mutex_unlock(&ucsi->ppm_lock);
 
 	return 0;
@@ -1123,6 +1435,8 @@ void ucsi_unregister(struct ucsi *ucsi)
 
 	/* Make sure that we are not in the middle of driver initialization */
 	cancel_work_sync(&ucsi->work);
+	debugfs_remove_recursive(ucsi->debugfs_dir);
+	ucsi->debugfs_dir = NULL;
 
 	/* Disable notifications */
 	ucsi->ops->async_write(ucsi, UCSI_CONTROL, &cmd, sizeof(cmd));
