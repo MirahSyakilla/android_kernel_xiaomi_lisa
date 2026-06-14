@@ -871,6 +871,8 @@ struct quick_charge adapter_cap[11] = {
 	{0, 0},
 };
 
+#define XM_PD_COMPAT_APDO_MAX_W		33
+
 static u8 get_quick_charge_type(struct battery_chg_dev *bcdev)
 {
 	int i = 0,verify_digiest = 0;
@@ -911,8 +913,11 @@ static u8 get_quick_charge_type(struct battery_chg_dev *bcdev)
 		return QUICK_CHARGE_NORMAL;
 
 	if (real_charger_type == POWER_SUPPLY_USB_TYPE_PD_PPS &&
-	    bcdev->xm_uvdm_compat_verified)
+	    bcdev->xm_uvdm_compat_verified) {
 		effective_verify = true;
+		if (!apdo_max)
+			apdo_max = XM_PD_COMPAT_APDO_MAX_W;
+	}
 
 	if (real_charger_type == POWER_SUPPLY_USB_TYPE_PD_PPS && effective_verify) {
 		if (apdo_max >= 50)

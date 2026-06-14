@@ -40,6 +40,7 @@ extern const char *const power_supply_usb_type_text[];
 #define XM_PD_PPS_TARGET_CURRENT_UA	2750000
 #define XM_PD_COMPAT_PDO2_9V3A		0x0002d12c
 #define XM_PD_COMPAT_ADAPTER_ID		ADAPTER_XIAOMI_PD_30W
+#define XM_PD_COMPAT_APDO_MAX_W		33
 #define XM_PD_RENEGOTIATION_DELAY_MS	2000
 #define XM_PD_RENEGOTIATION_CONNECTOR	1
 #define XM_UVDM_AUTH_PAYLOAD_LEN	16
@@ -191,6 +192,21 @@ static u32 xm_pd_effective_adapter_id(struct battery_chg_dev *bcdev)
 		adapter_id = XM_PD_COMPAT_ADAPTER_ID;
 
 	return adapter_id;
+}
+
+static u32 xm_pd_effective_apdo_max(struct battery_chg_dev *bcdev,
+				    u32 fw_apdo_max)
+{
+	if (fw_apdo_max)
+		return fw_apdo_max;
+
+	if (!bcdev->xm_uvdm_compat_verified || !usbpd_is_pd_active(bcdev))
+		return 0;
+
+	if (xm_pd_effective_adapter_id(bcdev) == ADAPTER_XIAOMI_PD_30W)
+		return XM_PD_COMPAT_APDO_MAX_W;
+
+	return 0;
 }
 
 static void xm_uvdm_auth_reset(struct battery_chg_dev *bcdev)
@@ -400,13 +416,15 @@ static void xm_pd_apply_power_profile(struct battery_chg_dev *bcdev,
 	union power_supply_propval val = { 0 };
 	u32 target_voltage_uv = XM_PD_PPS_TARGET_VOLTAGE_UV;
 	u32 target_current_ua = XM_PD_PPS_TARGET_CURRENT_UA;
-	int rc, current_rc, voltage_rc;
+	u32 effective_apdo_max;
+	int rc, current_rc, icl_rc, voltage_rc;
 
 	if (!usb_psy || !usbpd_is_pd_active(bcdev))
 		return;
 
 	if (bcdev->xm_pd_power_profile_applied &&
 	    bcdev->usb_current_max_ua == target_current_ua &&
+	    bcdev->usb_icl_ua == target_current_ua &&
 	    bcdev->usb_voltage_max_uv == target_voltage_uv)
 		return;
 
@@ -421,6 +439,17 @@ static void xm_pd_apply_power_profile(struct battery_chg_dev *bcdev,
 		pr_info("requested PD current_max=%d from %s\n",
 			target_current_ua, reason);
 
+	val.intval = target_current_ua;
+	icl_rc = power_supply_set_property(usb_psy,
+					   POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT,
+					   &val);
+	if (icl_rc < 0)
+		pr_err("failed to set PD input_current_limit from %s rc=%d\n",
+		       reason, icl_rc);
+	else
+		pr_info("requested PD input_current_limit=%d from %s\n",
+			target_current_ua, reason);
+
 	val.intval = target_voltage_uv;
 	voltage_rc = power_supply_set_property(usb_psy,
 					       POWER_SUPPLY_PROP_VOLTAGE_MAX,
@@ -432,7 +461,7 @@ static void xm_pd_apply_power_profile(struct battery_chg_dev *bcdev,
 		pr_info("requested PD voltage_max=%d from %s\n",
 			target_voltage_uv, reason);
 
-	rc = current_rc ? current_rc : voltage_rc;
+	rc = current_rc ? current_rc : (icl_rc ? icl_rc : voltage_rc);
 	bcdev->xm_pd_power_profile_applied = !rc;
 
 	rc = read_property_id(bcdev, usb_pst, USB_VOLT_MAX);
@@ -459,13 +488,17 @@ static void xm_pd_apply_power_profile(struct battery_chg_dev *bcdev,
 		pr_err("failed to read back APDO max after %s rc=%d\n",
 		       reason, rc);
 
-	pr_info("PD profile readback after %s: usb_vmax=%u usb_cmax=%u usb_icl=%u pdo2=%#08x apdo_max=%u\n",
+	effective_apdo_max = xm_pd_effective_apdo_max(bcdev,
+				xm_pst->prop[XM_PROP_APDO_MAX]);
+
+	pr_info("PD profile readback after %s: usb_vmax=%u usb_cmax=%u usb_icl=%u pdo2=%#08x apdo_max=%u effective_apdo_max=%u\n",
 		reason,
 		usb_pst->prop[USB_VOLT_MAX],
 		usb_pst->prop[USB_CURR_MAX],
 		usb_pst->prop[USB_INPUT_CURR_LIMIT],
 		xm_pst->prop[XM_PROP_PDO2],
-		xm_pst->prop[XM_PROP_APDO_MAX]);
+		xm_pst->prop[XM_PROP_APDO_MAX],
+		effective_apdo_max);
 }
 
 static void xm_pd_renegotiation_workfunc(struct work_struct *work)
@@ -2678,6 +2711,8 @@ static ssize_t power_max_show(struct class *c, struct class_attribute *attr,
 	};
 	struct power_supply *usb_psy = NULL;
 	int rc, usb_present = 0;
+	u32 apdo_max;
+
 	usb_psy = bcdev->psy_list[PSY_TYPE_USB].psy;
 	if (usb_psy != NULL) {
 		rc = usb_psy_get_prop(usb_psy, POWER_SUPPLY_PROP_ONLINE, &val);
@@ -2691,8 +2726,9 @@ static ssize_t power_max_show(struct class *c, struct class_attribute *attr,
 		rc = read_property_id(bcdev, xm_pst, XM_PROP_APDO_MAX);
 		if (rc < 0)
 			return rc;
-		return scnprintf(buf, PAGE_SIZE, "%u",
+		apdo_max = xm_pd_effective_apdo_max(bcdev,
 				 xm_pst->prop[XM_PROP_APDO_MAX]);
+		return scnprintf(buf, PAGE_SIZE, "%u", apdo_max);
 	}
 	pr_err("tx_adapter:%d\n", xm_pst->prop[XM_PROP_TX_ADAPTER]);
 #if defined(CONFIG_MI_WIRELESS)
@@ -3334,7 +3370,7 @@ static ssize_t xiaomi_pd_auth_debug_show(struct class *c,
 	struct psy_state *xm_pst = &bcdev->psy_list[PSY_TYPE_XM];
 	u32 usb_real_type = 0, current_state = 0, adapter_svid = 0;
 	u32 adapter_id = 0;
-	u32 pd_verified = 0, pdo2 = 0, apdo_max = 0;
+	u32 pd_verified = 0, pdo2 = 0, apdo_max = 0, effective_apdo_max;
 	bool effective_verified;
 	int len = 0;
 	int rc;
@@ -3361,6 +3397,7 @@ static ssize_t xiaomi_pd_auth_debug_show(struct class *c,
 	if (!rc)
 		apdo_max = xm_pst->prop[XM_PROP_APDO_MAX];
 	effective_verified = xm_pd_effective_verified(bcdev, pd_verified);
+	effective_apdo_max = xm_pd_effective_apdo_max(bcdev, apdo_max);
 
 	len += scnprintf(buf + len, PAGE_SIZE - len,
 			 "compat=%u altmode=%u notifier=%u state=%u last_cmd=%u ack=%u reset=%u\n",
@@ -3402,10 +3439,11 @@ static ssize_t xiaomi_pd_auth_debug_show(struct class *c,
 			 (int)sizeof(bcdev->xm_uvdm_last_rx),
 			 bcdev->xm_uvdm_last_rx);
 	len += scnprintf(buf + len, PAGE_SIZE - len,
-			 "live_usb_real=%u live_state=%u live_svid=%04x live_adapter_id=%08x override_adapter_id=%08x live_pd_verified=%u effective_pd_verified=%u live_pdo2=%08x live_apdo_max=%u\n",
+			 "live_usb_real=%u live_state=%u live_svid=%04x live_adapter_id=%08x override_adapter_id=%08x live_pd_verified=%u effective_pd_verified=%u live_pdo2=%08x live_apdo_max=%u effective_apdo_max=%u\n",
 			 usb_real_type, current_state, adapter_svid,
 			 adapter_id, bcdev->xm_adapter_id_override,
-			 pd_verified, effective_verified, pdo2, apdo_max);
+			 pd_verified, effective_verified, pdo2, apdo_max,
+			 effective_apdo_max);
 
 	return len;
 }
@@ -3466,7 +3504,9 @@ static ssize_t apdo_max_show(struct class *c, struct class_attribute *attr,
 	if (rc < 0)
 		return rc;
 
-	return scnprintf(buf, PAGE_SIZE, "%u\n", pst->prop[XM_PROP_APDO_MAX]);
+	return scnprintf(buf, PAGE_SIZE, "%u\n",
+			 xm_pd_effective_apdo_max(bcdev,
+						  pst->prop[XM_PROP_APDO_MAX]));
 }
 static CLASS_ATTR_RO(apdo_max);
 
