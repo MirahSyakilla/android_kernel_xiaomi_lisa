@@ -15,7 +15,6 @@
 #include <linux/soc/qcom/pmic_glink.h>
 #include <linux/soc/qcom/battery_charger.h>
 #include <asm/unaligned.h>
-#include <linux/usb/ucsi_glink.h>
 
 #include "qti_battery_charger.h"
 
@@ -42,7 +41,6 @@ extern const char *const power_supply_usb_type_text[];
 #define XM_PD_COMPAT_ADAPTER_ID		ADAPTER_XIAOMI_PD_30W
 #define XM_PD_COMPAT_APDO_MAX_W		33
 #define XM_PD_RENEGOTIATION_DELAY_MS	2000
-#define XM_PD_RENEGOTIATION_CONNECTOR	1
 #define XM_UVDM_AUTH_PAYLOAD_LEN	16
 #define XM_UVDM_AUTH_MSG_LEN		20
 #define XM_UVDM_AUTH_ROWS		10
@@ -417,14 +415,13 @@ static void xm_pd_apply_power_profile(struct battery_chg_dev *bcdev,
 	u32 target_voltage_uv = XM_PD_PPS_TARGET_VOLTAGE_UV;
 	u32 target_current_ua = XM_PD_PPS_TARGET_CURRENT_UA;
 	u32 effective_apdo_max;
-	int rc, current_rc, icl_rc, voltage_rc;
+	int rc, current_rc, voltage_rc;
 
 	if (!usb_psy || !usbpd_is_pd_active(bcdev))
 		return;
 
 	if (bcdev->xm_pd_power_profile_applied &&
 	    bcdev->usb_current_max_ua == target_current_ua &&
-	    bcdev->usb_icl_ua == target_current_ua &&
 	    bcdev->usb_voltage_max_uv == target_voltage_uv)
 		return;
 
@@ -439,17 +436,6 @@ static void xm_pd_apply_power_profile(struct battery_chg_dev *bcdev,
 		pr_info("requested PD current_max=%d from %s\n",
 			target_current_ua, reason);
 
-	val.intval = target_current_ua;
-	icl_rc = power_supply_set_property(usb_psy,
-					   POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT,
-					   &val);
-	if (icl_rc < 0)
-		pr_err("failed to set PD input_current_limit from %s rc=%d\n",
-		       reason, icl_rc);
-	else
-		pr_info("requested PD input_current_limit=%d from %s\n",
-			target_current_ua, reason);
-
 	val.intval = target_voltage_uv;
 	voltage_rc = power_supply_set_property(usb_psy,
 					       POWER_SUPPLY_PROP_VOLTAGE_MAX,
@@ -461,7 +447,7 @@ static void xm_pd_apply_power_profile(struct battery_chg_dev *bcdev,
 		pr_info("requested PD voltage_max=%d from %s\n",
 			target_voltage_uv, reason);
 
-	rc = current_rc ? current_rc : (icl_rc ? icl_rc : voltage_rc);
+	rc = current_rc ? current_rc : voltage_rc;
 	bcdev->xm_pd_power_profile_applied = !rc;
 
 	rc = read_property_id(bcdev, usb_pst, USB_VOLT_MAX);
@@ -533,20 +519,11 @@ static void xm_pd_renegotiation_workfunc(struct work_struct *work)
 
 	bcdev->xm_pd_renegotiation_count++;
 	bcdev->xm_pd_power_profile_applied = false;
-	pr_info("starting PD renegotiation #%u\n",
+	pr_info("starting PD profile reapply #%u\n",
 		bcdev->xm_pd_renegotiation_count);
-
-	rc = ucsi_glink_connector_reset(XM_PD_RENEGOTIATION_CONNECTOR, false);
-	if (rc < 0) {
-		bcdev->xm_pd_renegotiation_fail_count++;
-		pr_err("PD renegotiation connector reset failed rc=%d\n", rc);
-		return;
-	}
-
-	msleep(5000);
 	rc = read_property_id(bcdev, xm_pst, XM_PROP_INPUT_SUSPEND);
 	if (!rc && xm_pst->prop[XM_PROP_INPUT_SUSPEND]) {
-		pr_info("skip PD profile reapply after reset, input suspended=%u\n",
+		pr_info("skip PD profile reapply, input suspended=%u\n",
 			xm_pst->prop[XM_PROP_INPUT_SUSPEND]);
 		return;
 	}
