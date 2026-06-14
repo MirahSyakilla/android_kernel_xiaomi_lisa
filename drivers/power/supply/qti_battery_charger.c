@@ -874,6 +874,7 @@ struct quick_charge adapter_cap[11] = {
 static u8 get_quick_charge_type(struct battery_chg_dev *bcdev)
 {
 	int i = 0,verify_digiest = 0;
+	bool effective_verify = false;
 	u8 rc;
 	struct psy_state *pst = &bcdev->psy_list[PSY_TYPE_BATTERY];
 	enum power_supply_usb_type		real_charger_type = 0;
@@ -895,6 +896,7 @@ static u8 get_quick_charge_type(struct battery_chg_dev *bcdev)
 	pst = &bcdev->psy_list[PSY_TYPE_XM];
 	rc = read_property_id(bcdev, pst, XM_PROP_PD_VERIFED);
 	verify_digiest = pst->prop[XM_PROP_PD_VERIFED];
+	effective_verify = verify_digiest == 1;
 
 	rc = read_property_id(bcdev, pst, XM_PROP_APDO_MAX);
 	apdo_max =  pst->prop[XM_PROP_APDO_MAX];
@@ -908,7 +910,11 @@ static u8 get_quick_charge_type(struct battery_chg_dev *bcdev)
 	      || (batt_health == POWER_SUPPLY_HEALTH_OVERHEAT) || (batt_health == POWER_SUPPLY_HEALTH_OVERVOLTAGE))
 		return QUICK_CHARGE_NORMAL;
 
-	if (real_charger_type == POWER_SUPPLY_USB_TYPE_PD_PPS && verify_digiest == 1) {
+	if (real_charger_type == POWER_SUPPLY_USB_TYPE_PD_PPS &&
+	    bcdev->xm_uvdm_compat_verified)
+		effective_verify = true;
+
+	if (real_charger_type == POWER_SUPPLY_USB_TYPE_PD_PPS && effective_verify) {
 		if (apdo_max >= 50)
 			return QUICK_CHARGE_SUPER;
 		else

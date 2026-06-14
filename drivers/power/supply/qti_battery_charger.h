@@ -519,11 +519,26 @@ struct battery_chg_dev {
 	bool				xm_uvdm_compat_verified;
 	bool				xm_pd_power_profile_applied;
 	bool				xm_pd_auth_forced;
+	bool				xm_uvdm_auth_row_valid;
+	bool				xm_uvdm_auth_payload_valid;
+	struct delayed_work		xm_pd_renegotiation_work;
+	u32				xm_adapter_id_override;
+	u32				xm_pd_renegotiation_count;
+	u32				xm_pd_renegotiation_defer_count;
+	u32				xm_pd_renegotiation_fail_count;
 	u32				xm_uvdm_state;
 	u32				xm_uvdm_last_cmd;
+	u32				xm_uvdm_reset_count;
 	u32				xm_uvdm_rx_count;
 	u32				xm_uvdm_tx_count;
+	u32				xm_uvdm_tx_skip_count;
 	u32				xm_uvdm_tx_fail_count;
+	u32				xm_uvdm_rx_ack_count;
+	u32				xm_uvdm_rx_ack_fail_count;
+	u8				xm_uvdm_auth_row;
+	u32				xm_uvdm_auth_adapter_id;
+	u8				xm_uvdm_auth_payload[16];
+	u8				xm_uvdm_auth_response[16];
 	u32				xm_uvdm_last_tx[USBPD_UVDM_SS_LEN];
 	u8				xm_uvdm_last_rx[16];
 	/* To track the driver initialization status */

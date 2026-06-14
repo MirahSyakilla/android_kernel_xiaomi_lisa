@@ -1024,17 +1024,28 @@ static int ucsi_dr_swap(struct typec_port *port, enum typec_data_role role)
 {
 	struct ucsi_connector *con = typec_get_drvdata(port);
 	u8 partner_type;
+	u8 partner_flags;
 	u64 command;
 	int ret = 0;
 
 	mutex_lock(&con->lock);
 
 	partner_type = UCSI_CONSTAT_PARTNER_TYPE(con->status.flags);
+	partner_flags = UCSI_CONSTAT_PARTNER_FLAGS(con->status.flags);
+	dev_info(con->ucsi->dev,
+		 "con%d: data role swap request role=%s partner_type=%u partner_flags=0x%x flags=0x%x\n",
+		 con->num, role == TYPEC_HOST ? "host" : "device",
+		 partner_type, partner_flags, con->status.flags);
+
 	if ((partner_type == UCSI_CONSTAT_PARTNER_TYPE_DFP &&
 	     role == TYPEC_DEVICE) ||
 	    (partner_type == UCSI_CONSTAT_PARTNER_TYPE_UFP &&
-	     role == TYPEC_HOST))
+	     role == TYPEC_HOST)) {
+		dev_info(con->ucsi->dev,
+			 "con%d: data role already satisfies request\n",
+			 con->num);
 		goto out_unlock;
+	}
 
 	reinit_completion(&con->complete);
 
@@ -1042,15 +1053,54 @@ static int ucsi_dr_swap(struct typec_port *port, enum typec_data_role role)
 	command |= UCSI_SET_UOR_ROLE(role);
 	command |= UCSI_SET_UOR_ACCEPT_ROLE_SWAPS;
 	ret = ucsi_role_cmd(con, command);
-	if (ret < 0)
+	if (ret < 0) {
+		/*
+		 * Xiaomi's batterysecret only needs the typec class to report
+		 * host mode before it starts the private PD auth flow. Charger
+		 * partners frequently reject or do not implement data-role swap,
+		 * especially when they expose no USB data capability at all.
+		 * Treat that case as a compatibility no-op instead of failing
+		 * the userspace gate outright.
+		 */
+		if (role == TYPEC_HOST &&
+		    !(partner_flags & UCSI_CONSTAT_PARTNER_FLAG_USB) &&
+		    (ret == -EOPNOTSUPP || ret == -ETIMEDOUT)) {
+			dev_warn(con->ucsi->dev,
+				 "con%d: emulating host data role for non-USB partner ret=%d\n",
+				 con->num, ret);
+			typec_set_data_role(con->port, TYPEC_HOST);
+			ret = 0;
+			goto out_unlock;
+		}
+
+		dev_warn(con->ucsi->dev,
+			 "con%d: data role swap command failed role=%s ret=%d\n",
+			 con->num, role == TYPEC_HOST ? "host" : "device",
+			 ret);
 		goto out_unlock;
+	}
 
 	mutex_unlock(&con->lock);
 
 	if (!wait_for_completion_timeout(&con->complete,
-					 msecs_to_jiffies(UCSI_SWAP_TIMEOUT_MS)))
-		return -ETIMEDOUT;
+					 msecs_to_jiffies(UCSI_SWAP_TIMEOUT_MS))) {
+		if (role == TYPEC_HOST &&
+		    !(partner_flags & UCSI_CONSTAT_PARTNER_FLAG_USB)) {
+			dev_warn(con->ucsi->dev,
+				 "con%d: data role swap timed out on non-USB partner, emulating host mode\n",
+				 con->num);
+			typec_set_data_role(con->port, TYPEC_HOST);
+			return 0;
+		}
 
+		dev_warn(con->ucsi->dev,
+			 "con%d: data role swap timed out role=%s\n",
+			 con->num, role == TYPEC_HOST ? "host" : "device");
+		return -ETIMEDOUT;
+	}
+
+	dev_info(con->ucsi->dev, "con%d: data role swap completed role=%s\n",
+		 con->num, role == TYPEC_HOST ? "host" : "device");
 	return 0;
 
 out_unlock:

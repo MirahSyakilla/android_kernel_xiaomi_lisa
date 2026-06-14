@@ -90,6 +90,7 @@ struct ucsi_dev {
 
 static void *ucsi_ipc_log;
 static RAW_NOTIFIER_HEAD(ucsi_glink_notifier);
+static struct ucsi_dev *ucsi_qti_udev;
 
 int register_ucsi_glink_notifier(struct notifier_block *nb)
 {
@@ -102,6 +103,37 @@ int unregister_ucsi_glink_notifier(struct notifier_block *nb)
 	return raw_notifier_chain_unregister(&ucsi_glink_notifier, nb);
 }
 EXPORT_SYMBOL(unregister_ucsi_glink_notifier);
+
+int ucsi_glink_connector_reset(u8 connector, bool hard)
+{
+	struct ucsi_dev *udev = ucsi_qti_udev;
+	u64 command;
+	int rc;
+
+	if (!udev || !udev->ucsi || !udev->ucsi->connector)
+		return -ENODEV;
+
+	if (atomic_read(&udev->state) == PMIC_GLINK_STATE_DOWN)
+		return -ENOTCONN;
+
+	if (!connector || connector > udev->ucsi->cap.num_connectors)
+		return -EINVAL;
+
+	command = UCSI_CONNECTOR_RESET | UCSI_CONNECTOR_NUMBER(connector);
+	if (hard)
+		command |= UCSI_CONNECTOR_RESET_HARD;
+
+	dev_info(udev->dev, "connector%u %s reset requested\n",
+		 connector, hard ? "hard" : "soft");
+
+	rc = ucsi_send_command(udev->ucsi, command, NULL, 0);
+	if (rc < 0)
+		dev_warn(udev->dev, "connector%u reset failed rc=%d\n",
+			 connector, rc);
+
+	return rc;
+}
+EXPORT_SYMBOL(ucsi_glink_connector_reset);
 
 static char *offset_to_name(unsigned int offset)
 {
@@ -603,6 +635,7 @@ static int ucsi_probe(struct platform_device *pdev)
 
 	platform_set_drvdata(pdev, udev);
 	udev->dev = dev;
+	ucsi_qti_udev = udev;
 
 	ucsi_ipc_log = ipc_log_context_create(NUM_LOG_PAGES, "ucsi", 0);
 	if (!ucsi_ipc_log)
@@ -610,6 +643,8 @@ static int ucsi_probe(struct platform_device *pdev)
 
 	rc = ucsi_setup(udev);
 	if (rc) {
+		if (ucsi_qti_udev == udev)
+			ucsi_qti_udev = NULL;
 		ipc_log_context_destroy(ucsi_ipc_log);
 		ucsi_ipc_log = NULL;
 		pmic_glink_unregister_client(udev->client);
@@ -623,6 +658,9 @@ static int ucsi_remove(struct platform_device *pdev)
 	struct device *dev = &pdev->dev;
 	struct ucsi_dev *udev = dev_get_drvdata(dev);
 	int rc;
+
+	if (ucsi_qti_udev == udev)
+		ucsi_qti_udev = NULL;
 
 	cancel_work_sync(&udev->notify_work);
 	ucsi_unregister(udev->ucsi);

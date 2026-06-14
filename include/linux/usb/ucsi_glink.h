@@ -7,6 +7,7 @@
 #define __UCSI_GLINK_H__
 
 #include <linux/errno.h>
+#include <linux/types.h>
 #include <linux/usb/typec.h>
 
 struct ucsi_glink_constat_info {
@@ -23,6 +24,7 @@ struct notifier_block;
 
 int register_ucsi_glink_notifier(struct notifier_block *nb);
 int unregister_ucsi_glink_notifier(struct notifier_block *nb);
+int ucsi_glink_connector_reset(u8 connector, bool hard);
 
 #else
 
@@ -32,6 +34,11 @@ static inline int register_ucsi_glink_notifier(struct notifier_block *nb)
 }
 
 static inline int unregister_ucsi_glink_notifier(struct notifier_block *nb)
+{
+	return -ENODEV;
+}
+
+static inline int ucsi_glink_connector_reset(u8 connector, bool hard)
 {
 	return -ENODEV;
 }
