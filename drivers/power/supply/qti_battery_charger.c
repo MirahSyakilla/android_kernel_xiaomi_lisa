@@ -1114,16 +1114,79 @@ static int __battery_psy_set_charge_current(struct battery_chg_dev *bcdev,
 	return rc;
 }
 
+static bool battery_chg_defer_thermal_level(struct battery_chg_dev *bcdev,
+					    int val)
+{
+	struct psy_state *pst = &bcdev->psy_list[PSY_TYPE_BATTERY];
+	int rc, raw_temp = 0, temp = 0, soc = 0;
+	bool have_temp = false, have_soc = false;
+
+	if (val <= 0 || bcdev->charge_policy_temp_c <= 0 ||
+	    bcdev->charge_policy_soc <= 0)
+		return false;
+
+	rc = read_property_id(bcdev, pst, BATT_TEMP);
+	if (!rc) {
+		raw_temp = pst->prop[BATT_TEMP];
+		temp = DIV_ROUND_CLOSEST(raw_temp, 10);
+		if (temp > 100)
+			temp = DIV_ROUND_CLOSEST(temp, 10);
+		have_temp = true;
+	} else {
+		pr_err("Failed to read battery temp before ccl:%d, rc=%d\n",
+		       val, rc);
+	}
+
+	rc = read_property_id(bcdev, pst, BATT_CAPACITY);
+	if (!rc) {
+		soc = DIV_ROUND_CLOSEST(pst->prop[BATT_CAPACITY], 100);
+		have_soc = true;
+	} else {
+		pr_err("Failed to read battery SOC before ccl:%d, rc=%d\n",
+		       val, rc);
+	}
+
+	if (!have_temp || !have_soc ||
+	    temp >= bcdev->charge_policy_temp_c ||
+	    soc >= bcdev->charge_policy_soc)
+		return false;
+
+	bcdev->deferred_thermal_level = val;
+	pr_info("defer thermal-level:%d temp:%d(raw:%d)/%uC soc:%d%%/%u%%\n",
+		val, temp, raw_temp, bcdev->charge_policy_temp_c, soc,
+		bcdev->charge_policy_soc);
+	mod_delayed_work(system_wq, &bcdev->charge_policy_work,
+			 msecs_to_jiffies(CHARGE_POLICY_RECHECK_MS));
+
+	return true;
+}
+
+static int battery_chg_map_thermal_level(struct battery_chg_dev *bcdev, int val)
+{
+	u32 fw_max = bcdev->fw_thermal_level_max;
+	int mapped;
+
+	if (val < 0 || val <= bcdev->num_thermal_levels)
+		return val;
+
+	if (!fw_max || fw_max <= bcdev->num_thermal_levels || val > fw_max)
+		return val;
+
+	mapped = DIV_ROUND_UP((u32)val * bcdev->num_thermal_levels, fw_max);
+	mapped = clamp_t(int, mapped, 1, bcdev->num_thermal_levels);
+
+	pr_info("map thermal-level:%d/%u to lisa level:%d/%d\n",
+		val, fw_max, mapped, bcdev->num_thermal_levels);
+
+	return mapped;
+}
+
 static int battery_psy_set_charge_current(struct battery_chg_dev *bcdev,
 					int val)
 {
-	int rc;
+	struct psy_state *pst = &bcdev->psy_list[PSY_TYPE_BATTERY];
+	int rc, raw_val = val;
 	//u32 fcc_ua, prev_fcc_ua;
-
-	if(val == bcdev->curr_thermal_level)
-	      return 0;
-	pr_err("set thermal-level: %d max_thermal_level: %d\n",
-	       val, bcdev->num_thermal_levels);
 
 	if (!bcdev->num_thermal_levels)
 		return 0;
@@ -1133,15 +1196,33 @@ static int battery_psy_set_charge_current(struct battery_chg_dev *bcdev,
 		return -EINVAL;
 	}
 
+	val = battery_chg_map_thermal_level(bcdev, val);
+
+	if (!val && bcdev->deferred_thermal_level) {
+		bcdev->deferred_thermal_level = 0;
+		cancel_delayed_work(&bcdev->charge_policy_work);
+	}
+
+	if (val == bcdev->curr_thermal_level)
+	      return 0;
+
+	pr_err("set thermal-level: %d mapped:%d max_thermal_level: %d fw_max:%u\n",
+	       raw_val, val, bcdev->num_thermal_levels,
+	       bcdev->fw_thermal_level_max);
+
 	if (val < 0 || val > bcdev->num_thermal_levels)
 		return -EINVAL;
 
-	rc = write_property_id(bcdev, &bcdev->psy_list[PSY_TYPE_BATTERY],
-				BATT_CHG_CTRL_LIM, val);
+	if (battery_chg_defer_thermal_level(bcdev, val))
+		return 0;
+
+	rc = write_property_id(bcdev, pst, BATT_CHG_CTRL_LIM, val);
 	if (rc < 0)
 		pr_err("Failed to set ccl:%d, rc=%d\n", val, rc);
 
 	bcdev->curr_thermal_level = val;
+	if (val == 0 || val >= bcdev->deferred_thermal_level)
+		bcdev->deferred_thermal_level = 0;
 
 #if 0
 	fcc_ua = bcdev->thermal_levels[val];
@@ -1156,6 +1237,23 @@ static int battery_psy_set_charge_current(struct battery_chg_dev *bcdev,
 #endif
 
 	return rc;
+}
+
+static void battery_chg_charge_policy_work(struct work_struct *work)
+{
+	struct battery_chg_dev *bcdev = container_of(work,
+			struct battery_chg_dev, charge_policy_work.work);
+	int val = bcdev->deferred_thermal_level;
+
+	if (!val || !bcdev->initialized)
+		return;
+
+	if (val > bcdev->num_thermal_levels) {
+		bcdev->deferred_thermal_level = 0;
+		return;
+	}
+
+	battery_psy_set_charge_current(bcdev, val);
 }
 
 static int battery_psy_get_prop(struct power_supply *psy,
@@ -2082,6 +2180,12 @@ static int battery_chg_parse_dt(struct battery_chg_dev *bcdev)
 
 	of_property_read_string(node, "qcom,wireless-fw-name",
 				&bcdev->wls_fw_name);
+	of_property_read_u32(node, "mi,charge-policy-temp-c",
+			     &bcdev->charge_policy_temp_c);
+	of_property_read_u32(node, "mi,charge-policy-soc",
+			     &bcdev->charge_policy_soc);
+	of_property_read_u32(node, "mi,fw-thermal-level-max",
+			     &bcdev->fw_thermal_level_max);
 
 	rc = of_property_count_elems_of_size(node, "qcom,thermal-mitigation",
 						sizeof(u32));
@@ -2123,6 +2227,10 @@ static int battery_chg_parse_dt(struct battery_chg_dev *bcdev)
 	 * instead of the firmware's broader generic level count.
 	 */
 	bcdev->num_thermal_levels = len - 1;
+	if (!bcdev->fw_thermal_level_max)
+		bcdev->fw_thermal_level_max = MAX_THERMAL_LEVEL;
+	if (bcdev->fw_thermal_level_max < bcdev->num_thermal_levels)
+		bcdev->fw_thermal_level_max = bcdev->num_thermal_levels;
 	bcdev->thermal_fcc_ua = pst->prop[BATT_CHG_CTRL_LIM_MAX];
 
 	bcdev->support_wireless_charge = of_property_read_bool(node, "mi,support-wireless");
@@ -2276,6 +2384,8 @@ static int battery_chg_probe(struct platform_device *pdev)
 	INIT_WORK(&bcdev->subsys_up_work, battery_chg_subsys_up_work);
 	INIT_WORK(&bcdev->usb_type_work, battery_chg_update_usb_type_work);
 	INIT_WORK(&bcdev->fb_notifier_work, battery_chg_fb_notifier_work);
+	INIT_DELAYED_WORK(&bcdev->charge_policy_work,
+			  battery_chg_charge_policy_work);
 
 	atomic_set(&bcdev->state, PMIC_GLINK_STATE_UP);
 	bcdev->dev = dev;
@@ -2388,6 +2498,7 @@ static int battery_chg_remove(struct platform_device *pdev)
 	cancel_work_sync(&bcdev->subsys_up_work);
 	cancel_work_sync(&bcdev->usb_type_work);
 	cancel_work_sync(&bcdev->fb_notifier_work);
+	cancel_delayed_work_sync(&bcdev->charge_policy_work);
 	cancel_delayed_work_sync(&bcdev->xm_prop_change_work);
 	cancel_delayed_work_sync(&bcdev->charger_debug_info_print_work);
 	qti_battery_charger_xiaomi_deinit(bcdev);

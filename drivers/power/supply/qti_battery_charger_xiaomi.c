@@ -192,13 +192,33 @@ static u32 xm_pd_effective_adapter_id(struct battery_chg_dev *bcdev)
 	return adapter_id;
 }
 
+static bool xm_pd_effective_verified(struct battery_chg_dev *bcdev,
+				     u32 fw_verified)
+{
+	if (fw_verified)
+		return true;
+
+	return bcdev->xm_uvdm_compat_verified && usbpd_is_pd_active(bcdev);
+}
+
+static bool xm_pd_session_verified(struct battery_chg_dev *bcdev)
+{
+	struct psy_state *pst = &bcdev->psy_list[PSY_TYPE_XM];
+	u32 fw_verified = 0;
+
+	if (!read_property_id(bcdev, pst, XM_PROP_PD_VERIFED))
+		fw_verified = pst->prop[XM_PROP_PD_VERIFED];
+
+	return xm_pd_effective_verified(bcdev, fw_verified);
+}
+
 static u32 xm_pd_effective_apdo_max(struct battery_chg_dev *bcdev,
 				    u32 fw_apdo_max)
 {
 	if (fw_apdo_max)
 		return fw_apdo_max;
 
-	if (!bcdev->xm_uvdm_compat_verified || !usbpd_is_pd_active(bcdev))
+	if (!usbpd_is_pd_active(bcdev) || !xm_pd_session_verified(bcdev))
 		return 0;
 
 	if (xm_pd_effective_adapter_id(bcdev) == ADAPTER_XIAOMI_PD_30W)
@@ -420,10 +440,32 @@ static void xm_pd_apply_power_profile(struct battery_chg_dev *bcdev,
 	if (!usb_psy || !usbpd_is_pd_active(bcdev))
 		return;
 
-	if (bcdev->xm_pd_power_profile_applied &&
-	    bcdev->usb_current_max_ua == target_current_ua &&
-	    bcdev->usb_voltage_max_uv == target_voltage_uv)
+	if (bcdev->xm_pd_power_profile_applied) {
+		rc = read_property_id(bcdev, usb_pst, USB_CURR_MAX);
+		if (rc < 0)
+			pr_err("failed to read USB current_max before %s rc=%d\n",
+			       reason, rc);
+
+		rc = read_property_id(bcdev, usb_pst, USB_VOLT_MAX);
+		if (rc < 0)
+			pr_err("failed to read USB voltage_max before %s rc=%d\n",
+			       reason, rc);
+
+		if (usb_pst->prop[USB_CURR_MAX] == target_current_ua &&
+		    usb_pst->prop[USB_VOLT_MAX] == target_voltage_uv)
+			return;
+
+		pr_info("PD profile drift before %s: usb_vmax=%u usb_cmax=%u target_vmax=%u target_cmax=%u\n",
+			reason, usb_pst->prop[USB_VOLT_MAX],
+			usb_pst->prop[USB_CURR_MAX],
+			target_voltage_uv, target_current_ua);
+	}
+
+	if (!xm_pd_session_verified(bcdev)) {
+		pr_info("skip PD profile apply from %s, session not verified\n",
+			reason);
 		return;
+	}
 
 	val.intval = target_current_ua;
 	current_rc = power_supply_set_property(usb_psy,
@@ -511,7 +553,7 @@ static void xm_pd_renegotiation_workfunc(struct work_struct *work)
 	}
 
 	active = usbpd_is_pd_active(bcdev);
-	if (!active || !bcdev->xm_uvdm_compat_verified) {
+	if (!active || !xm_pd_session_verified(bcdev)) {
 		pr_info("skip PD renegotiation active=%u compat_verified=%u\n",
 			active, bcdev->xm_uvdm_compat_verified);
 		return;
@@ -538,7 +580,7 @@ static void xm_pd_schedule_renegotiation(struct battery_chg_dev *bcdev,
 	if (!bcdev->initialized)
 		return;
 
-	if (!bcdev->xm_uvdm_compat_verified)
+	if (!xm_pd_session_verified(bcdev))
 		return;
 
 	pr_info("schedule PD renegotiation from %s delay=%u ms\n",
@@ -595,15 +637,6 @@ static bool usbpd_is_pd_active(struct battery_chg_dev *bcdev)
 	default:
 		return false;
 	}
-}
-
-static bool xm_pd_effective_verified(struct battery_chg_dev *bcdev,
-				     u32 fw_verified)
-{
-	if (fw_verified)
-		return true;
-
-	return bcdev->xm_uvdm_compat_verified && usbpd_is_pd_active(bcdev);
 }
 
 static void xm_pd_auth_compat_reset(struct battery_chg_dev *bcdev,
@@ -2754,7 +2787,7 @@ static ssize_t input_suspend_store(struct class *c,
 
 	if (val)
 		cancel_delayed_work_sync(&bcdev->xm_pd_renegotiation_work);
-	else if (bcdev->xm_uvdm_compat_verified)
+	else if (xm_pd_session_verified(bcdev))
 		xm_pd_schedule_renegotiation(bcdev, "input_suspend_store",
 					     XM_PD_RENEGOTIATION_DELAY_MS);
 

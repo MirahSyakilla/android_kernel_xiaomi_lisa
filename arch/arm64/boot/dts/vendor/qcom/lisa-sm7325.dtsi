@@ -11,10 +11,13 @@ And public attribution of xiaomi platforms
 &battery_charger {
 	/*
 	 * The Xiaomi firmware consumes charge_control_limit as a raw thermal
-	 * level. Keep Lisa capped at raw level 5; higher generic SM7325 levels
-	 * clamp wired FCC too aggressively during PD/PPS/turbo charging.
+	 * level. The driver maps broader firmware levels onto Lisa's smaller
+	 * table so legacy userspace requests still throttle proportionally.
 	 */
 	qcom,thermal-mitigation = <5000000 4400000 4000000 3000000 1500000 500000>;
+	mi,fw-thermal-level-max = <16>;
+	mi,charge-policy-temp-c = <40>;
+	mi,charge-policy-soc = <85>;
 };
 
 &pm8350c_rgb {

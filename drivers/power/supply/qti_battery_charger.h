@@ -49,6 +49,7 @@
 #define WLS_FW_UPDATE_TIME_MS		1000
 #define WLS_FW_BUF_SIZE			128
 #define DEFAULT_RESTRICT_FCC_UA		1000000
+#define CHARGE_POLICY_RECHECK_MS	5000
 
 #if defined(CONFIG_BQ_FG_1S)
 #define BATTERY_DIGEST_LEN 32
@@ -481,6 +482,11 @@ struct battery_chg_dev {
 	int				curr_thermal_level;
 	int				curr_wlsthermal_level;
 	int				num_thermal_levels;
+	u32				fw_thermal_level_max;
+	u32				charge_policy_temp_c;
+	u32				charge_policy_soc;
+	int				deferred_thermal_level;
+	struct delayed_work		charge_policy_work;
 	atomic_t			state;
 	struct work_struct		subsys_up_work;
 	struct work_struct		usb_type_work;
