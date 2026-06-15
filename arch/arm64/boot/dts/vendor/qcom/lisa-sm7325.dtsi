@@ -8,6 +8,15 @@ And public attribution of xiaomi platforms
 #include "camera/lisa-sm7325-camera-sensor.dtsi"
 #include "lisa-audio-overlay.dtsi"
 
+&battery_charger {
+	/*
+	 * The Xiaomi firmware consumes charge_control_limit as a raw thermal
+	 * level. Keep Lisa capped at raw level 5; higher generic SM7325 levels
+	 * clamp wired FCC too aggressively during PD/PPS/turbo charging.
+	 */
+	qcom,thermal-mitigation = <5000000 4400000 4000000 3000000 1500000 500000>;
+};
+
 &pm8350c_rgb {
 	status = "disabled";
 };

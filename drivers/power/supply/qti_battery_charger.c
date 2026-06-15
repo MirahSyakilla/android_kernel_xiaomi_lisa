@@ -1122,7 +1122,8 @@ static int battery_psy_set_charge_current(struct battery_chg_dev *bcdev,
 
 	if(val == bcdev->curr_thermal_level)
 	      return 0;
-	pr_err("set thermal-level: %d num_thermal_levels: %d \n", val, bcdev->num_thermal_levels);
+	pr_err("set thermal-level: %d max_thermal_level: %d\n",
+	       val, bcdev->num_thermal_levels);
 
 	if (!bcdev->num_thermal_levels)
 		return 0;
@@ -1132,7 +1133,7 @@ static int battery_psy_set_charge_current(struct battery_chg_dev *bcdev,
 		return -EINVAL;
 	}
 
-	if (val < 0 || val >= bcdev->num_thermal_levels)
+	if (val < 0 || val > bcdev->num_thermal_levels)
 		return -EINVAL;
 
 	rc = write_property_id(bcdev, &bcdev->psy_list[PSY_TYPE_BATTERY],
@@ -2078,7 +2079,6 @@ static int battery_chg_parse_dt(struct battery_chg_dev *bcdev)
 	struct device_node *node = bcdev->dev->of_node;
 	struct psy_state *pst = &bcdev->psy_list[PSY_TYPE_BATTERY];
 	int rc, len;
-	//u32 prev,i, val;
 
 	of_property_read_string(node, "qcom,wireless-fw-name",
 				&bcdev->wls_fw_name);
@@ -2090,31 +2090,12 @@ static int battery_chg_parse_dt(struct battery_chg_dev *bcdev)
 
 	len = rc;
 
-#if 0
 	rc = read_property_id(bcdev, pst, BATT_CHG_CTRL_LIM_MAX);
 	if (rc < 0) {
 		pr_err("Failed to read prop BATT_CHG_CTRL_LIM_MAX, rc=%d\n",
 			rc);
 		return rc;
 	}
-
-	prev = pst->prop[BATT_CHG_CTRL_LIM_MAX];
-
-	for (i = 0; i < len; i++) {
-		rc = of_property_read_u32_index(node, "qcom,thermal-mitigation",
-						i, &val);
-		if (rc < 0)
-			return rc;
-
-		if (val > prev) {
-			pr_err("Thermal levels should be in descending order\n");
-			bcdev->num_thermal_levels = -EINVAL;
-			return 0;
-		}
-
-		prev = val;
-	}
-#endif
 
 	bcdev->thermal_levels = devm_kcalloc(bcdev->dev, len + 1,
 					sizeof(*bcdev->thermal_levels),
@@ -2136,7 +2117,12 @@ static int battery_chg_parse_dt(struct battery_chg_dev *bcdev)
 		return rc;
 	}
 
-	bcdev->num_thermal_levels = MAX_THERMAL_LEVEL;
+	/*
+	 * Xiaomi firmware consumes BATT_CHG_CTRL_LIM as a raw thermal level.
+	 * The DT table enumerates valid levels, so expose its highest index
+	 * instead of the firmware's broader generic level count.
+	 */
+	bcdev->num_thermal_levels = len - 1;
 	bcdev->thermal_fcc_ua = pst->prop[BATT_CHG_CTRL_LIM_MAX];
 
 	bcdev->support_wireless_charge = of_property_read_bool(node, "mi,support-wireless");
