@@ -368,6 +368,18 @@ static bool rcu_nocb_flush_bypass(struct rcu_data *rdp, struct rcu_head *rhp,
 	return rcu_nocb_do_flush_bypass(rdp, rhp, j, lazy);
 }
 
+static bool rcu_nocb_flush_bypass_remote(struct rcu_data *rdp, unsigned long j)
+{
+	if (!rcu_rdp_is_offloaded(rdp))
+		return true;
+
+	rcu_lockdep_assert_cblist_protected(rdp);
+	lockdep_assert_irqs_disabled();
+	raw_spin_lock(&rdp->nocb_bypass_lock);
+
+	return rcu_nocb_do_flush_bypass(rdp, NULL, j, false);
+}
+
 /*
  * If the ->nocb_bypass_lock is immediately available, flush the
  * ->nocb_bypass queue into ->cblist.
@@ -1255,7 +1267,7 @@ lazy_rcu_shrink_scan(struct shrinker *shrink, struct shrink_control *sc)
 			rcu_nocb_unlock_irqrestore(rdp, flags);
 			continue;
 		}
-		WARN_ON_ONCE(!rcu_nocb_flush_bypass(rdp, NULL, jiffies, false));
+		WARN_ON_ONCE(!rcu_nocb_flush_bypass_remote(rdp, jiffies));
 		rcu_nocb_unlock_irqrestore(rdp, flags);
 		wake_nocb_gp(rdp, false);
 		sc->nr_to_scan -= _count;
