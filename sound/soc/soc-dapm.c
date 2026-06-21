@@ -48,6 +48,11 @@
 	for ((dir) = SND_SOC_DAPM_DIR_IN; (dir) <= SND_SOC_DAPM_DIR_OUT; \
 		(dir)++)
 
+static inline unsigned int dapm_shr_bound(unsigned int val, unsigned int shift)
+{
+	return val >> min_t(unsigned int, shift, BITS_PER_TYPE(val) - 1);
+}
+
 static int snd_soc_dapm_add_path(struct snd_soc_dapm_context *dapm,
 	struct snd_soc_dapm_widget *wsource, struct snd_soc_dapm_widget *wsink,
 	const char *control,
@@ -760,7 +765,7 @@ static int dapm_connect_mux(struct snd_soc_dapm_context *dapm,
 
 	if (e->reg != SND_SOC_NOPM) {
 		soc_dapm_read(dapm, e->reg, &val);
-		val = (val >> e->shift_l) & e->mask;
+		val = dapm_shr_bound(val, e->shift_l) & e->mask;
 		item = snd_soc_enum_val_to_item(e, val);
 	} else {
 		/* since a virtual mux has no backing registers to
@@ -814,7 +819,7 @@ static void dapm_set_mixer_path_status(struct snd_soc_dapm_path *p, int i,
 				soc_dapm_read(p->sink->dapm, mc->rreg, &val);
 			val = (val >> mc->rshift) & mask;
 		} else {
-			val = (val >> shift) & mask;
+			val = dapm_shr_bound(val, shift) & mask;
 		}
 		if (invert)
 			val = max - val;
