@@ -1,5 +1,6 @@
 #include <linux/kernel.h>
 #include <linux/lz4.h>
+#include <linux/mm.h>
 #include <linux/slab.h>
 #include <linux/vmalloc.h>
 
@@ -14,13 +15,37 @@ struct lz4_ctx {
 
 static void lz4_release_params(struct zcomp_params *params)
 {
+	LZ4_stream_t *dict_stream = params->drv_data;
+
+	params->drv_data = NULL;
+	if (!dict_stream)
+		return;
+
+	kvfree(dict_stream);
 }
 
 static int lz4_setup_params(struct zcomp_params *params)
 {
+	LZ4_stream_t *dict_stream;
+	int ret;
+
 	if (params->level == ZCOMP_PARAM_NO_LEVEL)
 		params->level = LZ4_ACCELERATION_DEFAULT;
 
+	if (!params->dict || !params->dict_sz)
+		return 0;
+
+	dict_stream = kvzalloc(sizeof(*dict_stream), GFP_KERNEL);
+	if (!dict_stream)
+		return -ENOMEM;
+
+	ret = LZ4_loadDict(dict_stream, params->dict, params->dict_sz);
+	if (ret != params->dict_sz) {
+		kvfree(dict_stream);
+		return -EINVAL;
+	}
+
+	params->drv_data = dict_stream;
 	return 0;
 }
 
@@ -32,8 +57,8 @@ static void lz4_destroy(struct zcomp_ctx *ctx)
 		return;
 
 	vfree(zctx->mem);
-	kfree(zctx->dstrm);
-	kfree(zctx->cstrm);
+	kvfree(zctx->dstrm);
+	kvfree(zctx->cstrm);
 	kfree(zctx);
 }
 
@@ -51,11 +76,11 @@ static int lz4_create(struct zcomp_params *params, struct zcomp_ctx *ctx)
 		if (!zctx->mem)
 			goto error;
 	} else {
-		zctx->dstrm = kzalloc(sizeof(*zctx->dstrm), GFP_KERNEL);
+		zctx->dstrm = kvzalloc(sizeof(*zctx->dstrm), GFP_KERNEL);
 		if (!zctx->dstrm)
 			goto error;
 
-		zctx->cstrm = kzalloc(sizeof(*zctx->cstrm), GFP_KERNEL);
+		zctx->cstrm = kvzalloc(sizeof(*zctx->cstrm), GFP_KERNEL);
 		if (!zctx->cstrm)
 			goto error;
 	}
@@ -79,9 +104,7 @@ static int lz4_compress(struct zcomp_params *params, struct zcomp_ctx *ctx,
 					zctx->mem);
 	} else {
 		/* Cstrm needs to be reset */
-		ret = LZ4_loadDict(zctx->cstrm, params->dict, params->dict_sz);
-		if (ret != params->dict_sz)
-			return -EINVAL;
+		memcpy(zctx->cstrm, params->drv_data, sizeof(*zctx->cstrm));
 		ret = LZ4_compress_fast_continue(zctx->cstrm, req->src,
 						 req->dst, req->src_len,
 						 req->dst_len, params->level);
