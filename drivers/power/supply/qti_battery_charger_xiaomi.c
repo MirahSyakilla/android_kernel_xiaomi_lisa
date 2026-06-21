@@ -2983,6 +2983,14 @@ static void usbpd_request_vdm_cmd(struct battery_chg_dev *bcdev,
 		val = *data;
 		break;
 	case USBPD_UVDM_VERIFIED:
+		if (bcdev->xm_pd_auth_compat &&
+		    bcdev->xm_uvdm_state != USBPD_UVDM_VERIFIED) {
+			pr_err("usbpd_request_vdm_cmd: reject verified cmd outside auth flow state=%u\n",
+			       bcdev->xm_uvdm_state);
+			xm_pd_auth_compat_reset(bcdev, usbpd_is_pd_active(bcdev),
+						"uvdm_verified_out_of_order");
+			return;
+		}
 		prop_id = XM_PROP_VDM_CMD_VERIFIED;
 		val = *data;
 		break;
@@ -3000,15 +3008,19 @@ static void usbpd_request_vdm_cmd(struct battery_chg_dev *bcdev,
 	} else
 		rc = write_property_id(bcdev, pst, prop_id, val);
 
+	if (rc < 0) {
+		pr_err("usbpd_request_vdm_cmd: failed cmd=%d prop=%u rc=%d\n",
+		       cmd, prop_id, rc);
+		if (bcdev->xm_pd_auth_compat)
+			xm_pd_auth_compat_reset(bcdev, usbpd_is_pd_active(bcdev),
+						"uvdm_write_failed");
+		return;
+	}
+
 	xm_altmode_send_uvdm(bcdev, cmd, data);
 	xm_pd_auth_compat_advance(bcdev, cmd, data);
 
-	if (rc < 0)
-		pr_err("usbpd_request_vdm_cmd: failed cmd=%d prop=%u rc=%d\n",
-		       cmd, prop_id, rc);
-	else
-		pr_info("usbpd_request_vdm_cmd: sent cmd=%d prop=%u\n",
-			cmd, prop_id);
+	pr_info("usbpd_request_vdm_cmd: sent cmd=%d prop=%u\n", cmd, prop_id);
 }
 
 static bool usbpd_vdm_cmd_requires_data(enum uvdm_state cmd)
@@ -3329,6 +3341,14 @@ static ssize_t pd_verifed_store(struct class *c, struct class_attribute *attr,
 
 	if (kstrtobool(buf, &val))
 		return -EINVAL;
+
+	if (val && bcdev->xm_pd_auth_compat &&
+	    !bcdev->xm_uvdm_compat_verified) {
+		pr_err("pd_verifed_store: reject verified without successful UVDM auth\n");
+		xm_pd_auth_compat_reset(bcdev, usbpd_is_pd_active(bcdev),
+					"pd_verifed_without_auth");
+		return -EPROTO;
+	}
 
 	rc = write_property_id(bcdev, pst, XM_PROP_PD_VERIFED, val);
 	if (rc < 0)
