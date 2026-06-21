@@ -22,9 +22,88 @@
 #include <linux/smp.h>
 #include <trace/hooks/topology.h>
 
+static DEFINE_PER_CPU(struct scale_freq_data *, sft_data);
+static struct cpumask scale_freq_counters_mask;
+static bool scale_freq_invariant;
+
+static bool supports_scale_freq_counters(const struct cpumask *cpus)
+{
+	return cpumask_subset(cpus, &scale_freq_counters_mask);
+}
+
 bool topology_scale_freq_invariant(void)
 {
-	return cpufreq_supports_freq_invariance();
+	return cpufreq_supports_freq_invariance() ||
+	       supports_scale_freq_counters(cpu_online_mask);
+}
+
+static void update_scale_freq_invariant(bool status)
+{
+	if (scale_freq_invariant == status)
+		return;
+
+	/*
+	 * Task scheduler behavior depends on frequency invariance support,
+	 * either cpufreq or counter driven. If the support status changes as a
+	 * result of counter initialization and use, retrigger the build of
+	 * scheduling domains to ensure the information is propagated properly.
+	 */
+	if (topology_scale_freq_invariant() == status) {
+		scale_freq_invariant = status;
+		rebuild_sched_domains();
+	}
+}
+
+void topology_set_scale_freq_source(struct scale_freq_data *data,
+				    const struct cpumask *cpus)
+{
+	struct scale_freq_data *sfd;
+	int cpu;
+
+	/*
+	 * Avoid rebuilding scheduling domains unnecessarily if cpufreq already
+	 * provides frequency invariance.
+	 */
+	if (cpumask_empty(&scale_freq_counters_mask))
+		scale_freq_invariant = topology_scale_freq_invariant();
+
+	for_each_cpu(cpu, cpus) {
+		sfd = per_cpu(sft_data, cpu);
+
+		/* Use arch-provided counters whenever possible. */
+		if (!sfd || sfd->source != SCALE_FREQ_SOURCE_ARCH) {
+			per_cpu(sft_data, cpu) = data;
+			cpumask_set_cpu(cpu, &scale_freq_counters_mask);
+		}
+	}
+
+	update_scale_freq_invariant(true);
+}
+
+void topology_clear_scale_freq_source(enum scale_freq_source source,
+				      const struct cpumask *cpus)
+{
+	struct scale_freq_data *sfd;
+	int cpu;
+
+	for_each_cpu(cpu, cpus) {
+		sfd = per_cpu(sft_data, cpu);
+
+		if (sfd && sfd->source == source) {
+			per_cpu(sft_data, cpu) = NULL;
+			cpumask_clear_cpu(cpu, &scale_freq_counters_mask);
+		}
+	}
+
+	update_scale_freq_invariant(false);
+}
+
+void topology_scale_freq_tick(void)
+{
+	struct scale_freq_data *sfd = *this_cpu_ptr(&sft_data);
+
+	if (sfd)
+		sfd->set_freq_scale();
 }
 
 DEFINE_PER_CPU(unsigned long, freq_scale) = SCHED_CAPACITY_SCALE;
@@ -39,6 +118,13 @@ void arch_set_freq_scale(const struct cpumask *cpus, unsigned long cur_freq,
 	int i;
 
 	if (WARN_ON_ONCE(!cur_freq || !max_freq))
+		return;
+
+	/*
+	 * If counter-based frequency invariance is enabled, keep CPUFREQ from
+	 * overwriting the scale factor updated from arch_scale_freq_tick().
+	 */
+	if (supports_scale_freq_counters(cpus))
 		return;
 
 	scale = (cur_freq << SCHED_CAPACITY_SHIFT) / max_freq;
