@@ -25,14 +25,21 @@ struct vmpressure {
 	struct mutex events_lock;
 
 	struct work_struct work;
+
+	atomic_long_t users;
+	rwlock_t users_lock;
 };
 
 struct mem_cgroup;
 
 #ifdef CONFIG_MEMCG
 extern void vmpressure(gfp_t gfp, struct mem_cgroup *memcg, bool tree,
-		       unsigned long scanned, unsigned long reclaimed);
-extern void vmpressure_prio(gfp_t gfp, struct mem_cgroup *memcg, int prio);
+		       unsigned long scanned, unsigned long reclaimed,
+		       int order);
+extern void vmpressure_prio(gfp_t gfp, struct mem_cgroup *memcg, int prio,
+			    int order);
+extern bool vmpressure_inc_users(int order);
+extern void vmpressure_dec_users(void);
 
 extern void vmpressure_init(struct vmpressure *vmpr);
 extern void vmpressure_cleanup(struct vmpressure *vmpr);
@@ -45,8 +52,11 @@ extern void vmpressure_unregister_event(struct mem_cgroup *memcg,
 					struct eventfd_ctx *eventfd);
 #else
 static inline void vmpressure(gfp_t gfp, struct mem_cgroup *memcg, bool tree,
-			      unsigned long scanned, unsigned long reclaimed) {}
+			      unsigned long scanned, unsigned long reclaimed,
+			      int order) {}
 static inline void vmpressure_prio(gfp_t gfp, struct mem_cgroup *memcg,
-				   int prio) {}
+				   int prio, int order) {}
+static inline bool vmpressure_inc_users(int order) { return false; }
+static inline void vmpressure_dec_users(void) {}
 #endif /* CONFIG_MEMCG */
 #endif /* __LINUX_VMPRESSURE_H */

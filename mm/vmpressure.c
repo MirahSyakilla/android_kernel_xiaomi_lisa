@@ -197,11 +197,12 @@ static void vmpressure_work_fn(struct work_struct *work)
 	struct vmpressure *vmpr = work_to_vmpressure(work);
 	unsigned long scanned;
 	unsigned long reclaimed;
+	unsigned long flags;
 	enum vmpressure_levels level;
 	bool ancestor = false;
 	bool signalled = false;
 
-	spin_lock(&vmpr->sr_lock);
+	spin_lock_irqsave(&vmpr->sr_lock, flags);
 	/*
 	 * Several contexts might be calling vmpressure(), so it is
 	 * possible that the work was rescheduled again before the old
@@ -212,14 +213,14 @@ static void vmpressure_work_fn(struct work_struct *work)
 	 */
 	scanned = vmpr->tree_scanned;
 	if (!scanned) {
-		spin_unlock(&vmpr->sr_lock);
+		spin_unlock_irqrestore(&vmpr->sr_lock, flags);
 		return;
 	}
 
 	reclaimed = vmpr->tree_reclaimed;
 	vmpr->tree_scanned = 0;
 	vmpr->tree_reclaimed = 0;
-	spin_unlock(&vmpr->sr_lock);
+	spin_unlock_irqrestore(&vmpr->sr_lock, flags);
 
 	level = vmpressure_calc_level(scanned, reclaimed);
 
@@ -252,9 +253,21 @@ static void vmpressure_work_fn(struct work_struct *work)
  * This function does not return any value.
  */
 void vmpressure(gfp_t gfp, struct mem_cgroup *memcg, bool tree,
-		unsigned long scanned, unsigned long reclaimed)
+		unsigned long scanned, unsigned long reclaimed, int order)
 {
+	struct vmpressure *root_vmpr = memcg_to_vmpressure(NULL);
 	struct vmpressure *vmpr = memcg_to_vmpressure(memcg);
+	unsigned long flags;
+
+	if (order > PAGE_ALLOC_COSTLY_ORDER)
+		return;
+
+	read_lock_irqsave(&root_vmpr->users_lock, flags);
+	if (!atomic_long_read(&root_vmpr->users)) {
+		read_unlock_irqrestore(&root_vmpr->users_lock, flags);
+		return;
+	}
+	read_unlock_irqrestore(&root_vmpr->users_lock, flags);
 
 	/*
 	 * Here we only want to account pressure that userland is able to
@@ -282,10 +295,10 @@ void vmpressure(gfp_t gfp, struct mem_cgroup *memcg, bool tree,
 		return;
 
 	if (tree) {
-		spin_lock(&vmpr->sr_lock);
+		spin_lock_irqsave(&vmpr->sr_lock, flags);
 		scanned = vmpr->tree_scanned += scanned;
 		vmpr->tree_reclaimed += reclaimed;
-		spin_unlock(&vmpr->sr_lock);
+		spin_unlock_irqrestore(&vmpr->sr_lock, flags);
 
 		if (scanned < vmpressure_win)
 			return;
@@ -297,15 +310,15 @@ void vmpressure(gfp_t gfp, struct mem_cgroup *memcg, bool tree,
 		if (!memcg || memcg == root_mem_cgroup)
 			return;
 
-		spin_lock(&vmpr->sr_lock);
+		spin_lock_irqsave(&vmpr->sr_lock, flags);
 		scanned = vmpr->scanned += scanned;
 		reclaimed = vmpr->reclaimed += reclaimed;
 		if (scanned < vmpressure_win) {
-			spin_unlock(&vmpr->sr_lock);
+			spin_unlock_irqrestore(&vmpr->sr_lock, flags);
 			return;
 		}
 		vmpr->scanned = vmpr->reclaimed = 0;
-		spin_unlock(&vmpr->sr_lock);
+		spin_unlock_irqrestore(&vmpr->sr_lock, flags);
 
 		level = vmpressure_calc_level(scanned, reclaimed);
 
@@ -334,7 +347,7 @@ void vmpressure(gfp_t gfp, struct mem_cgroup *memcg, bool tree,
  *
  * This function does not return any value.
  */
-void vmpressure_prio(gfp_t gfp, struct mem_cgroup *memcg, int prio)
+void vmpressure_prio(gfp_t gfp, struct mem_cgroup *memcg, int prio, int order)
 {
 	/*
 	 * We only use prio for accounting critical level. For more info
@@ -350,7 +363,37 @@ void vmpressure_prio(gfp_t gfp, struct mem_cgroup *memcg, int prio)
 	 * to the vmpressure() basically means that we signal 'critical'
 	 * level.
 	 */
-	vmpressure(gfp, memcg, true, vmpressure_win, 0);
+	vmpressure(gfp, memcg, true, vmpressure_win, 0, order);
+}
+
+bool vmpressure_inc_users(int order)
+{
+	struct vmpressure *vmpr = memcg_to_vmpressure(NULL);
+	unsigned long flags;
+
+	if (order > PAGE_ALLOC_COSTLY_ORDER)
+		return false;
+
+	write_lock_irqsave(&vmpr->users_lock, flags);
+	if (atomic_long_inc_return_relaxed(&vmpr->users) == 1) {
+		spin_lock(&vmpr->sr_lock);
+		vmpr->scanned = 0;
+		vmpr->reclaimed = 0;
+		vmpr->tree_scanned = 0;
+		vmpr->tree_reclaimed = 0;
+		spin_unlock(&vmpr->sr_lock);
+	}
+	write_unlock_irqrestore(&vmpr->users_lock, flags);
+
+	return true;
+}
+
+void vmpressure_dec_users(void)
+{
+	struct vmpressure *vmpr = memcg_to_vmpressure(NULL);
+
+	smp_mb__before_atomic();
+	atomic_long_dec(&vmpr->users);
 }
 
 #define MAX_VMPRESSURE_ARGS_LEN	(strlen("critical") + strlen("hierarchy") + 2)
@@ -469,6 +512,8 @@ void vmpressure_init(struct vmpressure *vmpr)
 	mutex_init(&vmpr->events_lock);
 	INIT_LIST_HEAD(&vmpr->events);
 	INIT_WORK(&vmpr->work, vmpressure_work_fn);
+	atomic_long_set(&vmpr->users, 0);
+	rwlock_init(&vmpr->users_lock);
 }
 
 /**
