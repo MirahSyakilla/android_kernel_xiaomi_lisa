@@ -43,6 +43,9 @@ struct sugov_policy {
 
 	bool			limits_changed;
 	bool			need_freq_update;
+
+	u64			dvfs_headroom_lut_delay;
+	u16			dvfs_headroom_lut[SCHED_CAPACITY_SCALE + 1];
 };
 
 struct sugov_cpu {
@@ -238,44 +241,80 @@ static unsigned int get_next_freq(struct sugov_policy *sg_policy,
 	return l_freq;
 }
 
-static inline unsigned long apply_dvfs_headroom(unsigned long util, int cpu)
+static u64 sugov_dvfs_headroom_delay(struct sugov_policy *sg_policy, int cpu)
 {
-	unsigned long capacity = capacity_orig_of(cpu);
-	unsigned long delta, headroom, max_boost, min_boost;
-
-	/* There's no need of headroom at high utilization. The same goes
-	 * for very low utilization as well. Consider 3.125% (capacity / 32)
-	 * as the minimum utilization required.
-	 */
-	if (unlikely(util >= capacity) || likely(util < (capacity >> 5)))
-		return util;
+	struct rq *rq = cpu_rq(cpu);
+	u64 delay;
 
 	/*
-	 * Quadratically taper the boosting at the top end based on capacity
-	 * as these are expensive and we don't need that much of a big
-	 * headroom as we approach max capacity.
-	 *
-	 * Formula: (delta²) / (4 * capacity)
+	 * Estimate the time until the next schedutil decision point. With
+	 * multiple runnable CFS entities, use the smaller of the current slice
+	 * and a scheduler tick; otherwise a tick is the natural update point.
 	 */
-	delta = capacity - util;
-	headroom = (delta * delta) / (4 * capacity);
+	if (rq->cfs.h_nr_queued > 1)
+		delay = min_t(u64, rq->curr->se.slice / NSEC_PER_USEC, TICK_USEC);
+	else
+		delay = TICK_USEC;
 
-	/* Limit the headroom within a valid range to avoid excessive or
-	 * negligible boosts.
-	 * Cap the maximum headroom at ~10% (capacity / 10) to keep good
-	 * ramp-up while avoiding multicore over-boost churn.
-	 * If the calculated headroom is below 0.39% (capacity / 256),
-	 * skip boosting as it is unlikely to trigger a frequency change.
+	return max_t(u64, delay, sg_policy->tunables->rate_limit_us);
+}
+
+static void sugov_build_dvfs_headroom_lut(struct sugov_policy *sg_policy)
+{
+	unsigned int i;
+	u64 delay;
+
+	/*
+	 * Cache the common delay used when frequency updates are tick/rate-limit
+	 * bound. More bursty multi-runnable cases can fall back to the direct
+	 * approximation path when their shorter slice-based delay differs.
 	 */
-	max_boost = capacity / 10;
-	min_boost = capacity >> 8;
+	delay = max_t(u64, TICK_USEC, sg_policy->tunables->rate_limit_us);
+	sg_policy->dvfs_headroom_lut_delay = delay;
 
-	if (headroom > max_boost)
-		headroom = max_boost;
-	else if (headroom < min_boost)
+	for (i = 0; i <= SCHED_CAPACITY_SCALE; i++)
+		sg_policy->dvfs_headroom_lut[i] = approximate_util_avg(i, delay);
+}
+
+static inline unsigned long apply_dvfs_headroom(unsigned long util, int cpu)
+{
+	struct sugov_cpu *sg_cpu = &per_cpu(sugov_cpu, cpu);
+	struct sugov_policy *sg_policy = sg_cpu->sg_policy;
+	unsigned long cap, approx, h_max, growth, decay;
+	u64 delay;
+
+	if (!util)
+		return 0;
+
+	if (unlikely(util >= SCHED_CAPACITY_SCALE))
 		return util;
 
-	return util + headroom;
+	delay = sugov_dvfs_headroom_delay(sg_policy, cpu);
+	if (likely(delay == sg_policy->dvfs_headroom_lut_delay)) {
+		approx = sg_policy->dvfs_headroom_lut[util];
+		h_max = sg_policy->dvfs_headroom_lut[0];
+	} else {
+		approx = approximate_util_avg(util, delay);
+		h_max = approximate_util_avg(0, delay);
+	}
+
+	/*
+	 * Capacity-aware DVFS headroom based on PELT:
+	 *   H = ((C - util) * h_max) / 1024
+	 *
+	 * Rewrite to avoid a division in the hot path:
+	 *   growth = h_max * C / 1024
+	 *   decay  = h_max + util - approx
+	 *   H      = growth - decay
+	 */
+	cap = capacity_orig_of(cpu);
+	growth = mult_frac(h_max, cap, SCHED_CAPACITY_SCALE);
+	decay = h_max + util - approx;
+
+	if (growth > decay)
+		return util + growth - decay;
+
+	return util;
 }
 unsigned long sugov_effective_cpu_perf(int cpu, unsigned long actual,
 				 unsigned long min,
@@ -627,8 +666,10 @@ rate_limit_us_store(struct gov_attr_set *attr_set, const char *buf, size_t count
 
 	tunables->rate_limit_us = rate_limit_us;
 
-	list_for_each_entry(sg_policy, &attr_set->policy_list, tunables_hook)
+	list_for_each_entry(sg_policy, &attr_set->policy_list, tunables_hook) {
 		sg_policy->freq_update_delay_ns = rate_limit_us * NSEC_PER_USEC;
+		sugov_build_dvfs_headroom_lut(sg_policy);
+	}
 
 	return count;
 }
@@ -902,6 +943,7 @@ static int sugov_start(struct cpufreq_policy *policy)
 	sg_policy->work_in_progress		= false;
 	sg_policy->limits_changed		= false;
 	sg_policy->cached_raw_freq		= 0;
+	sugov_build_dvfs_headroom_lut(sg_policy);
 
 	sg_policy->need_freq_update = cpufreq_driver_test_flags(CPUFREQ_NEED_UPDATE_LIMITS);
 
