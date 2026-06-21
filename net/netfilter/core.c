@@ -75,7 +75,7 @@ static void __nf_hook_entries_free(struct rcu_head *h)
 static void nf_hook_entries_free(struct nf_hook_entries *e)
 {
 	struct nf_hook_entries_rcu_head *head;
-	struct nf_hook_ops **ops;
+	const struct nf_hook_ops **ops;
 	unsigned int num;
 
 	if (!e)
@@ -105,8 +105,8 @@ nf_hook_entries_grow(const struct nf_hook_entries *old,
 		     const struct nf_hook_ops *reg)
 {
 	unsigned int i, alloc_entries, nhooks, old_entries;
-	struct nf_hook_ops **orig_ops = NULL;
-	struct nf_hook_ops **new_ops;
+	const struct nf_hook_ops **orig_ops = NULL;
+	const struct nf_hook_ops **new_ops;
 	struct nf_hook_entries *new;
 	bool inserted = false;
 
@@ -164,7 +164,7 @@ nf_hook_entries_grow(const struct nf_hook_entries *old,
 static void hooks_validate(const struct nf_hook_entries *hooks)
 {
 #ifdef CONFIG_DEBUG_MISC
-	struct nf_hook_ops **orig_ops;
+	const struct nf_hook_ops **orig_ops;
 	int prio = INT_MIN;
 	size_t i = 0;
 
@@ -224,8 +224,8 @@ static void *__nf_hook_entries_try_shrink(struct nf_hook_entries *old,
 {
 	unsigned int i, j, skip = 0, hook_entries;
 	struct nf_hook_entries *new = NULL;
-	struct nf_hook_ops **orig_ops;
-	struct nf_hook_ops **new_ops;
+	const struct nf_hook_ops **orig_ops;
+	const struct nf_hook_ops **new_ops;
 
 	if (WARN_ON_ONCE(!old))
 		return NULL;
@@ -363,7 +363,7 @@ static int __nf_register_net_hook(struct net *net, int pf,
 static bool nf_remove_net_hook(struct nf_hook_entries *old,
 			       const struct nf_hook_ops *unreg)
 {
-	struct nf_hook_ops **orig_ops;
+	const struct nf_hook_ops **orig_ops;
 	unsigned int i;
 
 	orig_ops = nf_hook_entries_get_hook_ops(old);

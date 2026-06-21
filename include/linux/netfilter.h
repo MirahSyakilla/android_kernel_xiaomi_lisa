@@ -118,14 +118,15 @@ struct nf_hook_entries {
 };
 
 #ifdef CONFIG_NETFILTER
-static inline struct nf_hook_ops **nf_hook_entries_get_hook_ops(const struct nf_hook_entries *e)
+static inline const struct nf_hook_ops **
+nf_hook_entries_get_hook_ops(const struct nf_hook_entries *e)
 {
 	unsigned int n = e->num_hook_entries;
 	const void *hook_end;
 
 	hook_end = &e->hooks[n]; /* this is *past* ->hooks[]! */
 
-	return (struct nf_hook_ops **)hook_end;
+	return (const struct nf_hook_ops **)hook_end;
 }
 
 static inline int
