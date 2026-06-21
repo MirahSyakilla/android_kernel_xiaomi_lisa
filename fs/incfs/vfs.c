@@ -201,6 +201,7 @@ struct pending_reads_state {
 
 /* State of an open .log file, unique for each file descriptor. */
 struct log_file_state {
+	spinlock_t state_lock;
 	struct read_log_state state;
 };
 
@@ -573,6 +574,7 @@ static int log_open(struct inode *inode, struct file *file)
 	if (!log_state)
 		return -ENOMEM;
 
+	spin_lock_init(&log_state->state_lock);
 	log_state->state = incfs_get_log_state(mi);
 	file->private_data = log_state;
 	return 0;
@@ -606,8 +608,14 @@ static ssize_t log_read(struct file *f, char __user *buf, size_t len,
 
 	reads_to_collect = min_t(ssize_t, rl_size, reads_to_collect);
 	while (reads_to_collect > 0) {
-		struct read_log_state next_state = READ_ONCE(log_state->state);
-		int reads_collected = incfs_collect_logged_reads(
+		struct read_log_state next_state;
+		int reads_collected;
+
+		spin_lock(&log_state->state_lock);
+		next_state = log_state->state;
+		spin_unlock(&log_state->state_lock);
+
+		reads_collected = incfs_collect_logged_reads(
 			mi, &next_state, reads_buf,
 			min_t(ssize_t, reads_to_collect, reads_per_page));
 		if (reads_collected <= 0) {
@@ -626,7 +634,9 @@ static ssize_t log_read(struct file *f, char __user *buf, size_t len,
 			goto out;
 		}
 
-		WRITE_ONCE(log_state->state, next_state);
+		spin_lock(&log_state->state_lock);
+		log_state->state = next_state;
+		spin_unlock(&log_state->state_lock);
 		total_reads_collected += reads_collected;
 		buf += reads_collected * sizeof(*reads_buf);
 		reads_to_collect -= reads_collected;
@@ -646,9 +656,13 @@ static __poll_t log_poll(struct file *file, poll_table *wait)
 	struct mount_info *mi = get_mount_info(file_superblock(file));
 	int count;
 	__poll_t ret = 0;
+	struct read_log_state state;
 
 	poll_wait(file, &mi->mi_log.ml_notif_wq, wait);
-	count = incfs_get_uncollected_logs_count(mi, &log_state->state);
+	spin_lock(&log_state->state_lock);
+	state = log_state->state;
+	spin_unlock(&log_state->state_lock);
+	count = incfs_get_uncollected_logs_count(mi, &state);
 	if (count >= mi->mi_options.read_log_wakeup_count)
 		ret = EPOLLIN | EPOLLRDNORM;
 
