@@ -21,6 +21,7 @@
 #include <linux/dma-buf.h>
 #include <linux/delay.h>
 #include <linux/kref.h>
+#include <linux/ratelimit.h>
 #include <linux/signal.h>
 #include <linux/msm_ion.h>
 #include <linux/of_platform.h>
@@ -2256,8 +2257,13 @@ static long process_accept_req(struct file *filp, unsigned int cmd,
 		 * new cb requests.
 		 */
 		if (!cb_txn) {
-			pr_err("%s txn %d either invalid or removed from Q\n",
-					__func__, user_args.txn_id);
+			static DEFINE_RATELIMIT_STATE(rs,
+						      DEFAULT_RATELIMIT_INTERVAL,
+						      DEFAULT_RATELIMIT_BURST);
+
+			if (__ratelimit(&rs))
+				pr_debug("txn %d either invalid or removed from Q\n",
+					 user_args.txn_id);
 			goto start_waiting_for_requests;
 		}
 		ret = marshal_out_tzcb_req(&user_args, cb_txn,

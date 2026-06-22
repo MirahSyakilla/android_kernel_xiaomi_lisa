@@ -197,6 +197,17 @@ static void hdd_enable_gtk_offload(struct hdd_adapter *adapter)
 }
 
 #ifdef WLAN_FEATURE_IGMP_OFFLOAD
+static bool hdd_is_igmp_offload_enabled(struct hdd_adapter *adapter)
+{
+	struct hdd_context *hdd_ctx;
+
+	hdd_ctx = WLAN_HDD_GET_CTX(adapter);
+	if (!hdd_ctx || !hdd_ctx->psoc)
+		return false;
+
+	return ucfg_pmo_is_igmp_offload_enabled(hdd_ctx->psoc);
+}
+
 /**
  * hdd_send_igmp_offload_params() - enable igmp offload
  * @adapter: pointer to the adapter
@@ -255,7 +266,8 @@ hdd_send_igmp_offload_params(struct hdd_adapter *adapter,
 
 	status = ucfg_pmo_enable_igmp_offload(vdev, igmp_req);
 	if (status != QDF_STATUS_SUCCESS)
-		hdd_info("Failed to enable igmp offload");
+		hdd_debug("Failed to %s igmp offload: %d",
+			  enable ? "enable" : "disable", status);
 
 	hdd_objmgr_put_vdev(vdev);
 	qdf_mem_free(igmp_req);
@@ -276,6 +288,9 @@ static void hdd_enable_igmp_offload(struct hdd_adapter *adapter)
 	QDF_STATUS status;
 	struct wlan_objmgr_vdev *vdev;
 
+	if (!hdd_is_igmp_offload_enabled(adapter))
+		return;
+
 	vdev = hdd_objmgr_get_vdev(adapter);
 	if (!vdev) {
 		hdd_err("vdev is NULL");
@@ -283,7 +298,7 @@ static void hdd_enable_igmp_offload(struct hdd_adapter *adapter)
 	}
 	status = hdd_send_igmp_offload_params(adapter, true);
 	if (status != QDF_STATUS_SUCCESS)
-		hdd_info("Failed to enable igmp offload");
+		hdd_debug("Failed to enable igmp offload: %d", status);
 	hdd_objmgr_put_vdev(vdev);
 }
 
@@ -300,6 +315,9 @@ static void hdd_disable_igmp_offload(struct hdd_adapter *adapter)
 	QDF_STATUS status;
 	struct wlan_objmgr_vdev *vdev;
 
+	if (!hdd_is_igmp_offload_enabled(adapter))
+		return;
+
 	vdev = hdd_objmgr_get_vdev(adapter);
 	if (!vdev) {
 		hdd_err("vdev is NULL");
@@ -307,7 +325,7 @@ static void hdd_disable_igmp_offload(struct hdd_adapter *adapter)
 	}
 	status = hdd_send_igmp_offload_params(adapter, false);
 	if (status != QDF_STATUS_SUCCESS)
-		hdd_info("Failed to enable igmp offload");
+		hdd_debug("Failed to disable igmp offload: %d", status);
 	hdd_objmgr_put_vdev(vdev);
 }
 #else
