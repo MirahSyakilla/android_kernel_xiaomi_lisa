@@ -646,6 +646,9 @@ static u32 swr_master_read(struct swr_mstr_ctrl *swrm, unsigned int reg_addr)
 {
 	u32 val = 0;
 
+	if (!READ_ONCE(swrm->dev_up))
+		return 0;
+
 	if (swrm->read)
 		val = swrm->read(swrm->handle, reg_addr);
 	else
@@ -655,6 +658,9 @@ static u32 swr_master_read(struct swr_mstr_ctrl *swrm, unsigned int reg_addr)
 
 static void swr_master_write(struct swr_mstr_ctrl *swrm, u16 reg_addr, u32 val)
 {
+	if (!READ_ONCE(swrm->dev_up))
+		return;
+
 	if (swrm->write)
 		swrm->write(swrm->handle, reg_addr, val);
 	else
@@ -665,6 +671,9 @@ static int swr_master_bulk_write(struct swr_mstr_ctrl *swrm, u32 *reg_addr,
 				u32 *val, unsigned int length)
 {
 	int i = 0;
+
+	if (!READ_ONCE(swrm->dev_up))
+		return -ENODEV;
 
 	if (swrm->bulk_write)
 		swrm->bulk_write(swrm->handle, reg_addr, val, length);
@@ -694,6 +703,9 @@ static bool swrm_check_link_status(struct swr_mstr_ctrl *swrm, bool active)
 	int ret = false;
 	int status = active ? 0x1 : 0x0;
 	int comp_sts = 0x0;
+
+	if (!READ_ONCE(swrm->dev_up))
+		return active ? false : true;
 
 	if ((swrm->version <= SWRM_VERSION_1_5_1))
 		return true;
@@ -845,6 +857,9 @@ static void swrm_wait_for_fifo_avail(struct swr_mstr_ctrl *swrm, int swrm_rd_wr)
 	u32 fifo_outstanding_cmd;
 	u32 fifo_retry_count = SWR_OVERFLOW_RETRY_COUNT;
 
+	if (!READ_ONCE(swrm->dev_up))
+		return;
+
 	if (swrm_rd_wr) {
 		/* Check for fifo underflow during read */
 		/* Check no of outstanding commands in fifo before read */
@@ -899,8 +914,14 @@ static int swrm_cmd_fifo_rd_cmd(struct swr_mstr_ctrl *swrm, int *cmd_data,
 		dev_err(swrm->dev, "%s: invalid slave dev num\n", __func__);
 		return -EINVAL;
 	}
+	if (!READ_ONCE(swrm->dev_up))
+		return -ENODEV;
 
 	mutex_lock(&swrm->iolock);
+	if (!READ_ONCE(swrm->dev_up)) {
+		mutex_unlock(&swrm->iolock);
+		return -ENODEV;
+	}
 	val = swrm_get_packed_reg_val(&swrm->rcmd_id, len, dev_addr, reg_addr);
 	if (swrm->read) {
 		/* skip delay if read is handled in platform driver */
@@ -959,8 +980,14 @@ static int swrm_cmd_fifo_wr_cmd(struct swr_mstr_ctrl *swrm, u8 cmd_data,
 		dev_err(swrm->dev, "%s: invalid slave dev num\n", __func__);
 		return -EINVAL;
 	}
+	if (!READ_ONCE(swrm->dev_up))
+		return -ENODEV;
 
 	mutex_lock(&swrm->iolock);
+	if (!READ_ONCE(swrm->dev_up)) {
+		mutex_unlock(&swrm->iolock);
+		return -ENODEV;
+	}
 	if (!cmd_id)
 		val = swrm_get_packed_reg_val(&swrm->wcmd_id, cmd_data,
 					      dev_addr, reg_addr);
@@ -3287,6 +3314,27 @@ static int swrm_runtime_suspend(struct device *dev)
 	current_state = swrm->state;
 	mutex_unlock(&swrm->force_down_lock);
 
+	mutex_lock(&swrm->devlock);
+	if (current_state == SWR_MSTR_SSR || !swrm->dev_up) {
+		dev_dbg(dev, "%s: skip hw suspend during SSR/dev down, state: %d dev_up: %d\n",
+			__func__, current_state, swrm->dev_up);
+		mutex_unlock(&swrm->devlock);
+		mutex_unlock(&swrm->reslock);
+		mutex_unlock(&swrm->runtime_lock);
+		pm_runtime_set_autosuspend_delay(dev, auto_suspend_timer);
+		return 0;
+	}
+	mutex_unlock(&swrm->devlock);
+
+	if (current_state == SWR_MSTR_UP) {
+		dev_dbg(dev, "%s: defer runtime suspend while ADSP/SoundWire is active\n",
+			__func__);
+		mutex_unlock(&swrm->reslock);
+		mutex_unlock(&swrm->runtime_lock);
+		pm_runtime_set_autosuspend_delay(dev, ERR_AUTO_SUSPEND_TIMER_VAL);
+		return -EBUSY;
+	}
+
 	if (swrm_request_hw_vote(swrm, LPASS_HW_CORE, true)) {
 		dev_err(dev, "%s:lpass core hw enable failed\n",
 			__func__);
@@ -3295,6 +3343,19 @@ static int swrm_runtime_suspend(struct device *dev)
 
 	if (swrm->is_always_on && swrm_request_hw_vote(swrm, LPASS_AUDIO_CORE, true))
 		aud_core_err = true;
+
+	if (hw_core_err || aud_core_err) {
+		dev_err(dev,
+			"%s: skip hw suspend while LPASS is unavailable, state: %d hw_err: %d aud_err: %d\n",
+			__func__, current_state, hw_core_err, aud_core_err);
+		mutex_lock(&swrm->devlock);
+		swrm->dev_up = false;
+		mutex_unlock(&swrm->devlock);
+		swrm->state = SWR_MSTR_SSR;
+		ret = 0;
+		goto exit;
+	}
+
 	if ((current_state == SWR_MSTR_UP) ||
 	    (current_state == SWR_MSTR_SSR)) {
 
@@ -3527,6 +3588,7 @@ int swrm_wcd_notify(struct platform_device *pdev, u32 id, void *data)
 	struct swr_master *mstr;
 	struct swr_device *swr_dev;
 	struct swrm_port_config *port_cfg;
+	bool was_down = false;
 
 	if (!pdev) {
 		pr_err("%s: pdev is NULL\n", __func__);
@@ -3596,19 +3658,24 @@ int swrm_wcd_notify(struct platform_device *pdev, u32 id, void *data)
 		break;
 	case SWR_DEVICE_SSR_DOWN:
 		mutex_lock(&swrm->mlock);
-		if (swrm->state == SWR_MSTR_DOWN)
-			dev_dbg(swrm->dev, "%s:SWR master is already Down:%d\n",
-				__func__, swrm->state);
-		else
-			swrm_device_down(&pdev->dev);
 		mutex_lock(&swrm->devlock);
 		swrm->dev_up = false;
 		swrm->hw_core_clk_en = 0;
 		swrm->aud_core_clk_en = 0;
 		mutex_unlock(&swrm->devlock);
+		mutex_lock(&swrm->clklock);
+		swrm->clk_ref_count = 0;
+		complete(&swrm->clk_off_complete);
+		mutex_unlock(&swrm->clklock);
 		mutex_lock(&swrm->reslock);
+		was_down = (swrm->state == SWR_MSTR_DOWN);
 		swrm->state = SWR_MSTR_SSR;
 		mutex_unlock(&swrm->reslock);
+		if (was_down)
+			dev_dbg(swrm->dev, "%s:SWR master is already Down:%d\n",
+				__func__, swrm->state);
+		else
+			swrm_device_down(&pdev->dev);
 		mutex_unlock(&swrm->mlock);
 		break;
 	case SWR_DEVICE_SSR_UP:

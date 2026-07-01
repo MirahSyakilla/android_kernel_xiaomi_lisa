@@ -195,14 +195,13 @@ static int msm_pcm_soft_volume_ctl_get(struct snd_kcontrol *kcontrol,
 
 	substream = soft_vol->pcm->streams[soft_vol->stream].substream;
 	if (!substream) {
-		pr_err("%s substream not found\n", __func__);
-		return -ENODEV;
+		pr_debug("%s: substream not open\n", __func__);
+		goto out_default;
 	}
 	soc_prtd = substream->private_data;
 	if (!soc_prtd) {
-		pr_err("%s substream runtime or private_data not found\n",
-				 __func__);
-		return -ENODEV;
+		pr_debug("%s: substream private_data not ready\n", __func__);
+		goto out_default;
 	}
 
 	component = snd_soc_rtdcom_lookup(soc_prtd, DRV_NAME);
@@ -228,6 +227,12 @@ static int msm_pcm_soft_volume_ctl_get(struct snd_kcontrol *kcontrol,
 				ucontrol->value.integer.value[2]);
 
 	mutex_unlock(&pdata->lock);
+	return 0;
+
+out_default:
+	ucontrol->value.integer.value[0] = soft_params.period;
+	ucontrol->value.integer.value[1] = soft_params.step;
+	ucontrol->value.integer.value[2] = soft_params.rampingcurve;
 	return 0;
 }
 
@@ -1924,8 +1929,8 @@ static int msm_pcm_volume_ctl_get(struct snd_kcontrol *kcontrol,
 
 	substream = vol->pcm->streams[vol->stream].substream;
 	if (!substream) {
-		pr_err("%s substream not found\n", __func__);
-		return -ENODEV;
+		pr_debug("%s: substream not open\n", __func__);
+		return 0;
 	}
 	soc_prtd = substream->private_data;
 	if (!substream->runtime || !soc_prtd) {

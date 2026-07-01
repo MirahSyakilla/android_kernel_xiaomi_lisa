@@ -2637,7 +2637,7 @@ static int aw8624_parse_dt(struct device *dev, struct aw8624 *aw8624,
 
 	val = of_property_read_u32(np, "vib_mode", &aw8624->info.mode);
 	if (val != 0)
-		pr_err("%s: vib_mode not found\n", __func__);
+		pr_debug("%s: vib_mode not found\n", __func__);
 	val = of_property_read_u32(np, "vib_f0_pre", &aw8624->info.f0_pre);
 	if (val != 0)
 		pr_err("%s: vib_f0_pre not found\n", __func__);
@@ -2706,7 +2706,7 @@ static int aw8624_parse_dt(struct device *dev, struct aw8624 *aw8624,
 	    of_property_read_u32_array(np, "vib_rtp_time", rtp_time,
 				       ARRAY_SIZE(rtp_time));
 	if (val != 0)
-		pr_err("%s: vib_rtp_time not found\n", __func__);
+		pr_debug("%s: vib_rtp_time not found\n", __func__);
 	memcpy(aw8624->info.rtp_time, rtp_time, sizeof(rtp_time));
 
 	val =
@@ -2807,8 +2807,8 @@ static int aw8624_parse_dt(struct device *dev, struct aw8624 *aw8624,
 		rc = of_property_read_u32(child_node, "qcom,wf-repeat-count",
 					  &tmp);
 		if (rc < 0) {
-			printk("%s: Read  qcom,wf-repeat-count failed !\n",
-			       __func__);
+			pr_debug("%s: qcom,wf-repeat-count not found\n",
+				 __func__);
 		} else {
 			for (j = 0; j < ARRAY_SIZE(wf_repeat); j++)
 				if (tmp <= wf_repeat[j])
@@ -2821,8 +2821,8 @@ static int aw8624_parse_dt(struct device *dev, struct aw8624 *aw8624,
 		rc = of_property_read_u32(child_node, "qcom,wf-s-repeat-count",
 					  &tmp);
 		if (rc < 0) {
-			printk("%s: Read  qcom,wf-s-repeat-count failed !\n",
-			       __func__);
+			pr_debug("%s: qcom,wf-s-repeat-count not found\n",
+				 __func__);
 		} else {
 			for (j = 0; j < ARRAY_SIZE(wf_s_repeat); j++)
 				if (tmp <= wf_s_repeat[j])

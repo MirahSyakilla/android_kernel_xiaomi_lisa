@@ -76,8 +76,8 @@ static int32_t cam_get_source_node_info(
 
 	rc = of_property_read_u32(of_node, "flash-type", &soc_private->flash_type);
 	if (rc) {
-		CAM_ERR(CAM_FLASH,
-			"flash-type read failed rc=%d", rc);
+		CAM_DBG(CAM_FLASH,
+			"flash-type not present rc=%d, defaulting to PMIC flash", rc);
 		soc_private->flash_type = CAM_FLASH_TYPE_PMIC; // default to PMIC flash
 	}
 
@@ -261,7 +261,7 @@ static int32_t cam_get_source_node_info(
 				"qcom,current-ma",
 				&soc_private->torch_op_current[i]);
 			if (rc < 0) {
-				CAM_WARN(CAM_FLASH,
+				CAM_DBG(CAM_FLASH,
 					"op-current prop unavailable: %d", rc);
 				rc = 0;
 			}

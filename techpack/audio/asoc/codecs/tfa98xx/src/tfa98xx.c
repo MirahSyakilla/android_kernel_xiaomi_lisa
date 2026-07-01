@@ -4168,10 +4168,10 @@ static int tfa98xx_i2c_probe(struct i2c_client *i2c,
 				"nxp,spk-id-pin", 0);
 
 	if (!tfa98xx->spk_id_gpio_p) {
-		dev_err(&i2c->dev, "property %s not detected in node %s",
-				"nxp,spk-id-pin", np->full_name);
+		dev_dbg(&i2c->dev, "optional property %s not detected in node %s\n",
+			"nxp,spk-id-pin", np->full_name);
 	} else {
-		dev_err(&i2c->dev, "fw_name =%s\n", fw_name);
+		dev_dbg(&i2c->dev, "fw_name =%s\n", fw_name);
 	}
 
 	/* Power up! */

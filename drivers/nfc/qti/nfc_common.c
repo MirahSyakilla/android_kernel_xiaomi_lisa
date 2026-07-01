@@ -55,7 +55,7 @@ int nfc_parse_dt(struct device *dev, struct platform_gpio *nfc_gpio,
 			(u32 *) ldo->vdd_levels,
 			ARRAY_SIZE(ldo->vdd_levels));
 	if (ret) {
-		dev_err(dev, "error reading NFC VDDIO min and max value\n");
+		dev_dbg(dev, "optional NFC VDDIO min/max not present, using defaults\n");
 		// set default as per datasheet
 		ldo->vdd_levels[0] = NFC_VDDIO_MIN;
 		ldo->vdd_levels[1] = NFC_VDDIO_MAX;
@@ -64,7 +64,7 @@ int nfc_parse_dt(struct device *dev, struct platform_gpio *nfc_gpio,
 	// optional property
 	ret = of_property_read_u32(np, NFC_LDO_CUR_DT_NAME, &ldo->max_current);
 	if (ret) {
-		dev_err(dev, "error reading NFC current value\n");
+		dev_dbg(dev, "optional NFC current not present, using default\n");
 		// set default as per datasheet
 		ldo->max_current = NFC_CURRENT_MAX;
 	}

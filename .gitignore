@@ -69,7 +69,8 @@ modules.order
 /STATUS_HISTORY.md
 /CHECKLIST.md
 /out/
-KernelSU-Next
+/KernelSU-Next
+/Baseband-guard
 
 #
 # RPM spec file (make rpm-pkg)
