@@ -71,6 +71,8 @@ modules.order
 /out/
 /KernelSU-Next
 /Baseband-guard
+/KSUN/
+/archive/
 
 #
 # RPM spec file (make rpm-pkg)
