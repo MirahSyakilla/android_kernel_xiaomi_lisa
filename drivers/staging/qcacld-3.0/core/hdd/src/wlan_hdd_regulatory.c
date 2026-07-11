@@ -742,6 +742,29 @@ void hdd_program_country_code(struct hdd_context *hdd_ctx)
 }
 #endif
 
+static QDF_STATUS hdd_reg_wait_for_country_update(struct hdd_context *hdd_ctx,
+						  const uint8_t *country_code)
+{
+	QDF_STATUS status;
+
+	status = qdf_wait_for_event_completion(&hdd_ctx->regulatory_update_event,
+					       CHANNEL_LIST_UPDATE_TIMEOUT);
+	if (QDF_IS_STATUS_SUCCESS(status)) {
+		hdd_info("country %c%c regulatory update completed",
+			 country_code[0], country_code[1]);
+		return status;
+	}
+
+	hdd_err("country %c%c regulatory update failed: %d",
+		country_code[0], country_code[1], status);
+
+	qdf_mutex_acquire(&hdd_ctx->regulatory_status_lock);
+	hdd_ctx->is_regulatory_update_in_progress = false;
+	qdf_mutex_release(&hdd_ctx->regulatory_status_lock);
+
+	return status;
+}
+
 int hdd_reg_set_country(struct hdd_context *hdd_ctx, char *country_code)
 {
 	QDF_STATUS status;
@@ -776,7 +799,10 @@ int hdd_reg_set_country(struct hdd_context *hdd_ctx, char *country_code)
 		qdf_mutex_acquire(&hdd_ctx->regulatory_status_lock);
 		hdd_ctx->is_regulatory_update_in_progress = false;
 		qdf_mutex_release(&hdd_ctx->regulatory_status_lock);
+		return qdf_status_to_os_return(status);
 	}
+
+	status = hdd_reg_wait_for_country_update(hdd_ctx, cc);
 
 	return qdf_status_to_os_return(status);
 }
@@ -1768,6 +1794,7 @@ void hdd_send_wiphy_regd_sync_event(struct hdd_context *hdd_ctx)
 	QDF_STATUS  status;
 	uint8_t i;
 	uint32_t rule_idx, rule_count, regdb_6ghz_rules, drv_6ghz_rules;
+	int ret;
 
 	if (!hdd_ctx) {
 		hdd_err("hdd_ctx is NULL");
@@ -1828,9 +1855,14 @@ void hdd_send_wiphy_regd_sync_event(struct hdd_context *hdd_ctx)
 				      &rule_idx);
 	hdd_reg_fill_regdb_6ghz_rules(regd_rules, regdb_regd, &rule_idx);
 
-	regulatory_set_wiphy_regd(hdd_ctx->wiphy, regd);
+	ret = regulatory_set_wiphy_regd(hdd_ctx->wiphy, regd);
+	if (ret)
+		hdd_err("failed to queue wiphy regd sync event for %c%c: %d",
+			regd->alpha2[0], regd->alpha2[1], ret);
+	else
+		hdd_info("queued wiphy regd sync event for %c%c",
+			 regd->alpha2[0], regd->alpha2[1]);
 
-	hdd_debug("regd sync event sent with reg rules info");
 	kfree(regdb_regd);
 	qdf_mem_free(regd);
 }
