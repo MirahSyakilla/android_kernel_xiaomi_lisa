@@ -1970,14 +1970,17 @@ static void hdd_country_change_update_sta(struct hdd_context *hdd_ctx)
 				csr_convert_from_reg_phy_mode(new_phy_mode);
 			phy_changed = (roam_profile->phyMode != csr_phy_mode);
 
-			if (phy_changed || freq_changed) {
+			if (freq_changed) {
 				sme_roam_disconnect(
 					hdd_ctx->mac_handle,
 					adapter->vdev_id,
 					eCSR_DISCONNECT_REASON_UNSPECIFIED,
 					REASON_UNSPEC_FAILURE);
-				roam_profile->phyMode = csr_phy_mode;
 			}
+
+			/* Apply the new preference on the next association. */
+			if (phy_changed)
+				roam_profile->phyMode = csr_phy_mode;
 			break;
 		default:
 			break;
