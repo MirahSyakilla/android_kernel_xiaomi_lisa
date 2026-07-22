@@ -35,7 +35,7 @@ extern const char *const power_supply_usb_type_text[];
 #define XM_USBPD_STATE_SNK_STARTUP	25
 #define XM_USBPD_STATE_SNK_READY	31
 #define XM_USBPD_STATE_SRC_READY	5
-#define XM_PD_PPS_TARGET_VOLTAGE_UV	12000000
+#define XM_PD_PPS_TARGET_VOLTAGE_UV	11000000
 #define XM_PD_PPS_TARGET_CURRENT_UA	2750000
 #define XM_PD_COMPAT_PDO2_9V3A		0x0002d12c
 #define XM_PD_COMPAT_ADAPTER_ID		ADAPTER_XIAOMI_PD_30W
@@ -560,8 +560,7 @@ static void xm_pd_renegotiation_workfunc(struct work_struct *work)
 	}
 
 	bcdev->xm_pd_renegotiation_count++;
-	bcdev->xm_pd_power_profile_applied = false;
-	pr_info("starting PD profile reapply #%u\n",
+	pr_info("checking PD profile #%u\n",
 		bcdev->xm_pd_renegotiation_count);
 	rc = read_property_id(bcdev, xm_pst, XM_PROP_INPUT_SUSPEND);
 	if (!rc && xm_pst->prop[XM_PROP_INPUT_SUSPEND]) {
