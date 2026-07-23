@@ -1047,6 +1047,16 @@ static int ucsi_dr_swap(struct typec_port *port, enum typec_data_role role)
 		goto out_unlock;
 	}
 
+	if (role == TYPEC_HOST &&
+	    !(partner_flags & UCSI_CONSTAT_PARTNER_FLAG_USB)) {
+		dev_warn(con->ucsi->dev,
+			 "con%d: emulating host data role for non-USB partner without UCSI swap\n",
+			 con->num);
+		typec_set_data_role(con->port, TYPEC_HOST);
+		ret = 0;
+		goto out_unlock;
+	}
+
 	reinit_completion(&con->complete);
 
 	command = UCSI_SET_UOR | UCSI_CONNECTOR_NUMBER(con->num);
@@ -1054,25 +1064,6 @@ static int ucsi_dr_swap(struct typec_port *port, enum typec_data_role role)
 	command |= UCSI_SET_UOR_ACCEPT_ROLE_SWAPS;
 	ret = ucsi_role_cmd(con, command);
 	if (ret < 0) {
-		/*
-		 * Xiaomi's batterysecret only needs the typec class to report
-		 * host mode before it starts the private PD auth flow. Charger
-		 * partners frequently reject or do not implement data-role swap,
-		 * especially when they expose no USB data capability at all.
-		 * Treat that case as a compatibility no-op instead of failing
-		 * the userspace gate outright.
-		 */
-		if (role == TYPEC_HOST &&
-		    !(partner_flags & UCSI_CONSTAT_PARTNER_FLAG_USB) &&
-		    (ret == -EOPNOTSUPP || ret == -ETIMEDOUT)) {
-			dev_warn(con->ucsi->dev,
-				 "con%d: emulating host data role for non-USB partner ret=%d\n",
-				 con->num, ret);
-			typec_set_data_role(con->port, TYPEC_HOST);
-			ret = 0;
-			goto out_unlock;
-		}
-
 		dev_warn(con->ucsi->dev,
 			 "con%d: data role swap command failed role=%s ret=%d\n",
 			 con->num, role == TYPEC_HOST ? "host" : "device",
@@ -1084,15 +1075,6 @@ static int ucsi_dr_swap(struct typec_port *port, enum typec_data_role role)
 
 	if (!wait_for_completion_timeout(&con->complete,
 					 msecs_to_jiffies(UCSI_SWAP_TIMEOUT_MS))) {
-		if (role == TYPEC_HOST &&
-		    !(partner_flags & UCSI_CONSTAT_PARTNER_FLAG_USB)) {
-			dev_warn(con->ucsi->dev,
-				 "con%d: data role swap timed out on non-USB partner, emulating host mode\n",
-				 con->num);
-			typec_set_data_role(con->port, TYPEC_HOST);
-			return 0;
-		}
-
 		dev_warn(con->ucsi->dev,
 			 "con%d: data role swap timed out role=%s\n",
 			 con->num, role == TYPEC_HOST ? "host" : "device");
