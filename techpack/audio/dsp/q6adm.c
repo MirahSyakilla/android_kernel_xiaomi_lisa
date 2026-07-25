@@ -57,6 +57,20 @@ static bool adm_cal_send_optional_error(int ret)
 	return ret == -ENODATA;
 }
 
+static bool adm_cal_send_fallback_error(int ret)
+{
+	switch (ret) {
+	case -EINVAL:
+	case -EOPNOTSUPP:
+	case -ENOPROTOOPT:
+	case -ENOTRECOVERABLE:
+	case -EADV:
+		return true;
+	default:
+		return false;
+	}
+}
+
 typedef int (*adm_cb)(uint32_t opcode, uint32_t token,
 		       uint32_t *pp_event_package, void *pvt);
 
@@ -2714,6 +2728,8 @@ static int send_adm_cal_type(int fedai_id, int cal_index, int path, int port_id,
 	int dest_perms[2] = {PERM_READ | PERM_WRITE, PERM_READ | PERM_WRITE};
 	int source_vm[1] = {VMID_HLOS};
 	int dest_vm[2] = {VMID_LPASS, VMID_ADSP_HEAP};
+	bool use_generic_match = false;
+	bool rejected_stale = false;
 
 	pr_debug("%s: cal index %d\n", __func__, cal_index);
 
@@ -2725,50 +2741,75 @@ static int send_adm_cal_type(int fedai_id, int cal_index, int path, int port_id,
 	}
 
 	mutex_lock(&this_adm.cal_data[cal_index]->lock);
-	cal_block = adm_find_cal_by_buf_number(fedai_id, cal_index, path, app_type, acdb_id,
-				sample_rate);
-	if (cal_block == NULL) {
-		ret = -ENOENT;
-		goto unlock;
-	}
-
-	if (cal_block->cma_mem) {
-		if (cal_block->cal_data.paddr == 0 ||
-		    cal_block->map_data.map_size <= 0) {
-			pr_err("%s: No address to map!\n", __func__);
-			ret = -EINVAL;
-			goto unlock;
+	for (;;) {
+		if (use_generic_match) {
+			cal_block = adm_find_cal(cal_index, path, app_type,
+						 acdb_id, sample_rate);
+		} else {
+			cal_block = adm_find_cal_by_buf_number(fedai_id,
+					cal_index, path, app_type, acdb_id,
+					sample_rate);
 		}
-		ret = hyp_assign_phys(cal_block->cal_data.paddr,
-				      cal_block->map_data.map_size,
-				      source_vm, 1, dest_vm, dest_perms, 2);
-		if (ret < 0) {
-			pr_err("%s: hyp_assign_phys failed result = %d addr = 0x%pK size = %d\n",
-				__func__, ret, cal_block->cal_data.paddr,
-				cal_block->map_data.map_size);
-			ret = -EINVAL;
-			goto unlock;
-		}
-		this_adm.tx_port_id = port_id;
-		this_adm.hyp_assigned = true;
-		this_adm.fnn_app_type = app_type;
-		pr_debug("%s: hyp_assign_phys success in tx_port_id 0x%x\n",
-			 __func__, this_adm.tx_port_id);
-	}
-	ret = adm_remap_and_send_cal_block(cal_index, port_id, copp_idx,
-		cal_block, perf_mode, app_type, acdb_id, sample_rate);
 
-	if (!ret || adm_cal_send_optional_error(ret)) {
-		if (ret)
-			pr_debug("%s: marking optional ADM cal used after DSP ret=%d cal_index=%d port=0x%x copp=%d path=%d app=%d acdb=%d rate=%d\n",
-			       __func__, ret, cal_index, port_id, copp_idx, path,
-			       app_type, acdb_id, sample_rate);
+		if (cal_block == NULL) {
+			if (rejected_stale)
+				ret = 0;
+			else if (!use_generic_match)
+				ret = -ENOENT;
+			break;
+		}
+
+		if (cal_block->cma_mem) {
+			if (cal_block->cal_data.paddr == 0 ||
+			    cal_block->map_data.map_size <= 0) {
+				pr_err("%s: No address to map!\n", __func__);
+				ret = -EINVAL;
+				goto unlock;
+			}
+			ret = hyp_assign_phys(cal_block->cal_data.paddr,
+					      cal_block->map_data.map_size,
+					      source_vm, 1, dest_vm,
+					      dest_perms, 2);
+			if (ret < 0) {
+				pr_err("%s: hyp_assign_phys failed result = %d addr = 0x%pK size = %d\n",
+					__func__, ret, cal_block->cal_data.paddr,
+					cal_block->map_data.map_size);
+				ret = -EINVAL;
+				goto unlock;
+			}
+			this_adm.tx_port_id = port_id;
+			this_adm.hyp_assigned = true;
+			this_adm.fnn_app_type = app_type;
+			pr_debug("%s: hyp_assign_phys success in tx_port_id 0x%x\n",
+				 __func__, this_adm.tx_port_id);
+		}
+
+		ret = adm_remap_and_send_cal_block(cal_index, port_id, copp_idx,
+			cal_block, perf_mode, app_type, acdb_id, sample_rate);
+		if (!ret || adm_cal_send_optional_error(ret)) {
+			if (ret)
+				pr_debug("%s: marking optional ADM cal used after DSP ret=%d cal_index=%d port=0x%x copp=%d path=%d app=%d acdb=%d rate=%d\n",
+				       __func__, ret, cal_index, port_id,
+				       copp_idx, path, app_type, acdb_id,
+				       sample_rate);
+			cal_utils_mark_cal_used(cal_block);
+			ret = 0;
+			break;
+		}
+
+		if (!adm_cal_send_fallback_error(ret)) {
+			pr_err("%s: keeping ADM cal stale for retry cal_index=%d port=0x%x copp=%d path=%d app=%d acdb=%d rate=%d ret=%d\n",
+			       __func__, cal_index, port_id, copp_idx, path,
+			       app_type, acdb_id, sample_rate, ret);
+			break;
+		}
+
+		pr_warn_ratelimited("%s: staling rejected ADM cal block and retrying fallback cal_index=%d port=0x%x copp=%d path=%d app=%d acdb=%d rate=%d ret=%d\n",
+				    __func__, cal_index, port_id, copp_idx,
+				    path, app_type, acdb_id, sample_rate, ret);
 		cal_utils_mark_cal_used(cal_block);
-		ret = 0;
-	} else {
-		pr_err("%s: keeping ADM cal stale for retry cal_index=%d port=0x%x copp=%d path=%d app=%d acdb=%d rate=%d ret=%d\n",
-		       __func__, cal_index, port_id, copp_idx, path, app_type,
-		       acdb_id, sample_rate, ret);
+		rejected_stale = true;
+		use_generic_match = true;
 	}
 unlock:
 	mutex_unlock(&this_adm.cal_data[cal_index]->lock);
