@@ -484,6 +484,7 @@ struct lockdep_map { };
 extern int lock_is_held(const void *);
 extern int lockdep_is_held(const void *);
 #define lockdep_is_held_type(l, r)		(1)
+#define lockdep_is_held(l)			(1)
 
 #define lockdep_assert_held(l)			do { (void)(l); } while (0)
 #define lockdep_assert_held_write(l)	do { (void)(l); } while (0)

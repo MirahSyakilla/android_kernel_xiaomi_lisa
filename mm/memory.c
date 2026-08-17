@@ -1366,6 +1366,10 @@ void unmap_vmas(struct mmu_gather *tlb,
 	mmu_notifier_range_init(&range, MMU_NOTIFY_UNMAP, 0, vma, vma->vm_mm,
 				start_addr, end_addr);
 	mmu_notifier_invalidate_range_start(&range);
+	/* 
+	 * Must use linked list (vm_next) because these VMAs might be 
+	 * detached from the Maple Tree during munmap.
+	 */
 	for ( ; vma && vma->vm_start < end_addr; vma = vma->vm_next)
 		unmap_single_vma(tlb, vma, start_addr, end_addr, NULL);
 	mmu_notifier_invalidate_range_end(&range);
@@ -1384,6 +1388,7 @@ void zap_page_range(struct vm_area_struct *vma, unsigned long start,
 {
 	struct mmu_notifier_range range;
 	struct mmu_gather tlb;
+	MA_STATE(mas, &vma->vm_mm->mm_mt, vma->vm_start, vma->vm_start);
 
 	lru_add_drain();
 	mmu_notifier_range_init(&range, MMU_NOTIFY_CLEAR, 0, vma, vma->vm_mm,
@@ -1391,8 +1396,9 @@ void zap_page_range(struct vm_area_struct *vma, unsigned long start,
 	tlb_gather_mmu(&tlb, vma->vm_mm, start, range.end);
 	update_hiwater_rss(vma->vm_mm);
 	mmu_notifier_invalidate_range_start(&range);
-	for ( ; vma && vma->vm_start < range.end; vma = vma->vm_next)
+	mas_for_each(&mas, vma, range.end - 1) {
 		unmap_single_vma(&tlb, vma, start, range.end, NULL);
+	}
 	mmu_notifier_invalidate_range_end(&range);
 	tlb_finish_mmu(&tlb, start, range.end);
 }

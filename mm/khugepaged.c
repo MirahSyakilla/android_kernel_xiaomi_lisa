@@ -404,7 +404,7 @@ static void insert_to_mm_slots_hash(struct mm_struct *mm,
 
 static inline int khugepaged_test_exit(struct mm_struct *mm)
 {
-	return atomic_read(&mm->mm_users) == 0 || !mmget_still_valid(mm);
+	return atomic_read(&mm->mm_users) == 0;
 }
 
 static bool hugepage_vma_check(struct vm_area_struct *vma,
@@ -1970,6 +1970,8 @@ static unsigned int khugepaged_scan_mm_slot(unsigned int pages,
 	struct mm_struct *mm;
 	struct vm_area_struct *vma;
 	int progress = 0;
+	/* Initialize with NULL, we set the tree later */
+	MA_STATE(mas, NULL, 0, 0); 
 
 	VM_BUG_ON(!pages);
 	lockdep_assert_held(&khugepaged_mm_lock);
@@ -1986,6 +1988,14 @@ static unsigned int khugepaged_scan_mm_slot(unsigned int pages,
 	khugepaged_collapse_pte_mapped_thps(mm_slot);
 
 	mm = mm_slot->mm;
+
+	/* Update tree pointer now that mm is valid */
+	mas.tree = &mm->mm_mt;
+	/* Update start index */
+	mas.index = khugepaged_scan.address;
+	/* Reset state */
+	mas.node = MAS_START;
+
 	/*
 	 * Don't wait for semaphore (to avoid long wait times).  Just move to
 	 * the next mm on the list.
@@ -1993,11 +2003,12 @@ static unsigned int khugepaged_scan_mm_slot(unsigned int pages,
 	vma = NULL;
 	if (unlikely(!down_read_trylock(&mm->mmap_sem)))
 		goto breakouterloop_mmap_sem;
+
 	if (likely(!khugepaged_test_exit(mm)))
-		vma = find_vma(mm, khugepaged_scan.address);
+		vma = mas_find(&mas, ULONG_MAX);
 
 	progress++;
-	for (; vma; vma = vma->vm_next) {
+	for (; vma; vma = mas_find(&mas, ULONG_MAX)) {
 		unsigned long hstart, hend;
 
 		cond_resched();

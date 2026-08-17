@@ -362,10 +362,12 @@ static struct vm_area_struct *
 find_ref_ctr_vma(struct uprobe *uprobe, struct mm_struct *mm)
 {
 	struct vm_area_struct *tmp;
+	MA_STATE(mas, &mm->mm_mt, 0, 0);
 
-	for (tmp = mm->mmap; tmp; tmp = tmp->vm_next)
+	mas_for_each(&mas, tmp, ULONG_MAX) {
 		if (valid_ref_ctr_vma(uprobe, tmp))
 			return tmp;
+	}
 
 	return NULL;
 }
@@ -1245,9 +1247,10 @@ static int unapply_uprobe(struct uprobe *uprobe, struct mm_struct *mm)
 {
 	struct vm_area_struct *vma;
 	int err = 0;
+	MA_STATE(mas, &mm->mm_mt, 0, 0);
 
 	down_read(&mm->mmap_sem);
-	for (vma = mm->mmap; vma; vma = vma->vm_next) {
+	mas_for_each(&mas, vma, ULONG_MAX) {
 		unsigned long vaddr;
 		loff_t offset;
 
@@ -1462,7 +1465,7 @@ static int xol_add_vma(struct mm_struct *mm, struct xol_area *area)
 		/* Try to map as high as possible, this is only a hint. */
 		area->vaddr = get_unmapped_area(NULL, TASK_SIZE - PAGE_SIZE,
 						PAGE_SIZE, 0, 0);
-		if (area->vaddr & ~PAGE_MASK) {
+		if (IS_ERR_VALUE(area->vaddr)) {
 			ret = area->vaddr;
 			goto fail;
 		}
@@ -1995,8 +1998,9 @@ bool uprobe_deny_signal(void)
 static void mmf_recalc_uprobes(struct mm_struct *mm)
 {
 	struct vm_area_struct *vma;
+	MA_STATE(mas, &mm->mm_mt, 0, 0);
 
-	for (vma = mm->mmap; vma; vma = vma->vm_next) {
+	mas_for_each(&mas, vma, ULONG_MAX) {
 		if (!valid_vma(vma, false))
 			continue;
 		/*
