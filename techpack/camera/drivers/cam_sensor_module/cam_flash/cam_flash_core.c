@@ -423,7 +423,7 @@ static int cam_flash_ops(struct cam_flash_ctrl *flash_ctrl,
 	}
 
 	if (flash_ctrl->switch_trigger) {
-#if IS_ENABLED(CONFIG_LEDS_QTI_FLASH)
+#if IS_BUILTIN(CONFIG_LEDS_QTI_FLASH)
 		int rc = 0;
 
 		if (op == CAMERA_SENSOR_FLASH_OP_FIREDURATION) {

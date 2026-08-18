@@ -42,7 +42,7 @@
 #include "lpm-levels.h"
 #include <trace/events/power.h>
 #include <linux/clk.h>
-#ifdef CONFIG_DRM_PANEL
+#if IS_BUILTIN(CONFIG_DRM_PANEL) && IS_BUILTIN(CONFIG_MI_THERMAL_INTERFACE)
 #include <drm/drm_panel.h>
 #endif
 #define CREATE_TRACE_POINTS
@@ -96,7 +96,7 @@ static void cluster_prepare(struct lpm_cluster *cluster,
 		const struct cpumask *cpu, int child_idx, bool from_idle,
 		int64_t time);
 
-#ifdef CONFIG_DRM_PANEL
+#if IS_BUILTIN(CONFIG_DRM_PANEL) && IS_BUILTIN(CONFIG_MI_THERMAL_INTERFACE)
 static bool sleep_disabled = true;
 module_param_named(sleep_disabled, sleep_disabled, bool, 0444);
 
@@ -1762,7 +1762,7 @@ static int lpm_probe(struct platform_device *pdev)
 	unsigned int cpu;
 	struct hrtimer *cpu_histtimer;
 	struct kobject *module_kobj = NULL;
-#ifdef CONFIG_DRM_PANEL
+#if IS_BUILTIN(CONFIG_DRM_PANEL) && IS_BUILTIN(CONFIG_MI_THERMAL_INTERFACE)
 	struct drm_panel *active_panel = get_panel();
 
 	if (!active_panel)
