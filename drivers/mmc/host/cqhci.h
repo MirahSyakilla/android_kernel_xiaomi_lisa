@@ -231,7 +231,7 @@ struct cqhci_host_crypto_variant_ops {
 					   struct request_queue *q);
 #ifdef CONFIG_BLK_INLINE_ENCRYPTION
 	int (*host_init_crypto)(struct cqhci_host *host,
-				const struct keyslot_mgmt_ll_ops *ksm_ops);
+				const struct blk_ksm_ll_ops *ksm_ops);
 #endif
 	void (*enable)(struct cqhci_host *host);
 	void (*disable)(struct cqhci_host *host);
@@ -314,7 +314,8 @@ struct cqhci_host {
 	union cqhci_crypto_cap_entry *crypto_cap_array;
 	u32 crypto_cfg_register;
 #ifdef CONFIG_BLK_INLINE_ENCRYPTION
-	struct keyslot_manager *ksm;
+	struct blk_keyslot_manager ksm;
+	void __iomem *hwkm_icemmio;
 #endif /* CONFIG_BLK_INLINE_ENCRYPTION */
 	struct platform_device *pdev;
 };

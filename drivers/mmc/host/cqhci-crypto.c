@@ -175,25 +175,25 @@ static void cqhci_crypto_clear_all_keyslots(struct cqhci_host *host)
 		cqhci_crypto_clear_keyslot(host, slot);
 }
 
-static int cqhci_crypto_keyslot_program(struct keyslot_manager *ksm,
+static int cqhci_crypto_keyslot_program(struct blk_keyslot_manager *ksm,
 					const struct blk_crypto_key *key,
 					unsigned int slot)
 {
-	struct cqhci_host *host = keyslot_manager_private(ksm);
+	struct cqhci_host *host = container_of(ksm, struct cqhci_host, ksm);
 	int err = 0;
 	u8 data_unit_mask;
 	union cqhci_crypto_cfg_entry cfg;
 	int cap_idx;
 
-	cap_idx = cqhci_crypto_cap_find(host, key->crypto_mode,
-					key->data_unit_size);
+	cap_idx = cqhci_crypto_cap_find(host, key->crypto_cfg.crypto_mode,
+					key->crypto_cfg.data_unit_size);
 
 	if (!cqhci_is_crypto_enabled(host) ||
 	    !cqhci_keyslot_valid(host, slot) ||
 	    !cqhci_cap_idx_valid(host, cap_idx))
 		return -EINVAL;
 
-	data_unit_mask = get_data_unit_size_mask(key->data_unit_size);
+	data_unit_mask = get_data_unit_size_mask(key->crypto_cfg.data_unit_size);
 
 	if (!(data_unit_mask & host->crypto_cap_array[cap_idx].sdus_mask))
 		return -EINVAL;
@@ -215,11 +215,11 @@ static int cqhci_crypto_keyslot_program(struct keyslot_manager *ksm,
 	return 0;
 }
 
-static int cqhci_crypto_keyslot_evict(struct keyslot_manager *ksm,
+static int cqhci_crypto_keyslot_evict(struct blk_keyslot_manager *ksm,
 				      const struct blk_crypto_key *key,
 				      unsigned int slot)
 {
-	struct cqhci_host *host = keyslot_manager_private(ksm);
+	struct cqhci_host *host = container_of(ksm, struct cqhci_host, ksm);
 
 	if (!cqhci_is_crypto_enabled(host) ||
 	    !cqhci_keyslot_valid(host, slot))
@@ -250,7 +250,7 @@ void cqhci_crypto_disable_spec(struct cqhci_host *host)
 }
 EXPORT_SYMBOL(cqhci_crypto_disable_spec);
 
-static const struct keyslot_mgmt_ll_ops cqhci_ksm_ops = {
+static const struct blk_ksm_ll_ops cqhci_ksm_ops = {
 	.keyslot_program	= cqhci_crypto_keyslot_program,
 	.keyslot_evict		= cqhci_crypto_keyslot_evict,
 };
@@ -277,7 +277,7 @@ enum blk_crypto_mode_num cqhci_crypto_blk_crypto_mode_num_for_alg_dusize(
  * -ENOMEM upon OOM.
  */
 int cqhci_host_init_crypto_spec(struct cqhci_host *host,
-				const struct keyslot_mgmt_ll_ops *ksm_ops)
+				const struct blk_ksm_ll_ops *ksm_ops)
 {
 	int cap_idx = 0;
 	int err = 0;
@@ -334,17 +334,17 @@ int cqhci_host_init_crypto_spec(struct cqhci_host *host,
 
 	cqhci_crypto_clear_all_keyslots(host);
 
-	host->ksm = keyslot_manager_create(host->mmc->parent,
-				       cqhci_num_keyslots(host), ksm_ops,
-				       BLK_CRYPTO_FEATURE_STANDARD_KEYS |
-				       BLK_CRYPTO_FEATURE_WRAPPED_KEYS,
-				       crypto_modes_supported,
-				       host);
-
-	if (!host->ksm) {
-		err = -ENOMEM;
+	err = devm_blk_ksm_init(mmc_dev(host->mmc), &host->ksm,
+				cqhci_num_keyslots(host));
+	if (err)
 		goto out_free_caps;
-	}
+	host->ksm.ksm_ll_ops = *ksm_ops;
+	host->ksm.max_dun_bytes_supported = sizeof(u32);
+	host->ksm.features = BLK_CRYPTO_FEATURE_STANDARD_KEYS |
+				     BLK_CRYPTO_FEATURE_WRAPPED_KEYS;
+	host->ksm.dev = mmc_dev(host->mmc);
+	memcpy(host->ksm.crypto_modes_supported, crypto_modes_supported,
+	       sizeof(crypto_modes_supported));
 	/*
 	 * In case host controller supports cryptographic operations
 	 * then, it uses 128bit task descriptor. Upper 64 bits of task
@@ -369,14 +369,13 @@ void cqhci_crypto_setup_rq_keyslot_manager_spec(struct cqhci_host *host,
 	if (!cqhci_host_is_crypto_supported(host) || !q)
 		return;
 
-	q->ksm = host->ksm;
+	q->ksm = &host->ksm;
 }
 EXPORT_SYMBOL(cqhci_crypto_setup_rq_keyslot_manager_spec);
 
 void cqhci_crypto_destroy_rq_keyslot_manager_spec(struct cqhci_host *host,
 					      struct request_queue *q)
 {
-	keyslot_manager_destroy(host->ksm);
 }
 EXPORT_SYMBOL(cqhci_crypto_destroy_rq_keyslot_manager_spec);
 
@@ -389,8 +388,7 @@ int cqhci_prepare_crypto_desc_spec(struct cqhci_host *host,
 						  brq.mrq);
 	struct request *req = mmc_queue_req_to_req(mqrq);
 
-	if (!req->bio ||
-	    !bio_crypt_should_process(req)) {
+	if (!req->bio || !req->crypt_keyslot) {
 		*ice_ctx = 0;
 		return 0;
 	}
@@ -402,14 +400,15 @@ int cqhci_prepare_crypto_desc_spec(struct cqhci_host *host,
 		return -EINVAL;
 	}
 
-	bc = req->bio->bi_crypt_context;
+	bc = req->crypt_ctx;
 
-	if (!cqhci_keyslot_valid(host, bc->bc_keyslot))
+	if (!cqhci_keyslot_valid(host,
+			blk_ksm_get_slot_idx(req->crypt_keyslot)))
 		return -EINVAL;
 
 	if (ice_ctx) {
 		*ice_ctx = DATA_UNIT_NUM(bc->bc_dun[0]) |
-			   CRYPTO_CONFIG_INDEX(bc->bc_keyslot) |
+		   CRYPTO_CONFIG_INDEX(blk_ksm_get_slot_idx(req->crypt_keyslot)) |
 			   CRYPTO_ENABLE(true);
 	}
 
@@ -535,7 +534,7 @@ int cqhci_crypto_recovery_finish(struct cqhci_host *host)
 		return host->crypto_vops->recovery_finish(host);
 
 	/* Reset/Recovery might clear all keys, so reprogram all the keys. */
-	keyslot_manager_reprogram_all_keys(host->ksm);
+	blk_ksm_reprogram_all_keys(&host->ksm);
 
 	return 0;
 }

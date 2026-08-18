@@ -20,7 +20,6 @@ EXPORT_SYMBOL_GPL(mmc_crypto_setup_queue);
 
 void mmc_crypto_free_host(struct mmc_host *host)
 {
-	keyslot_manager_destroy(host->ksm);
 }
 
 void mmc_crypto_prepare_req(struct mmc_queue_req *mqrq)
@@ -29,11 +28,11 @@ void mmc_crypto_prepare_req(struct mmc_queue_req *mqrq)
 	struct mmc_request *mrq = &mqrq->brq.mrq;
 	const struct bio_crypt_ctx *bc;
 
-	if (!bio_crypt_should_process(req))
+	if (!req->crypt_keyslot)
 		return;
 
-	bc = req->bio->bi_crypt_context;
-	mrq->crypto_key_slot = bc->bc_keyslot;
+	bc = req->crypt_ctx;
+	mrq->crypto_key_slot = blk_ksm_get_slot_idx(req->crypt_keyslot);
 	mrq->data_unit_num = bc->bc_dun[0];
 	mrq->crypto_key = bc->bc_key;
 }
