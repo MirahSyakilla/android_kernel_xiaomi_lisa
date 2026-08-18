@@ -5,6 +5,7 @@
  */
 
 #include <linux/module.h>
+#include <linux/leds-qti-flash.h>
 
 #include "cam_sensor_cmn_header.h"
 #include "cam_flash_core.h"

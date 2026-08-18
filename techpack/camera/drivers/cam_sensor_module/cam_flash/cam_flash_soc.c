@@ -5,6 +5,7 @@
 
 #include <linux/of.h>
 #include <linux/of_gpio.h>
+#include <linux/leds-qti-flash.h>
 #include "cam_flash_soc.h"
 #include "cam_res_mgr_api.h"
 #include <dt-bindings/msm/msm-camera.h>

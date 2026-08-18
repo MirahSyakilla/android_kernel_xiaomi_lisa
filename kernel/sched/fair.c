@@ -1448,7 +1448,6 @@ static void update_curr(struct cfs_rq *cfs_rq)
 	}
 
 	curr->sum_exec_runtime += delta_exec;
-	schedstat_add(cfs_rq->exec_clock, delta_exec);
 
 	curr->vruntime += calc_delta_fair(delta_exec, curr);
 	resched = update_deadline(cfs_rq, curr);
