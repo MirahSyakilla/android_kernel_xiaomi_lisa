@@ -14,7 +14,7 @@ void cqhci_crypto_qti_disable(struct cqhci_host *host);
 
 #ifdef CONFIG_BLK_INLINE_ENCRYPTION
 int cqhci_crypto_qti_init_crypto(struct cqhci_host *host,
-				 const struct keyslot_mgmt_ll_ops *ksm_ops);
+				 const struct blk_ksm_ll_ops *ksm_ops);
 #endif
 
 int cqhci_crypto_qti_debug(struct cqhci_host *host);
