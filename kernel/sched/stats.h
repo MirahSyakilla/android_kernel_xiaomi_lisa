@@ -1,8 +1,19 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 
+#include <linux/tracepoint-defs.h>
+
 #ifdef CONFIG_SCHEDSTATS
 
 extern struct static_key_false sched_schedstats;
+#ifdef CONFIG_TRACEPOINTS
+extern struct tracepoint __tracepoint_sched_stat_wait;
+extern struct tracepoint __tracepoint_sched_stat_sleep;
+extern struct tracepoint __tracepoint_sched_stat_iowait;
+extern struct tracepoint __tracepoint_sched_stat_blocked;
+extern struct tracepoint __tracepoint_sched_stat_runtime;
+
+#define schedstat_tracepoint_active(tp) static_key_false(&(tp).key)
+#endif
 
 /*
  * Expects runqueue lock to be held for atomicity of update
@@ -56,13 +67,15 @@ check_schedstat_required(void)
 	if (schedstat_enabled())
 		return;
 
-	/* Force schedstat enabled if a dependent tracepoint is active */
-	if (trace_sched_stat_wait_enabled()    ||
-	    trace_sched_stat_sleep_enabled()   ||
-	    trace_sched_stat_iowait_enabled()  ||
-	    trace_sched_stat_blocked_enabled() ||
-	    trace_sched_stat_runtime_enabled())
+#ifdef CONFIG_TRACEPOINTS
+	/* Force schedstat enabled if a dependent tracepoint is active. */
+	if (schedstat_tracepoint_active(__tracepoint_sched_stat_wait)    ||
+	    schedstat_tracepoint_active(__tracepoint_sched_stat_sleep)   ||
+	    schedstat_tracepoint_active(__tracepoint_sched_stat_iowait)  ||
+	    schedstat_tracepoint_active(__tracepoint_sched_stat_blocked) ||
+	    schedstat_tracepoint_active(__tracepoint_sched_stat_runtime))
 		printk_deferred_once("Scheduler tracepoints stat_sleep, stat_iowait, stat_blocked and stat_runtime require the kernel parameter schedstats=enable or kernel.sched_schedstats=1\n");
+#endif
 }
 
 #else /* !CONFIG_SCHEDSTATS: */
