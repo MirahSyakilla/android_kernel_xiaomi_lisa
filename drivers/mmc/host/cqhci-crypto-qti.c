@@ -252,7 +252,7 @@ out:
 }
 
 int cqhci_crypto_qti_init_crypto(struct cqhci_host *host,
-				const struct keyslot_mgmt_ll_ops *ksm_ops)
+				const struct blk_ksm_ll_ops *ksm_ops)
 {
 	int err = 0;
 	struct resource *cqhci_ice_memres = NULL;
