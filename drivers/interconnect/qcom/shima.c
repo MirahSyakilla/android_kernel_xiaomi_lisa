@@ -16,11 +16,18 @@
 #include <linux/of_device.h>
 #include <linux/of_platform.h>
 #include <linux/platform_device.h>
+#include <linux/regmap.h>
 #include <linux/sort.h>
 
 #include "icc-rpmh.h"
 #include "bcm-voter.h"
 #include "qnoc-qos.h"
+
+static const struct regmap_config icc_regmap_config = {
+	.reg_bits = 32,
+	.reg_stride = 4,
+	.val_bits = 32,
+};
 
 static LIST_HEAD(qnoc_probe_list);
 static DEFINE_MUTEX(probe_list_lock);
