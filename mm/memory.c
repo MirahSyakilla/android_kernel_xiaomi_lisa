@@ -1366,8 +1366,8 @@ void unmap_vmas(struct mmu_gather *tlb,
 	mmu_notifier_range_init(&range, MMU_NOTIFY_UNMAP, 0, vma, vma->vm_mm,
 				start_addr, end_addr);
 	mmu_notifier_invalidate_range_start(&range);
-	/* 
-	 * Must use linked list (vm_next) because these VMAs might be 
+	/*
+	 * Must use linked list (vm_next) because these VMAs might be
 	 * detached from the Maple Tree during munmap.
 	 */
 	for ( ; vma && vma->vm_start < end_addr; vma = vma->vm_next)
@@ -3990,11 +3990,6 @@ static inline vm_fault_t wp_huge_pmd(struct vm_fault *vmf, pmd_t orig_pmd)
 	__split_huge_pmd(vmf->vma, vmf->pmd, vmf->address, false, NULL);
 
 	return VM_FAULT_FALLBACK;
-}
-
-static inline bool vma_is_accessible(struct vm_area_struct *vma)
-{
-	return vma->vm_flags & (VM_READ | VM_EXEC | VM_WRITE);
 }
 
 static vm_fault_t create_huge_pud(struct vm_fault *vmf)

@@ -1971,7 +1971,7 @@ static unsigned int khugepaged_scan_mm_slot(unsigned int pages,
 	struct vm_area_struct *vma;
 	int progress = 0;
 	/* Initialize with NULL, we set the tree later */
-	MA_STATE(mas, NULL, 0, 0); 
+	MA_STATE(mas, NULL, 0, 0);
 
 	VM_BUG_ON(!pages);
 	lockdep_assert_held(&khugepaged_mm_lock);

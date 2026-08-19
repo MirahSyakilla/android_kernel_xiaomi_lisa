@@ -289,7 +289,7 @@ out:
 #ifdef CONFIG_DEBUG_VM_RB
 #if defined(CONFIG_DEBUG_VM_MAPLE_TREE)
 extern void mt_validate(struct maple_tree *mt);
-extern void mt_dump(const struct maple_tree *mt);
+extern void mt_dump(const struct maple_tree *mt, enum mt_dump_format format);
 
 /* Validate the maple tree */
 static void validate_mm_mt(struct mm_struct *mm)
@@ -328,18 +328,18 @@ static void validate_mm_mt(struct mm_struct *mm)
 			pr_emerg("rb->next = %p %lu - %lu\n", vma->vm_next,
 					vma->vm_next->vm_start, vma->vm_next->vm_end);
 
-			mt_dump(mas.tree);
+			mt_dump(mas.tree, mt_dump_hex);
 			if (vma_mt->vm_end != mas.last + 1) {
 				pr_err("vma: %p vma_mt %lu-%lu\tmt %lu-%lu\n",
 						mm, vma_mt->vm_start, vma_mt->vm_end,
 						mas.index, mas.last);
-				mt_dump(mas.tree);
+				mt_dump(mas.tree, mt_dump_hex);
 			}
 			VM_BUG_ON_MM(vma_mt->vm_end != mas.last + 1, mm);
 			if (vma_mt->vm_start != mas.index) {
 				pr_err("vma: %p vma_mt %p %lu - %lu doesn't match\n",
 						mm, vma_mt, vma_mt->vm_start, vma_mt->vm_end);
-				mt_dump(mas.tree);
+				mt_dump(mas.tree, mt_dump_hex);
 			}
 			VM_BUG_ON_MM(vma_mt->vm_start != mas.index, mm);
 		}
@@ -3053,7 +3053,7 @@ int insert_vm_struct(struct mm_struct *mm, struct vm_area_struct *vma)
 
 	if (find_vma_intersection(mm, vma->vm_start, vma->vm_end))
 		return -ENOMEM;
-	
+
 	find_vma_prev(mm, vma->vm_start, &prev);
 
 	overlap = mt_find(&mm->mm_mt, &start, vma->vm_end - 1);
@@ -3063,7 +3063,7 @@ int insert_vm_struct(struct mm_struct *mm, struct vm_area_struct *vma)
 		pr_err("vma : %lu => %lu-%lu\n", (unsigned long)overlap,
 				overlap->vm_start, overlap->vm_end - 1);
 #if defined(CONFIG_DEBUG_VM_MAPLE_TREE)
-		mt_dump(&mm->mm_mt);
+		mt_dump(&mm->mm_mt, mt_dump_hex);
 #endif
 		BUG();
 	}
@@ -3124,7 +3124,7 @@ struct vm_area_struct *copy_vma(struct vm_area_struct **vmap,
 
 	if (find_vma_intersection(mm, addr, addr + len))
 		return NULL;	/* should never get here */
-	
+
 	find_vma_prev(mm, addr, &prev);
 
 	if (mt_find(&mm->mm_mt, &index, addr+len - 1))
