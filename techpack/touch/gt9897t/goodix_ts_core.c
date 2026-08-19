@@ -1046,24 +1046,19 @@ static int goodix_parse_dt_resolution(struct device_node *node,
 
 static int goodix_get_panel_type(struct goodix_ts_core *ts_data)
 {
-	int i = 0, j;
+	int i = 0;
 	u8 *lockdown = ts_data->lockdown_info;
 	__maybe_unused struct goodix_config_info *panel_list =
 		ts_data->board_data.config_array;
 
-	for (j = 0; j < 60; j++) {
-		if (lockdown[1] == 0x42) {
-			i = 1;
-			ts_info("This is CSOT Display Panel!");
-			break;
-		}
-		if (lockdown[1] == 0x36) {
-			i = 0;
-			ts_info("This is TM Display Panel!");
-			break;
-		}
-
-		mdelay(1000);
+	if (lockdown[1] == 0x42) {
+		i = 1;
+		ts_info("This is CSOT Display Panel!");
+	} else if (lockdown[1] == 0x36) {
+		ts_info("This is TM Display Panel!");
+	} else {
+		ts_info("Unknown display panel 0x%02x, use default panel config",
+			lockdown[1]);
 	}
 	if (i != 0 && i != 1) {
 		i = 2;
