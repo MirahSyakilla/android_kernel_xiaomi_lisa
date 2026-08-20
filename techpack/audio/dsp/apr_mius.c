@@ -45,6 +45,8 @@ struct driver_sensor_event {
 
 static int ups_event;
 
+extern int us_afe_callback(int data);
+
 static int afe_set_parameter(int port, int param_id, int module_id,
 			     struct afe_mi_ultrasound_set_params_t *prot_config,
 			     uint32_t length)
@@ -185,6 +187,9 @@ int32_t mius_apr_set_parameter(int32_t port_id, uint32_t param_id,
 		module_id = MIUS_ULTRASOUND_MODULE_RX;
 
 	if (param_id == MIUS_ULTRASOUND_UPLOAD_NONE) {
+		ret = us_afe_callback(ups_event);
+		pr_info("[MIUS]: %s force report event %d ret %d\n",
+			__func__, ups_event, ret);
 		return ret;
 	}
 
@@ -212,8 +217,10 @@ int32_t mius_process_apr_payload(uint32_t *payload)
 	payload_size = payload[2] & 0xFFFF;
 	if (payload[3] == 0 || payload[3] == 1) {
 		ups_event = payload[3];
+		ret = us_afe_callback(ups_event);
 	} else {
 		ups_event = ups_event ^ 1;
+		ret = us_afe_callback(ups_event);
 	}
 
 	if (ret != 0) {
